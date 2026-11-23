@@ -735,6 +735,29 @@ pub fn check_relations(conn: &Connection, touched: &[String], problems: &mut Vec
     Ok(())
 }
 
+/// After a release, every live view in scope must point at a live collection and fit its live definition.
+/// In scope: views released here, and views over a collection touched, published or deleted here.
+pub fn check_views(conn: &Connection, released: &[String], collections: &[String], problems: &mut Vec<String>) -> Result<(), String> {
+    let fail = |e: rusqlite::Error| format!("检查界面失败：{e}");
+    let mut stmt = conn.prepare("SELECT name, published FROM views WHERE published IS NOT NULL ORDER BY name").map_err(fail)?;
+    let rows: Vec<(String, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;
+    for (name, json) in rows {
+        let view: crate::schema::ViewDef = serde_json::from_str(&json).map_err(|e| format!("界面“{name}”的定义已损坏：{e}"))?;
+        if !released.contains(&name) && !collections.contains(&view.collection) {
+            continue;
+        }
+        match live_def_opt(conn, &view.collection)? {
+            None => problems.push(format!("view:{name} 引用的 collection:{} 不在线上：请把集合一起发布，或先删除这个界面。", view.collection)),
+            Some(def) => {
+                if let Err(e) = crate::schema::check_view(&view, &def) {
+                    problems.push(format!("view:{name}：{e}"));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Publishes pending changes in one transaction: all of the actor's, or only the listed ones.
 /// Nothing goes live unless the whole release passes verification.
 pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: &str) -> Result<Release, String> {
@@ -822,6 +845,7 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
     let mut released: Vec<(i64, String)> = vec![];
     // collections whose definition went live or was deleted in this release
     let mut defs: Vec<(String, bool)> = vec![];
+    let mut views: Vec<String> = vec![];
     // (record id, live copy before the rewrite, collection whose definition change caused it)
     let mut rewritten: Vec<(i64, String, String)> = vec![];
     for (target, s) in &items {
@@ -853,6 +877,9 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
                 touched.push(collection);
             }
             Target::View(_) | Target::Notes => {
+                if let Target::View(n) = target {
+                    views.push(n.clone());
+                }
                 let copy = if s.draft_deleted { "published = NULL" } else { "published = draft" };
                 tx.execute(&format!("UPDATE {table} SET {copy}, {clear} WHERE {key} = ?1"), [val]).map_err(fail)?;
             }
@@ -868,6 +895,8 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
     touched.dedup();
     verify(&tx, &touched, &released, &mut problems)?;
     check_relations(&tx, &touched, &mut problems)?;
+    let scope: Vec<String> = touched.iter().cloned().chain(defs.iter().map(|(n, _)| n.clone())).collect();
+    check_views(&tx, &views, &scope, &mut problems)?;
     if !problems.is_empty() {
         let mut seen = std::collections::HashSet::new();
         problems.retain(|p| seen.insert(p.clone()));

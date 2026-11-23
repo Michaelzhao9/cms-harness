@@ -4,7 +4,7 @@
 use crate::auth::{Actor, Scope};
 use crate::changes::{self, Target};
 use crate::query::{self, Query};
-use crate::schema::{check_def, normalize, project, CollectionDef, FieldDef, FieldType};
+use crate::schema::{check_def, check_view, normalize, project, Action, CollectionDef, FieldDef, FieldType, ViewDef, MAX_NOTES};
 use crate::App;
 use rusqlite::{Connection, OptionalExtension};
 use schemars::JsonSchema;
@@ -45,6 +45,11 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<TargetArgs>("list_versions", Scope::Read, "列出一个对象的发布历史（最近 30 个版本）。target 形如 record:12、collection:news。"),
             spec::<RestoreVersion>("restore_version", Scope::Write, "把一个历史版本放回草稿，不会直接上线；发布后才生效。已删除的对象也能这样找回。"),
             spec::<TargetArgs>("discard_draft", Scope::Write, "丢弃一个对象的草稿或待删除标记，回到线上版本；从未发布过的对象会直接消失。"),
+            spec::<NoArgs>("list_views", Scope::Read, "列出所有界面声明（不含已删除的），带状态；有草稿时返回草稿定义。"),
+            spec::<SetView>("set_view", Scope::Structure, "新建或修改界面草稿：它基于哪个集合、显示哪些列、可过滤和排序的字段、允许的操作。发布后才生效。"),
+            spec::<DeleteView>("delete_view", Scope::Structure, "删除界面草稿；从未发布的界面直接消失，已发布的待发布时才真正删除。"),
+            spec::<NoArgs>("get_site_notes", Scope::Read, "读取站点说明（有草稿时返回草稿）和状态。"),
+            spec::<SetSiteNotes>("set_site_notes", Scope::Structure, "修改站点说明草稿：一段给对话模型看的文字，最多 20000 个字符。发布后才生效。"),
             spec::<UploadMedia>("upload_media", Scope::Write, "上传图片或 PDF（base64，最大 5 MB）：返回 /uploads/ 路径，可填进 media 字段。"),
         ]
     })
@@ -126,6 +131,11 @@ fn dispatch(app: &App, conn: &Connection, actor: &Actor, name: &str, args: Value
         "list_versions" => list_versions(conn, parse(name, args)?),
         "restore_version" => restore_version(conn, actor, parse(name, args)?),
         "discard_draft" => discard_draft(conn, actor, parse(name, args)?),
+        "list_views" => parse::<NoArgs>(name, args).and_then(|_| list_views(conn)),
+        "set_view" => set_view(conn, actor, parse(name, args)?),
+        "delete_view" => delete_view(conn, actor, parse(name, args)?),
+        "get_site_notes" => parse::<NoArgs>(name, args).and_then(|_| get_site_notes(conn)),
+        "set_site_notes" => set_site_notes(conn, actor, parse(name, args)?),
         "upload_media" => upload_media(app, parse(name, args)?),
         _ => Err(format!("工具“{name}”{NOT_IMPLEMENTED}：它出现在工具列表里却没有处理逻辑，请联系开发者。")),
     }
@@ -579,6 +589,99 @@ fn discard_draft(conn: &Connection, actor: &Actor, a: TargetArgs) -> Result<Valu
     check_structure_scope(actor, &target)?;
     changes::discard(conn, &target)?;
     Ok(json!({ "target": a.target, "status": changes::target_status(conn, &target)? }))
+}
+
+// ---- views and site notes ----
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SetView {
+    name: String,
+    title: String,
+    collection: String,
+    columns: Vec<String>,
+    #[serde(default)]
+    filters: Vec<String>,
+    #[serde(default)]
+    sort: Option<String>,
+    #[serde(default)]
+    actions: Vec<Action>,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeleteView {
+    name: String,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SetSiteNotes {
+    text: String,
+    note: String,
+}
+
+fn list_views(conn: &Connection) -> Result<Value, String> {
+    let fail = |e: rusqlite::Error| format!("读取界面失败：{e}");
+    let mut stmt = conn
+        .prepare("SELECT name, published, draft, draft_deleted FROM views WHERE published IS NOT NULL OR draft IS NOT NULL ORDER BY name")
+        .map_err(fail)?;
+    let rows: Vec<(String, Option<String>, Option<String>, bool)> =
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;
+    let mut out = vec![];
+    for (name, published, draft, deleting) in rows {
+        let status = changes::status(published.is_some(), draft.is_some(), deleting);
+        let json = draft.or(published).unwrap_or_default();
+        let def: Value = serde_json::from_str(&json).map_err(|e| format!("界面“{name}”的定义已损坏：{e}"))?;
+        out.push(json!({ "definition": def, "status": status }));
+    }
+    Ok(Value::Array(out))
+}
+
+fn set_view(conn: &Connection, actor: &Actor, a: SetView) -> Result<Value, String> {
+    let note = check_note(&a.note)?;
+    let view = ViewDef { name: a.name, title: a.title, collection: a.collection, columns: a.columns, filters: a.filters, sort: a.sort, actions: a.actions };
+    let def = changes::effective_def(conn, &view.collection)?;
+    check_view(&view, &def)?;
+    let target = Target::View(view.name.clone());
+    changes::save_draft(conn, actor, &target, &json!(view), note)?;
+    Ok(json!({ "name": view.name, "status": changes::target_status(conn, &target)? }))
+}
+
+fn delete_view(conn: &Connection, actor: &Actor, a: DeleteView) -> Result<Value, String> {
+    let note = check_note(&a.note)?;
+    let target = Target::parse(&format!("view:{}", a.name))?;
+    if changes::target_status(conn, &target)? == "deleted" {
+        return Err(format!("界面“{}”不存在或已删除，请先用 list_views 查看现有界面。", a.name));
+    }
+    changes::mark_deleted(conn, actor, &target, note)?;
+    Ok(json!({ "name": a.name, "status": changes::target_status(conn, &target)? }))
+}
+
+fn get_site_notes(conn: &Connection) -> Result<Value, String> {
+    let row: Option<(Option<String>, Option<String>)> = conn
+        .query_row("SELECT published, draft FROM notes WHERE id = 1", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()
+        .map_err(|e| format!("读取站点说明失败：{e}"))?;
+    let (published, draft) = row.unwrap_or_default();
+    let status = if published.is_none() && draft.is_none() { "published" } else { changes::status(published.is_some(), draft.is_some(), false) };
+    let text = match draft.or(published) {
+        Some(json) => serde_json::from_str::<String>(&json).map_err(|e| format!("站点说明已损坏：{e}"))?,
+        None => String::new(),
+    };
+    Ok(json!({ "text": text, "status": status }))
+}
+
+fn set_site_notes(conn: &Connection, actor: &Actor, a: SetSiteNotes) -> Result<Value, String> {
+    let note = check_note(&a.note)?;
+    let n = a.text.chars().count();
+    if n > MAX_NOTES {
+        return Err(format!("站点说明太长：最多 {MAX_NOTES} 个字符，现在有 {n} 个，请缩短。"));
+    }
+    changes::save_draft(conn, actor, &Target::Notes, &json!(a.text), note)?;
+    Ok(json!({ "status": changes::target_status(conn, &Target::Notes)? }))
 }
 
 // ---- media ----

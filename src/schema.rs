@@ -343,3 +343,62 @@ pub fn migrate(old: &CollectionDef, new: &CollectionDef, doc: &Value) -> Result<
     }
     normalize(new, &doc, &serde_json::json!({}))
 }
+
+pub const MAX_NOTES: usize = 20_000;
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Action { Create, Edit, Delete }
+
+/// A declared admin screen over one collection.
+#[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ViewDef {
+    pub name: String,
+    pub title: String,
+    pub collection: String,
+    pub columns: Vec<String>,
+    #[serde(default)]
+    pub filters: Vec<String>,
+    #[serde(default)]
+    pub sort: Option<String>,
+    #[serde(default)]
+    pub actions: Vec<Action>,
+}
+
+pub fn check_view(view: &ViewDef, def: &CollectionDef) -> Result<(), String> {
+    let name = &view.name;
+    if !valid_name(name) {
+        return Err(format!("界面名“{name}”不合法：只能用小写字母开头，后接小写字母、数字或下划线，最长 40 个字符，且不能是保留字（id、sort、limit、offset、expand）。"));
+    }
+    if view.title.trim().is_empty() {
+        return Err(format!("界面“{name}”的 title 不能为空：请写一个给人看的标题。"));
+    }
+    if view.collection != def.name {
+        return Err(format!("界面“{name}”的 collection 是“{}”，却在按集合“{}”检查：请检查集合名。", view.collection, def.name));
+    }
+    if view.columns.is_empty() {
+        return Err(format!("界面“{name}”的 columns 不能为空：请至少列出一列（id 或集合的字段名）。"));
+    }
+    let known = |f: &str| f == "id" || def.field(f).is_some();
+    let indexed = |f: &str| f == "id" || def.field(f).is_some_and(|f| f.index || f.unique);
+    for (list, label) in [(&view.columns, "columns"), (&view.filters, "filters")] {
+        for (i, f) in list.iter().enumerate() {
+            if list[..i].contains(f) {
+                return Err(format!("界面“{name}”的 {label} 里“{f}”重复了：请去掉重复的一项。"));
+            }
+        }
+    }
+    for f in &view.columns {
+        if !known(f) {
+            return Err(format!("界面“{name}”的 columns 里的“{f}”不是集合“{}”的字段：请用 id 或已声明的字段名。", def.name));
+        }
+    }
+    let sort = view.sort.as_deref().map(|s| s.strip_prefix('-').unwrap_or(s));
+    for (f, label) in view.filters.iter().map(|f| (f.as_str(), "filters")).chain(sort.map(|s| (s, "sort"))) {
+        if !indexed(f) {
+            return Err(format!("界面“{name}”的 {label} 里的“{f}”不能用：只有 id 和设置了 index 或 unique 的字段可以过滤、排序，请先给字段加上 index。"));
+        }
+    }
+    Ok(())
+}
