@@ -40,6 +40,11 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<DeleteRecord>("delete_record", Scope::Write, "删除记录；从未发布的记录直接消失，已发布的待发布时才真正删除。"),
             spec::<GetRecord>("get_record", Scope::Read, "按编号读取一条记录（有草稿时返回草稿）和状态。"),
             spec::<QueryRecords>("query_records", Scope::Read, "查询集合的记录（草稿视图）。filter 与 sort 只能用 id 或设置了 index/unique 的字段。"),
+            spec::<NoArgs>("list_pending", Scope::Read, "列出所有待发布的改动：改了什么、谁改的、波及多少记录。"),
+            spec::<Publish>("publish", Scope::Publish, "把待发布的改动发布上线：全部，或只发 targets 里列出的几项。发布前整体检查，不通过就什么都不上线。"),
+            spec::<TargetArgs>("list_versions", Scope::Read, "列出一个对象的发布历史（最近 30 个版本）。target 形如 record:12、collection:news。"),
+            spec::<RestoreVersion>("restore_version", Scope::Write, "把一个历史版本放回草稿，不会直接上线；发布后才生效。已删除的对象也能这样找回。"),
+            spec::<TargetArgs>("discard_draft", Scope::Write, "丢弃一个对象的草稿或待删除标记，回到线上版本；从未发布过的对象会直接消失。"),
         ]
     })
 }
@@ -115,6 +120,11 @@ fn dispatch(conn: &Connection, actor: &Actor, name: &str, args: Value) -> Result
         "delete_record" => delete_record(conn, actor, parse(name, args)?),
         "get_record" => get_record(conn, parse(name, args)?),
         "query_records" => query_records(conn, parse(name, args)?),
+        "list_pending" => parse::<NoArgs>(name, args).and_then(|_| Ok(json!(changes::pending(conn)?))),
+        "publish" => publish(conn, actor, parse(name, args)?),
+        "list_versions" => list_versions(conn, parse(name, args)?),
+        "restore_version" => restore_version(conn, actor, parse(name, args)?),
+        "discard_draft" => discard_draft(conn, actor, parse(name, args)?),
         _ => Err(format!("工具“{name}”{NOT_IMPLEMENTED}：它出现在工具列表里却没有处理逻辑，请联系开发者。")),
     }
 }
@@ -196,15 +206,6 @@ struct DeleteCollection {
     note: String,
 }
 
-fn record_count(conn: &Connection, name: &str) -> Result<i64, String> {
-    conn.query_row(
-        "SELECT count(*) FROM records WHERE collection = ?1 AND (published IS NOT NULL OR draft IS NOT NULL)",
-        [name],
-        |r| r.get(0),
-    )
-    .map_err(|e| format!("统计集合“{name}”的记录数失败：{e}"))
-}
-
 /// (name, definition, status) of every collection that is not deleted.
 fn collections(conn: &Connection, only: Option<&str>) -> Result<Vec<(String, CollectionDef, &'static str)>, String> {
     let names: Vec<String> = match only {
@@ -230,7 +231,7 @@ fn list_collections(conn: &Connection) -> Result<Value, String> {
     let mut out = vec![];
     for (name, def, status) in collections(conn, None)? {
         out.push(json!({ "name": def.name, "title": def.title, "single": def.single, "status": status,
-            "record_count": record_count(conn, &name)? }));
+            "record_count": changes::record_count(conn, &name)? }));
     }
     Ok(Value::Array(out))
 }
@@ -239,7 +240,7 @@ fn get_collection(conn: &Connection, a: NameArgs) -> Result<Value, String> {
     let (name, def, status) = collections(conn, Some(&a.name))?
         .pop()
         .ok_or_else(|| format!("集合“{}”不存在或已删除，请先用 list_collections 查看现有集合。", a.name))?;
-    Ok(json!({ "definition": def, "status": status, "record_count": record_count(conn, &name)? }))
+    Ok(json!({ "definition": def, "status": status, "record_count": changes::record_count(conn, &name)? }))
 }
 
 /// Every relation target must be an existing, non-deleted collection, or the collection itself.
@@ -428,7 +429,7 @@ fn check_relations(conn: &Connection, def: &CollectionDef, changed: &Value) -> R
 fn create_record(conn: &Connection, actor: &Actor, a: CreateRecord) -> Result<Value, String> {
     let note = check_note(&a.note)?;
     let def = changes::effective_def(conn, &a.collection)?;
-    if def.single && record_count(conn, &a.collection)? > 0 {
+    if def.single && changes::record_count(conn, &a.collection)? > 0 {
         return Err(format!("集合“{}”是单例集合，已经有一条记录：请用 update_record 修改它。", a.collection));
     }
     let doc = normalize(&def, &json!({}), &a.data)?;
@@ -490,4 +491,63 @@ fn query_records(conn: &Connection, a: QueryRecords) -> Result<Value, String> {
     let (rows, total) = query::run(conn, &def, &q, false)?;
     let items: Vec<Value> = rows.into_iter().map(|r| json!({ "id": r.id, "status": r.status, "data": r.doc })).collect();
     Ok(json!({ "items": items, "total": total }))
+}
+
+// ---- publish and history tools ----
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct TargetArgs {
+    /// `collection:<name>`, `record:<id>`, `view:<name>` or `notes`.
+    target: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct Publish {
+    /// Targets to publish; leave out to publish everything you are allowed to.
+    targets: Option<Vec<String>>,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RestoreVersion {
+    target: String,
+    version_id: i64,
+    note: String,
+}
+
+/// Structure objects (collections, views, the site notes) need the structure scope on top of the tool's own.
+fn check_structure_scope(actor: &Actor, target: &Target) -> Result<(), String> {
+    if matches!(target, Target::Record(_)) || actor.can(Scope::Structure) {
+        return Ok(());
+    }
+    Err(format!("“{}”没有权限改动“{target}”：它属于结构，需要 structure 权限。", actor.name))
+}
+
+fn publish(conn: &Connection, actor: &Actor, a: Publish) -> Result<Value, String> {
+    let note = check_note(&a.note)?;
+    let targets = a.targets.map(|list| list.iter().map(|t| Target::parse(t)).collect::<Result<Vec<_>, _>>()).transpose()?;
+    let release = changes::publish(conn, actor, targets.as_deref(), note)?;
+    Ok(json!({ "release_id": release.id, "published": release.published, "skipped": release.skipped }))
+}
+
+fn list_versions(conn: &Connection, a: TargetArgs) -> Result<Value, String> {
+    Ok(json!(changes::versions(conn, &Target::parse(&a.target)?)?))
+}
+
+fn restore_version(conn: &Connection, actor: &Actor, a: RestoreVersion) -> Result<Value, String> {
+    let note = check_note(&a.note)?;
+    let target = Target::parse(&a.target)?;
+    check_structure_scope(actor, &target)?;
+    changes::restore(conn, actor, &target, a.version_id, note)?;
+    Ok(json!({ "target": a.target, "status": changes::target_status(conn, &target)? }))
+}
+
+fn discard_draft(conn: &Connection, actor: &Actor, a: TargetArgs) -> Result<Value, String> {
+    let target = Target::parse(&a.target)?;
+    check_structure_scope(actor, &target)?;
+    changes::discard(conn, &target)?;
+    Ok(json!({ "target": a.target, "status": changes::target_status(conn, &target)? }))
 }

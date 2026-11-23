@@ -50,3 +50,8 @@ pub fn news(app: &Shared) {
         { "name": "cover", "title": "封面", "type": "media" }
     ] }));
 }
+
+/// Publishes everything pending, as the builder.
+pub fn publish_all(app: &Shared) -> Value {
+    ok(app, &builder(), "publish", json!({ "note": "发布" }))
+}

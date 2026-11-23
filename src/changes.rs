@@ -252,3 +252,348 @@ pub fn check_unique(conn: &Connection, def: &CollectionDef, id: Option<i64>, doc
     }
     Ok(())
 }
+
+// ---- pending list, publish, history ----
+
+/// One object's two copies and who last drafted it.
+struct Slot {
+    published: Option<String>,
+    draft: Option<String>,
+    draft_deleted: bool,
+    actor: Option<String>,
+    note: Option<String>,
+}
+
+fn slot(conn: &Connection, target: &Target) -> Result<Option<Slot>, String> {
+    let (table, key, val, has_dd) = target.row();
+    let dd = if has_dd { "draft_deleted" } else { "0" };
+    conn.query_row(
+        &format!("SELECT published, draft, {dd}, draft_actor, draft_note FROM {table} WHERE {key} = ?1"),
+        [val],
+        |r| Ok(Slot { published: r.get(0)?, draft: r.get(1)?, draft_deleted: r.get(2)?, actor: r.get(3)?, note: r.get(4)? }),
+    )
+    .optional()
+    .map_err(|e| db(target, e))
+}
+
+/// Status of any object; a missing row reads as "deleted".
+pub fn target_status(conn: &Connection, target: &Target) -> Result<&'static str, String> {
+    if let Target::Collection(name) = target {
+        return collection_status(conn, name);
+    }
+    Ok(slot(conn, target)?.map_or("deleted", |s| status(s.published.is_some(), s.draft.is_some(), s.draft_deleted)))
+}
+
+fn names(conn: &Connection, sql: &str) -> Result<Vec<String>, String> {
+    let mut stmt = conn.prepare(sql).map_err(|e| format!("读取待发布清单失败：{e}"))?;
+    let rows = stmt.query_map([], |r| r.get(0)).map_err(|e| format!("读取待发布清单失败：{e}"))?;
+    rows.collect::<Result<_, _>>().map_err(|e| format!("读取待发布清单失败：{e}"))
+}
+
+/// Every object with a draft or a pending deletion, in release order: collections, views, notes, records.
+fn pending_targets(conn: &Connection) -> Result<Vec<Target>, String> {
+    let mut out: Vec<Target> = vec![];
+    let waiting = "draft IS NOT NULL OR draft_deleted = 1";
+    out.extend(names(conn, &format!("SELECT name FROM collections WHERE {waiting} ORDER BY name"))?.into_iter().map(Target::Collection));
+    out.extend(names(conn, &format!("SELECT name FROM views WHERE {waiting} ORDER BY name"))?.into_iter().map(Target::View));
+    if !names(conn, "SELECT 'notes' FROM notes WHERE draft IS NOT NULL")?.is_empty() {
+        out.push(Target::Notes);
+    }
+    let mut stmt = conn
+        .prepare(&format!("SELECT id FROM records WHERE {waiting} ORDER BY id"))
+        .map_err(|e| format!("读取待发布清单失败：{e}"))?;
+    let ids = stmt.query_map([], |r| r.get(0)).map_err(|e| format!("读取待发布清单失败：{e}"))?;
+    for id in ids {
+        out.push(Target::Record(id.map_err(|e| format!("读取待发布清单失败：{e}"))?));
+    }
+    Ok(out)
+}
+
+fn parse_doc(json: &Option<String>) -> Value {
+    json.as_deref().and_then(|j| serde_json::from_str(j).ok()).unwrap_or(Value::Null)
+}
+
+/// Top-level keys whose values differ between the two documents.
+fn changed_keys(a: &Value, b: &Value) -> Vec<String> {
+    let (Some(a), Some(b)) = (a.as_object(), b.as_object()) else { return vec![] };
+    let mut keys: Vec<String> = a.keys().chain(b.keys()).filter(|k| a.get(*k) != b.get(*k)).cloned().collect();
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+/// How many records a collection holds, tombstones not counted.
+pub fn record_count(conn: &Connection, name: &str) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT count(*) FROM records WHERE collection = ?1 AND (published IS NOT NULL OR draft IS NOT NULL)",
+        [name],
+        |r| r.get(0),
+    )
+    .map_err(|e| format!("统计集合“{name}”的记录数失败：{e}"))
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct Pending {
+    pub target: String,
+    /// created | changed | deleted
+    pub kind: &'static str,
+    pub title: String,
+    /// Top-level keys that differ from the published copy; empty for created and deleted.
+    pub fields: Vec<String>,
+    pub actor: String,
+    pub note: String,
+    /// For a collection: how many records it holds. Otherwise 1.
+    pub affected: i64,
+}
+
+pub fn pending(conn: &Connection) -> Result<Vec<Pending>, String> {
+    let mut out = vec![];
+    for target in pending_targets(conn)? {
+        let Some(s) = slot(conn, &target)? else { continue };
+        let (old, new) = (parse_doc(&s.published), parse_doc(&s.draft));
+        let shown = if new.is_null() { &old } else { &new };
+        let title = match &target {
+            Target::Notes => "站点说明".to_string(),
+            Target::Record(id) => ["title", "name"]
+                .iter()
+                .find_map(|k| shown.get(*k).and_then(Value::as_str))
+                .map_or_else(|| format!("记录 {id}"), String::from),
+            Target::Collection(n) | Target::View(n) => shown.get("title").and_then(Value::as_str).unwrap_or(n).to_string(),
+        };
+        let kind = if s.draft_deleted { "deleted" } else if s.published.is_none() { "created" } else { "changed" };
+        out.push(Pending {
+            target: target.to_string(),
+            kind,
+            title,
+            fields: if kind == "changed" { changed_keys(&old, &new) } else { vec![] },
+            actor: s.actor.unwrap_or_default(),
+            note: s.note.unwrap_or_default(),
+            affected: if let Target::Collection(n) = &target { record_count(conn, n)? } else { 1 },
+        });
+    }
+    Ok(out)
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct Release {
+    pub id: i64,
+    pub published: Vec<String>,
+    /// Pending objects left alone because the actor may not publish them.
+    pub skipped: Vec<String>,
+}
+
+fn may_publish(actor: &Actor, target: &Target) -> bool {
+    use crate::auth::Scope;
+    let own = if matches!(target, Target::Record(_)) { Scope::Write } else { Scope::Structure };
+    actor.can(Scope::Publish) && actor.can(own)
+}
+
+/// Order inside one release: structure first, then content, deletions last.
+fn rank(target: &Target, deleting: bool) -> u8 {
+    match (target, deleting) {
+        (Target::Collection(_), false) => 0,
+        (Target::View(_), false) => 1,
+        (Target::Notes, _) => 2,
+        (Target::Record(_), false) => 3,
+        (Target::Record(_), true) => 4,
+        (Target::View(_), true) => 5,
+        (Target::Collection(_), true) => 6,
+    }
+}
+
+/// Rewrites every record of a collection (both copies) from the old definition to the new one.
+fn migrate_records(conn: &Connection, name: &str, old: &CollectionDef, new: &CollectionDef, problems: &mut Vec<String>) -> Result<(), String> {
+    let fail = |e: rusqlite::Error| format!("改写集合“{name}”的记录失败：{e}");
+    let mut stmt = conn
+        .prepare("SELECT id, published, draft FROM records WHERE collection = ?1 AND (published IS NOT NULL OR draft IS NOT NULL)")
+        .map_err(fail)?;
+    let rows: Vec<(i64, Option<String>, Option<String>)> =
+        stmt.query_map([name], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;
+    for (id, published, draft) in rows {
+        for (column, json) in [("published", published), ("draft", draft)] {
+            let Some(json) = json else { continue };
+            let doc: Value = serde_json::from_str(&json).map_err(|e| format!("记录 {id} 的内容已损坏：{e}"))?;
+            match crate::schema::migrate(old, new, &doc) {
+                Ok(next) if next != doc => {
+                    conn.execute(&format!("UPDATE records SET {column} = ?1 WHERE id = ?2"), params![next.to_string(), id]).map_err(fail)?;
+                }
+                Ok(_) => {}
+                Err(e) => problems.push(format!("record:{id}：{e}")),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Checks every live record of the touched collections against its live definition.
+// ponytail: re-validates every live record of each touched collection on each publish; make it incremental
+// if collections reach ~100k records.
+fn verify(conn: &Connection, touched: &[String], released: &[(i64, String)], problems: &mut Vec<String>) -> Result<(), String> {
+    for (id, collection) in released {
+        if live_def(conn, collection).is_err() {
+            problems.push(format!("record:{id} 所属的集合还没有上线：请把 collection:{collection} 一起发布。"));
+        }
+    }
+    for name in touched {
+        let Ok(def) = live_def(conn, name) else { continue };
+        let fail = |e: rusqlite::Error| format!("检查集合“{name}”的记录失败：{e}");
+        let mut stmt = conn.prepare("SELECT id, published FROM records WHERE collection = ?1 AND published IS NOT NULL").map_err(fail)?;
+        let rows: Vec<(i64, String)> =
+            stmt.query_map([name], |r| Ok((r.get(0)?, r.get(1)?))).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;
+        for (id, json) in rows {
+            let doc: Value = serde_json::from_str(&json).map_err(|e| format!("记录 {id} 的内容已损坏：{e}"))?;
+            if let Err(e) = crate::schema::normalize(&def, &doc, &serde_json::json!({})) {
+                problems.push(format!("record:{id}：{e}"));
+            }
+            if let Err(e) = check_unique(conn, &def, Some(id), &doc, true) {
+                problems.push(format!("record:{id}：{e}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Publishes pending changes in one transaction: all of the actor's, or only the listed ones.
+/// Nothing goes live unless the whole release passes verification.
+pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: &str) -> Result<Release, String> {
+    let all = pending_targets(conn)?;
+    if all.is_empty() {
+        return Err("没有待发布的改动：先修改内容或结构，再来发布。".into());
+    }
+    let mut skipped = vec![];
+    let chosen: Vec<Target> = match only {
+        Some(list) => {
+            for t in list {
+                if !all.contains(t) {
+                    return Err(format!("“{t}”没有待发布的改动：请先用 list_pending 查看有哪些。"));
+                }
+                if !may_publish(actor, t) {
+                    let own = if matches!(t, Target::Record(_)) { "write" } else { "structure" };
+                    return Err(format!("“{}”没有权限发布“{t}”：需要 {own} 和 publish 权限。", actor.name));
+                }
+            }
+            all.iter().filter(|t| list.contains(t)).cloned().collect()
+        }
+        None => {
+            let (mine, rest): (Vec<Target>, Vec<Target>) = all.into_iter().partition(|t| may_publish(actor, t));
+            skipped = rest.iter().map(Target::to_string).collect();
+            mine
+        }
+    };
+    if chosen.is_empty() {
+        return Err(format!("“{}”没有权限发布这些改动：发布内容需要 write 和 publish 权限，发布结构需要 structure 和 publish 权限。", actor.name));
+    }
+
+    let fail = |e: rusqlite::Error| format!("发布失败：{e}");
+    let tx = conn.unchecked_transaction().map_err(fail)?;
+    let mut items = vec![];
+    for target in chosen {
+        let s = slot(&tx, &target)?.ok_or_else(|| missing(&target))?;
+        items.push((target, s));
+    }
+    items.sort_by_key(|(t, s)| rank(t, s.draft_deleted));
+
+    let mut problems: Vec<String> = vec![];
+    let mut touched: Vec<String> = vec![];
+    let mut released: Vec<(i64, String)> = vec![];
+    for (target, s) in &items {
+        let (table, key, val, has_dd) = target.row();
+        let clear = if has_dd { ", draft_deleted = 0" } else { "" };
+        let clear = format!("draft = NULL, draft_actor = NULL, draft_note = NULL{clear}");
+        match target {
+            Target::Collection(name) if !s.draft_deleted => {
+                let new = parse_def(name, s.draft.as_deref().unwrap_or_default())?;
+                if let Some(old) = &s.published {
+                    migrate_records(&tx, name, &parse_def(name, old)?, &new, &mut problems)?;
+                }
+                tx.execute(&format!("UPDATE collections SET published = draft, deleted = 0, {clear} WHERE name = ?1"), [name]).map_err(fail)?;
+                touched.push(name.clone());
+            }
+            Target::Collection(name) => {
+                tx.execute(&format!("UPDATE collections SET deleted = 1, {clear} WHERE name = ?1"), [name]).map_err(fail)?;
+            }
+            Target::Record(id) => {
+                let collection: String = tx.query_row("SELECT collection FROM records WHERE id = ?1", [id], |r| r.get(0)).map_err(fail)?;
+                let copy = if s.draft_deleted { "published = NULL" } else { "published = draft" };
+                tx.execute(&format!("UPDATE records SET {copy}, {clear}, updated_at = datetime('now') WHERE id = ?1"), [id]).map_err(fail)?;
+                if !s.draft_deleted {
+                    released.push((*id, collection.clone()));
+                }
+                touched.push(collection);
+            }
+            Target::View(_) | Target::Notes => {
+                let copy = if s.draft_deleted { "published = NULL" } else { "published = draft" };
+                tx.execute(&format!("UPDATE {table} SET {copy}, {clear} WHERE {key} = ?1"), [val]).map_err(fail)?;
+            }
+        }
+    }
+    touched.sort();
+    touched.dedup();
+    verify(&tx, &touched, &released, &mut problems)?;
+    if !problems.is_empty() {
+        problems.dedup();
+        let more = if problems.len() > 10 { format!("（另有 {} 个问题未列出）", problems.len() - 10) } else { String::new() };
+        problems.truncate(10);
+        // Dropping the transaction rolls everything back.
+        return Err(format!("发布被拦下，什么都没有上线。{}{more}", problems.join("；")));
+    }
+
+    tx.execute("INSERT INTO releases(actor, note) VALUES(?1, ?2)", params![actor.name, note]).map_err(fail)?;
+    let release = tx.last_insert_rowid();
+    let mut published = vec![];
+    for (target, s) in items {
+        let doc = if s.draft_deleted { None } else { s.draft };
+        tx.execute(
+            "INSERT INTO versions(release_id, target, doc, prev, actor, note) VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+            params![release, target.to_string(), doc, s.published, s.actor.unwrap_or_else(|| actor.name.clone()), s.note.unwrap_or_else(|| note.to_string())],
+        )
+        .map_err(fail)?;
+        published.push(target.to_string());
+    }
+    tx.commit().map_err(fail)?;
+    Ok(Release { id: release, published, skipped })
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct Version {
+    pub id: i64,
+    pub release_id: i64,
+    pub actor: String,
+    pub note: String,
+    pub created_at: String,
+    /// True when this version is the object's deletion; it has no content to restore.
+    pub deleted: bool,
+}
+
+/// An object's publish history, newest first, at most 30.
+pub fn versions(conn: &Connection, target: &Target) -> Result<Vec<Version>, String> {
+    let fail = |e: rusqlite::Error| db(target, e);
+    let mut stmt = conn
+        .prepare(
+            "SELECT v.id, v.release_id, v.actor, v.note, r.created_at, v.doc IS NULL FROM versions v \
+             JOIN releases r ON r.id = v.release_id WHERE v.target = ?1 ORDER BY v.id DESC LIMIT 30",
+        )
+        .map_err(fail)?;
+    let rows = stmt
+        .query_map([target.to_string()], |r| {
+            Ok(Version { id: r.get(0)?, release_id: r.get(1)?, actor: r.get(2)?, note: r.get(3)?, created_at: r.get(4)?, deleted: r.get(5)? })
+        })
+        .map_err(fail)?;
+    rows.collect::<Result<_, _>>().map_err(fail)
+}
+
+/// Puts a past version's content back into the draft; it goes live only when published.
+pub fn restore(conn: &Connection, actor: &Actor, target: &Target, version_id: i64, note: &str) -> Result<(), String> {
+    let doc: Option<Option<String>> = conn
+        .query_row("SELECT doc FROM versions WHERE id = ?1 AND target = ?2", params![version_id, target.to_string()], |r| r.get(0))
+        .optional()
+        .map_err(|e| db(target, e))?;
+    let Some(doc) = doc else {
+        return Err(format!("“{target}”没有编号为 {version_id} 的历史版本：请先用 list_versions 查看。"));
+    };
+    let Some(doc) = doc else {
+        return Err(format!("版本 {version_id} 是一次删除，没有内容可以恢复：请选更早的版本。"));
+    };
+    let doc: Value = serde_json::from_str(&doc).map_err(|e| format!("版本 {version_id} 的内容已损坏：{e}"))?;
+    save_draft(conn, actor, target, &doc, note)
+}
