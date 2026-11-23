@@ -35,7 +35,9 @@ fn deleting_a_never_published_collection_removes_its_records() {
     let app = app();
     news(&app);
     app.conn().execute("INSERT INTO records(collection, draft) VALUES('news', '{}')", []).unwrap();
-    let r = ok(&app, &builder(), "delete_collection", json!({ "name": "news", "note": "删" }));
+    // It holds a record, so the call must name the count.
+    assert!(err(&app, &builder(), "delete_collection", json!({ "name": "news", "note": "删" })).contains("confirm"));
+    let r = ok(&app, &builder(), "delete_collection", json!({ "name": "news", "note": "删", "confirm": 1 }));
     assert_eq!(r["status"], "deleted");
     let n: i64 = app.conn().query_row("SELECT count(*) FROM records", [], |r| r.get(0)).unwrap();
     assert_eq!(n, 0);

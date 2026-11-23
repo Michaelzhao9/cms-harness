@@ -253,6 +253,98 @@ pub fn check_unique(conn: &Connection, def: &CollectionDef, id: Option<i64>, doc
     Ok(())
 }
 
+// ---- structural change rules ----
+
+/// Rejects a new definition that existing records cannot follow: values that do not convert, required fields
+/// left empty, unique fields holding duplicates. Looks at both copies of every record of the collection.
+pub fn check_structure(conn: &Connection, name: &str, new: &CollectionDef) -> Result<(), String> {
+    let Some(row) = coll_row(conn, name)? else { return Ok(()) };
+    let live = row.published.as_deref().map(|j| parse_def(name, j)).transpose()?;
+    let current = match row.draft.as_deref() {
+        Some(j) => Some(parse_def(name, j)?),
+        None => live.clone(),
+    };
+    let fail = |e: rusqlite::Error| format!("检查集合“{name}”的记录失败：{e}");
+    let mut stmt = conn
+        .prepare("SELECT id, published, draft FROM records WHERE collection = ?1 AND (published IS NOT NULL OR draft IS NOT NULL) ORDER BY id")
+        .map_err(fail)?;
+    let rows: Vec<(i64, Option<String>, Option<String>)> =
+        stmt.query_map([name], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;
+
+    let mut failing: Vec<i64> = vec![];
+    let mut samples: Vec<String> = vec![];
+    let mut seen: std::collections::HashMap<(String, String), i64> = std::collections::HashMap::new();
+    let mut note = |id: i64, why: String, failing: &mut Vec<i64>| {
+        if !failing.contains(&id) {
+            failing.push(id);
+        }
+        let why = why.trim_end_matches('。').to_string();
+        if samples.len() < 3 && !samples.contains(&why) {
+            samples.push(why);
+        }
+    };
+    for (id, published, draft) in rows {
+        // Published copies follow the live definition; drafts follow the current draft definition.
+        for (json, old) in [(published, live.as_ref().or(current.as_ref())), (draft, current.as_ref())] {
+            let (Some(json), Some(old)) = (json, old) else { continue };
+            let doc: Value = serde_json::from_str(&json).map_err(|e| format!("记录 {id} 的内容已损坏：{e}"))?;
+            let next = match crate::schema::migrate(old, new, &doc) {
+                Ok(next) => next,
+                Err(e) => {
+                    note(id, format!("记录 {id}：{e}"), &mut failing);
+                    continue;
+                }
+            };
+            for f in new.fields.iter().filter(|f| f.unique) {
+                let Some(v) = next.get(&f.name).filter(|v| !v.is_null()) else { continue };
+                match seen.get(&(f.name.clone(), v.to_string())) {
+                    Some(other) if *other != id => {
+                        let shown: String = v.to_string().chars().take(50).collect();
+                        note(id, format!("字段“{}”的值 {shown} 在记录 {other} 和记录 {id} 里重复", f.name), &mut failing);
+                        note(*other, String::new(), &mut failing);
+                    }
+                    Some(_) => {}
+                    None => {
+                        seen.insert((f.name.clone(), v.to_string()), id);
+                    }
+                }
+            }
+        }
+    }
+    if failing.is_empty() {
+        return Ok(());
+    }
+    samples.retain(|s| !s.is_empty());
+    Err(format!(
+        "有 {} 条记录不符合新的定义，改动没有保存。例如：{}。请先修改这些记录；如果是新增的必填字段，可以给它一个默认值，或者先不设为必填。",
+        failing.len(),
+        samples.join("；")
+    ))
+}
+
+/// How many records hold a value (in either copy) for any of these fields.
+pub fn affected_by_removal(conn: &Connection, name: &str, fields: &[String]) -> Result<i64, String> {
+    if fields.is_empty() {
+        return Ok(0);
+    }
+    let mut holds = vec![];
+    for f in fields {
+        if !crate::schema::valid_name(f) {
+            return Err(format!("字段名“{f}”不合法。"));
+        }
+        holds.push(format!("json_extract(published,'$.{f}') IS NOT NULL OR json_extract(draft,'$.{f}') IS NOT NULL"));
+    }
+    conn.query_row(
+        &format!(
+            "SELECT count(*) FROM records WHERE collection = ?1 AND (published IS NOT NULL OR draft IS NOT NULL) AND ({})",
+            holds.join(" OR ")
+        ),
+        [name],
+        |r| r.get(0),
+    )
+    .map_err(|e| format!("统计集合“{name}”受影响的记录失败：{e}"))
+}
+
 // ---- pending list, publish, history ----
 
 /// One object's two copies and who last drafted it.

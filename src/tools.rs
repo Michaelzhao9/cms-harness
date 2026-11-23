@@ -191,9 +191,8 @@ struct UpdateCollection {
     add_fields: Option<Vec<FieldDef>>,
     change_fields: Option<Vec<FieldChange>>,
     remove_fields: Option<Vec<String>>,
-    /// Accepted and ignored until the destructive-change check exists.
-    #[allow(dead_code)]
-    confirm: Option<bool>,
+    /// Required when `remove_fields` would drop values: the number of records that hold them.
+    confirm: Option<i64>,
     note: String,
 }
 
@@ -201,8 +200,8 @@ struct UpdateCollection {
 #[serde(deny_unknown_fields)]
 struct DeleteCollection {
     name: String,
-    #[allow(dead_code)]
-    confirm: Option<bool>,
+    /// Required when the collection holds records: how many.
+    confirm: Option<i64>,
     note: String,
 }
 
@@ -281,7 +280,13 @@ fn create_collection(conn: &Connection, actor: &Actor, a: CreateCollection) -> R
         .optional()
         .map_err(|e| format!("检查集合名“{}”失败：{e}", def.name))?;
     if taken.is_some() {
-        return Err(format!("集合“{}”已存在（可能是已删除或待删除的）：请换一个名字。", def.name));
+        if changes::collection_status(conn, &def.name)? == "deleted" {
+            return Err(format!(
+                "名字“{0}”属于一个已删除的集合，它的记录还保留着：要用回它，请对 collection:{0} 调用 list_versions 和 restore_version 把它恢复；否则换一个名字。",
+                def.name
+            ));
+        }
+        return Err(format!("集合“{}”已存在：请换一个名字，或用 update_collection 修改它。", def.name));
     }
     save_collection(conn, actor, &def, note)
 }
@@ -317,20 +322,33 @@ fn update_collection(conn: &Connection, actor: &Actor, a: UpdateCollection) -> R
         if let Some(v) = c.options { f.options = v }
         if let Some(v) = c.target { f.target = Some(v) }
     }
-    for n in a.remove_fields.unwrap_or_default() {
+    let removed = a.remove_fields.unwrap_or_default();
+    for n in &removed {
         let i = def
             .fields
             .iter()
-            .position(|f| f.name == n)
+            .position(|f| &f.name == n)
             .ok_or_else(|| format!("字段“{n}”不存在：无法删除，请检查字段名。"))?;
         def.fields.remove(i);
     }
+    let affected = changes::affected_by_removal(conn, &a.name, &removed)?;
+    if affected > 0 && a.confirm != Some(affected) {
+        return Err(format!(
+            "删除字段 {} 会让 {affected} 条记录里已有的内容不再显示：确认要删，请加上参数 confirm: {affected}。内容不会被清除，把字段加回来就能恢复。",
+            removed.join("、")
+        ));
+    }
+    changes::check_structure(conn, &a.name, &def)?;
     save_collection(conn, actor, &def, note)
 }
 
 fn delete_collection(conn: &Connection, actor: &Actor, a: DeleteCollection) -> Result<Value, String> {
     let note = check_note(&a.note)?;
     changes::effective_def(conn, &a.name)?;
+    let count = changes::record_count(conn, &a.name)?;
+    if count > 0 && a.confirm != Some(count) {
+        return Err(format!("集合“{}”里有 {count} 条记录：确认要删除，请加上参数 confirm: {count}。", a.name));
+    }
     changes::mark_deleted(conn, actor, &Target::Collection(a.name.clone()), note)?;
     // A never-published collection's row is gone, so its status is "deleted".
     let status = changes::collection_status(conn, &a.name)?;
