@@ -1,4 +1,5 @@
 pub mod store;
+pub mod schema;
 
 use rusqlite::Connection;
 use std::path::PathBuf;
