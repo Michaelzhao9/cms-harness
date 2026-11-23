@@ -677,6 +677,15 @@ fn verify(conn: &Connection, touched: &[String], released: &[(i64, String)], pro
     Ok(())
 }
 
+/// Rebuilds the field indexes of every live collection. Run at startup, so live reads never depend on an
+/// index that is missing (for example in a database written by an older version).
+pub fn sync_all_indexes(conn: &Connection) -> Result<(), String> {
+    for (_, def) in live_defs(conn)? {
+        sync_indexes(conn, &def)?;
+    }
+    Ok(())
+}
+
 /// (name, definition) of every collection that is live: published and not deleted.
 fn live_defs(conn: &Connection) -> Result<Vec<(String, CollectionDef)>, String> {
     let fail = |e: rusqlite::Error| format!("读取线上的集合失败：{e}");

@@ -84,3 +84,15 @@ pub async fn post_json(app: &Shared, path: &str, key: Option<&str>, body: Value)
 pub fn key(app: &Shared, scopes: &[Scope]) -> String {
     harness_cms::auth::create_key(&app.conn(), "test", scopes).unwrap()
 }
+
+pub async fn post_raw(app: &Shared, path: &str, key: Option<&str>, body: &str) -> (StatusCode, Value) {
+    let req = Request::post(path).header(header::CONTENT_TYPE, "application/json");
+    let (s, _, v) = send(app, req, key, axum::body::Body::from(body.to_string())).await;
+    (s, v)
+}
+
+/// The body of a GET as text.
+pub async fn get_text(app: &Shared, path: &str) -> String {
+    let resp = harness_cms::api::router(app.clone()).oneshot(Request::get(path).body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    String::from_utf8(resp.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap()
+}

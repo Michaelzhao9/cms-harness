@@ -1,11 +1,12 @@
 //! HTTP routes. One small function per route; database work runs on the blocking pool.
 
-use crate::auth::{actor_from_key, Scope};
+use crate::auth::{actor_from_key, Actor, Scope};
 use crate::schema::project;
-use crate::{changes, media, query, Shared};
+use crate::{changes, media, query, tools, Shared};
+use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Multipart, Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Response};
 use axum::{routing::{get, post}, Json, Router};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -13,12 +14,19 @@ use serde_json::{json, Value};
 type Params = Query<Vec<(String, String)>>;
 type Fail = (StatusCode, String);
 
+const MIB: usize = 1024 * 1024;
+
 pub fn router(app: Shared) -> Router {
     Router::new()
+        .route("/", get(home))
+        .route("/api/v1/tools", get(list_tools))
+        .route("/api/v1/tools/{name}", post(call_tool).layer(DefaultBodyLimit::max(8 * MIB)))
+        .route("/mcp", post(mcp).layer(DefaultBodyLimit::max(8 * MIB)))
         .route("/api/v1/content/{collection}", get(list))
         .route("/api/v1/content/{collection}/{id}", get(one))
         .route("/api/v1/media", post(upload).layer(DefaultBodyLimit::max(21 * 1024 * 1024)))
         .route("/uploads/{*path}", get(serve))
+        .layer(DefaultBodyLimit::max(MIB))
         .with_state(app)
 }
 
@@ -188,4 +196,168 @@ async fn upload(State(app): State<Shared>, headers: HeaderMap, mut form: Multipa
         Ok(Err(e)) => error_response(StatusCode::BAD_REQUEST, e),
         Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("保存文件失败：{e}")),
     }
+}
+
+// ---- tools over REST and MCP ----
+
+/// The actor behind the request's key, or a 401 response.
+async fn actor(app: &Shared, headers: &HeaderMap) -> Result<Actor, Box<Response>> {
+    let key = bearer(headers);
+    let a = app.clone();
+    tokio::task::spawn_blocking(move || key.and_then(|k| actor_from_key(&a.conn(), &k)))
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| Box::new(error_response(StatusCode::UNAUTHORIZED, "缺少或无效的密钥：请在 Authorization 头里带上 Bearer 密钥。".into())))
+}
+
+/// Runs one tool on the blocking pool. Tool errors are `Err(message)`.
+async fn run_tool(app: &Shared, actor: Actor, name: String, args: Value) -> Result<Value, String> {
+    let a = app.clone();
+    tokio::task::spawn_blocking(move || tools::call(&a, &actor, &name, args))
+        .await
+        .unwrap_or_else(|e| Err(format!("服务器内部错误：{e}")))
+}
+
+fn scope_name(scope: Scope) -> String {
+    serde_json::to_value(scope).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default()
+}
+
+async fn list_tools(State(app): State<Shared>, headers: HeaderMap) -> Response {
+    let actor = match actor(&app, &headers).await {
+        Ok(a) => a,
+        Err(r) => return *r,
+    };
+    let list: Vec<Value> = tools::specs()
+        .iter()
+        .filter(|s| actor.can(s.scope))
+        .map(|s| json!({ "name": s.name, "description": s.description, "scope": scope_name(s.scope), "inputSchema": s.schema }))
+        .collect();
+    Json(json!({ "ok": true, "tools": list })).into_response()
+}
+
+async fn call_tool(State(app): State<Shared>, Path(name): Path<String>, headers: HeaderMap, body: Bytes) -> Response {
+    let actor = match actor(&app, &headers).await {
+        Ok(a) => a,
+        Err(r) => return *r,
+    };
+    let args: Value = if body.is_empty() {
+        Value::Null
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(v) => v,
+            Err(e) => return error_response(StatusCode::BAD_REQUEST, format!("请求体不是合法的 JSON：{e}。请发送一个 JSON 对象作为工具参数。")),
+        }
+    };
+    match run_tool(&app, actor, name, args).await {
+        Ok(result) => Json(json!({ "ok": true, "result": result })).into_response(),
+        Err(e) => error_response(StatusCode::BAD_REQUEST, e),
+    }
+}
+
+// Protocol revisions checked against https://modelcontextprotocol.io/docs/2026-07-28/learn/versioning on 2026-11-23.
+// 2026-07-28 has no initialize handshake: clients send tools/list and tools/call directly, which this stateless
+// endpoint accepts. Older clients open with initialize and one of the handshake revisions.
+const MCP_LATEST: &str = "2026-07-28";
+const MCP_HANDSHAKE: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+
+fn rpc_result(id: &Value, result: Value) -> Response {
+    Json(json!({ "jsonrpc": "2.0", "id": id, "result": result })).into_response()
+}
+
+fn rpc_error(id: &Value, code: i64, message: String) -> Response {
+    Json(json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })).into_response()
+}
+
+async fn mcp(State(app): State<Shared>, headers: HeaderMap, body: Bytes) -> Response {
+    let actor = match actor(&app, &headers).await {
+        Ok(a) => a,
+        Err(r) => return *r,
+    };
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return rpc_error(&Value::Null, -32700, format!("请求不是合法的 JSON：{e}")),
+    };
+    // A request without an id is a notification: nothing to answer.
+    let Some(id) = req.get("id").cloned() else {
+        return StatusCode::ACCEPTED.into_response();
+    };
+    let params = req.get("params").cloned().unwrap_or(Value::Null);
+    let info = json!({ "name": "harness-cms", "version": env!("CARGO_PKG_VERSION") });
+    match req["method"].as_str().unwrap_or_default() {
+        "initialize" => {
+            let asked = params["protocolVersion"].as_str().unwrap_or_default();
+            let version = MCP_HANDSHAKE.iter().find(|v| **v == asked).copied().unwrap_or(MCP_HANDSHAKE[0]);
+            rpc_result(&id, json!({
+                "protocolVersion": version,
+                "capabilities": { "tools": {} },
+                "serverInfo": info,
+                "instructions": "这是一个内容后台的工具。所有修改先存为草稿，发布需要带 publish 权限的密钥。"
+            }))
+        }
+        "server/discover" => {
+            let mut versions = vec![MCP_LATEST];
+            versions.extend(MCP_HANDSHAKE);
+            rpc_result(&id, json!({ "supportedVersions": versions, "capabilities": { "tools": {} }, "serverInfo": info }))
+        }
+        "ping" => rpc_result(&id, json!({})),
+        "tools/list" => {
+            let list: Vec<Value> = tools::specs()
+                .iter()
+                .filter(|s| actor.can(s.scope))
+                .map(|s| json!({ "name": s.name, "description": s.description, "inputSchema": s.schema }))
+                .collect();
+            rpc_result(&id, json!({ "tools": list }))
+        }
+        "tools/call" => {
+            let name = params["name"].as_str().unwrap_or_default().to_string();
+            let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+            // A failed tool is a normal result flagged isError, so the model can read the message and retry.
+            let (text, is_error) = match run_tool(&app, actor, name, args).await {
+                Ok(v) => (v.to_string(), false),
+                Err(e) => (e, true),
+            };
+            rpc_result(&id, json!({ "content": [{ "type": "text", "text": text }], "isError": is_error }))
+        }
+        other => rpc_error(&id, -32601, format!("Method not found: {other}")),
+    }
+}
+
+// ---- placeholder front page ----
+
+fn escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
+}
+
+async fn home(State(app): State<Shared>) -> Html<String> {
+    let name = escape(&app.site_name);
+    let api = escape(&format!("{}/api/v1/content/", app.origin));
+    Html(format!(
+        r#"<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{name}</title>
+<style>
+:root {{ color-scheme: light dark; }}
+body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: #fcfcfd; color: #1d1d1f;
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif; }}
+main {{ max-width: 34em; padding: 32px 24px; }}
+h1 {{ margin: 0 0 8px; font-size: 32px; letter-spacing: -0.02em; }}
+p {{ margin: 0 0 6px; color: #424245; }}
+code {{ font: 14px ui-monospace, "SF Mono", Menlo, monospace; }}
+@media (prefers-color-scheme: dark) {{ body {{ background: #111113; color: #f2f2f4; }} p {{ color: #b8b8bf; }} }}
+</style>
+</head>
+<body>
+<main>
+<h1>{name}</h1>
+<p>后台已就绪。</p>
+<p>前台通过内容接口读取已发布的内容：<code>{api}</code></p>
+</main>
+</body>
+</html>
+"#
+    ))
 }
