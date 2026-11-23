@@ -224,6 +224,32 @@ fn live_def_opt(conn: &Connection, name: &str) -> Result<Option<CollectionDef>, 
     }
 }
 
+fn drop_indexes(conn: &Connection, collection: &str, keep: &[String]) -> Result<(), String> {
+    let prefix = format!("hc:{collection}:");
+    let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND substr(name, 1, ?1) = ?2").map_err(|e| e.to_string())?;
+    let old: Vec<String> = stmt.query_map(params![prefix.len() as i64, prefix], |r| r.get(0)).map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>().map_err(|e| e.to_string())?;
+    for name in old.into_iter().filter(|n| !keep.contains(n)) {
+        conn.execute(&format!("DROP INDEX \"{name}\""), []).map_err(|e| format!("删除索引“{name}”失败：{e}"))?;
+    }
+    Ok(())
+}
+
+/// Makes the field indexes of `def` match its `index` / `unique` fields: one partial expression index per field,
+/// on exactly the expression `query` filters by.
+pub fn sync_indexes(conn: &Connection, def: &CollectionDef) -> Result<(), String> {
+    let mut keep = vec![];
+    for f in def.fields.iter().filter(|f| f.index || f.unique) {
+        let name = format!("hc:{}:{}", def.name, f.name);
+        conn.execute(
+            &format!("CREATE INDEX IF NOT EXISTS \"{name}\" ON records(json_extract(published,'$.{}')) WHERE collection = '{}'", f.name, def.name),
+            [],
+        ).map_err(|e| format!("创建索引“{name}”失败：{e}"))?;
+        keep.push(name);
+    }
+    drop_indexes(conn, &def.name, &keep)
+}
+
 /// The published, non-deleted definition.
 pub fn live_def(conn: &Connection, name: &str) -> Result<CollectionDef, String> {
     live_def_opt(conn, name)?.ok_or_else(|| format!("集合“{name}”尚未发布或已删除，线上没有它。"))
@@ -794,6 +820,8 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
     let mut problems: Vec<String> = vec![];
     let mut touched: Vec<String> = vec![];
     let mut released: Vec<(i64, String)> = vec![];
+    // collections whose definition went live or was deleted in this release
+    let mut defs: Vec<(String, bool)> = vec![];
     // (record id, live copy before the rewrite, collection whose definition change caused it)
     let mut rewritten: Vec<(i64, String, String)> = vec![];
     for (target, s) in &items {
@@ -809,8 +837,10 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
                 }
                 tx.execute(&format!("UPDATE collections SET published = draft, deleted = 0, {clear} WHERE name = ?1"), [name]).map_err(fail)?;
                 touched.push(name.clone());
+                defs.push((name.clone(), true));
             }
             Target::Collection(name) => {
+                defs.push((name.clone(), false));
                 tx.execute(&format!("UPDATE collections SET deleted = 1, {clear} WHERE name = ?1"), [name]).map_err(fail)?;
             }
             Target::Record(id) => {
@@ -826,6 +856,12 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
                 let copy = if s.draft_deleted { "published = NULL" } else { "published = draft" };
                 tx.execute(&format!("UPDATE {table} SET {copy}, {clear} WHERE {key} = ?1"), [val]).map_err(fail)?;
             }
+        }
+    }
+    for (name, live) in &defs {
+        match live {
+            true => sync_indexes(&tx, &live_def(&tx, name)?)?,
+            false => drop_indexes(&tx, name, &[])?,
         }
     }
     touched.sort();

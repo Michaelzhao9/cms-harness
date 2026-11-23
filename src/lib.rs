@@ -3,6 +3,7 @@ pub mod store;
 pub mod schema;
 pub mod changes;
 pub mod query;
+pub mod api;
 pub mod tools;
 
 use rusqlite::Connection;

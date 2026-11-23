@@ -142,13 +142,17 @@ fn build(def: &CollectionDef, q: &Query, live: bool) -> Result<(&'static str, St
     Ok((col, wh, params))
 }
 
-pub fn run(conn: &Connection, def: &CollectionDef, q: &Query, live: bool) -> Result<(Vec<Row>, i64), String> {
-    if !(1..=100).contains(&q.limit) {
-        return Err(format!("limit 必须在 1 到 100 之间，收到 {}：请调整后重试。", q.limit));
+/// `records`, pinned to the first filtered (else sorted) field's index in the live view: SQLite otherwise prefers `records_collection`.
+fn from(def: &CollectionDef, q: &Query, live: bool) -> String {
+    let field = q.filters.iter().map(|f| &f.0).chain(q.sort.as_ref().map(|s| &s.0)).find(|f| *f != "id");
+    match field {
+        Some(f) if live && def.field(f).is_some() => format!("records INDEXED BY \"hc:{}:{f}\"", def.name),
+        _ => "records".into(),
     }
-    if q.offset < 0 {
-        return Err(format!("offset 不能小于 0，收到 {}：请传 0 或更大的数。", q.offset));
-    }
+}
+
+/// The page query and its parameters (limit and offset last). Fails only on filters or sorts the definition does not allow.
+fn page_sql(def: &CollectionDef, q: &Query, live: bool) -> Result<(String, Vec<Sql>), String> {
     let (col, wh, mut params) = build(def, q, live)?;
     let order = match &q.sort {
         None => "id DESC".to_string(),
@@ -158,19 +162,30 @@ pub fn run(conn: &Connection, def: &CollectionDef, q: &Query, live: bool) -> Res
             format!("{} {d}, id {d}", expr(f, col)?)
         }
     };
-    let err = |e: rusqlite::Error| format!("查询集合“{}”失败：{e}", def.name);
-    let total: i64 = conn
-        .query_row(&format!("SELECT count(*) FROM records WHERE {wh}"), params_from_iter(&params), |r| r.get(0))
-        .map_err(err)?;
     params.push(Sql::Integer(q.limit));
     params.push(Sql::Integer(q.offset));
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT id, published IS NOT NULL, draft IS NOT NULL, draft_deleted, {col} FROM records WHERE {wh} ORDER BY {order} LIMIT ? OFFSET ?"
-        ))
+    Ok((
+        format!("SELECT id, published IS NOT NULL, draft IS NOT NULL, draft_deleted, {col} FROM {} WHERE {wh} ORDER BY {order} LIMIT ? OFFSET ?", from(def, q, live)),
+        params,
+    ))
+}
+
+/// The SQL `run` uses for the live view. Panics if the query was not checked (`parse_params` / `parse_filter` do that).
+pub fn live_sql(def: &CollectionDef, q: &Query) -> (String, Vec<Sql>) {
+    page_sql(def, q, true).expect("query was checked against the definition")
+}
+
+pub fn run(conn: &Connection, def: &CollectionDef, q: &Query, live: bool) -> Result<(Vec<Row>, i64), String> {
+    check_page(q)?;
+    let (_, wh, params) = build(def, q, live)?;
+    let (sql, page_params) = page_sql(def, q, live)?;
+    let err = |e: rusqlite::Error| format!("查询集合“{}”失败：{e}", def.name);
+    let total: i64 = conn
+        .query_row(&format!("SELECT count(*) FROM {} WHERE {wh}", from(def, q, live)), params_from_iter(&params), |r| r.get(0))
         .map_err(err)?;
+    let mut stmt = conn.prepare(&sql).map_err(err)?;
     let rows = stmt
-        .query_map(params_from_iter(&params), |r| {
+        .query_map(params_from_iter(&page_params), |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, bool>(1)?, r.get::<_, bool>(2)?, r.get::<_, bool>(3)?, r.get::<_, String>(4)?))
         })
         .map_err(err)?;
@@ -181,4 +196,69 @@ pub fn run(conn: &Connection, def: &CollectionDef, q: &Query, live: bool) -> Res
         out.push(Row { id, status: changes::status(p, d, dd), doc: project(def, &doc) });
     }
     Ok((out, total))
+}
+
+fn check_page(q: &Query) -> Result<(), String> {
+    if !(1..=100).contains(&q.limit) {
+        return Err(format!("limit 必须在 1 到 100 之间，收到 {}：请调整后重试。", q.limit));
+    }
+    if q.offset < 0 {
+        return Err(format!("offset 不能小于 0，收到 {}：请传 0 或更大的数。", q.offset));
+    }
+    Ok(())
+}
+
+/// Query-string parameters to a checked `Query` plus the `expand` field names.
+/// `field=v` is equality, `field__ne|gt|gte|lt|lte|contains=v` the other operators; values are read by field type.
+pub fn parse_params(def: &CollectionDef, params: &[(String, String)]) -> Result<(Query, Vec<String>), String> {
+    let mut q = Query { filters: vec![], sort: None, limit: 20, offset: 0 };
+    let mut expand = vec![];
+    let int = |name: &str, v: &str| v.parse::<i64>().map_err(|_| format!("参数“{name}”必须是整数，收到“{v}”：请改成数字。"));
+    for (name, v) in params {
+        match name.as_str() {
+            "limit" => q.limit = int(name, v)?,
+            "offset" => q.offset = int(name, v)?,
+            "sort" => q.sort = Some(match v.strip_prefix('-') { Some(f) => (f.to_string(), true), None => (v.clone(), false) }),
+            "expand" => {
+                for f in v.split(',').filter(|f| !f.is_empty()) {
+                    if def.field(f).map(|d| d.kind) != Some(FieldType::Relation) {
+                        return Err(format!("expand 的字段“{f}”不是集合“{}”的 relation 字段：只能展开关系字段。", def.name));
+                    }
+                    expand.push(f.to_string());
+                }
+            }
+            _ => {
+                let (field, op) = match name.rsplit_once("__") {
+                    Some((f, o)) if def.field(name).is_none() => {
+                        let op = match o {
+                            "ne" => Op::Ne, "gt" => Op::Gt, "gte" => Op::Gte, "lt" => Op::Lt, "lte" => Op::Lte, "contains" => Op::Contains,
+                            _ => return Err(format!("参数“{name}”的运算符“{o}”未知：可用的有 ne、gt、gte、lt、lte、contains。")),
+                        };
+                        (f, op)
+                    }
+                    _ => (name.as_str(), Op::Eq),
+                };
+                let val = match def.field(field).map(|f| f.kind) {
+                    None if field == "id" => Value::from(int(name, v)?),
+                    Some(FieldType::Relation) => Value::from(int(name, v)?),
+                    Some(FieldType::Number) => v.parse::<i64>().map(Value::from)
+                        .or_else(|_| v.parse::<f64>().ok().and_then(serde_json::Number::from_f64).map(Value::Number).ok_or(()))
+                        .map_err(|_| format!("参数“{name}”必须是数字，收到“{v}”：请改成数字。"))?,
+                    Some(FieldType::Boolean) => match v.as_str() {
+                        "true" => Value::Bool(true),
+                        "false" => Value::Bool(false),
+                        _ => return Err(format!("参数“{name}”必须是 true 或 false，收到“{v}”。")),
+                    },
+                    _ => Value::String(v.clone()),
+                };
+                check_filter(def, field, op, &val)?;
+                q.filters.push((field.to_string(), op, val));
+            }
+        }
+    }
+    check_page(&q)?;
+    if let Some((f, _)) = &q.sort {
+        check_field(def, f)?;
+    }
+    Ok((q, expand))
 }

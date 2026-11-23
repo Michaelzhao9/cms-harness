@@ -55,3 +55,32 @@ pub fn news(app: &Shared) {
 pub fn publish_all(app: &Shared) -> Value {
     ok(app, &builder(), "publish", json!({ "note": "发布" }))
 }
+
+use axum::http::{header, HeaderMap, Request, StatusCode};
+use http_body_util::BodyExt;
+use tower::ServiceExt;
+
+async fn send(app: &Shared, req: axum::http::request::Builder, key: Option<&str>, body: axum::body::Body) -> (StatusCode, HeaderMap, Value) {
+    let req = match key {
+        Some(k) => req.header(header::AUTHORIZATION, format!("Bearer {k}")),
+        None => req,
+    };
+    let resp = harness_cms::api::router(app.clone()).oneshot(req.body(body).unwrap()).await.unwrap();
+    let (status, headers) = (resp.status(), resp.headers().clone());
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    (status, headers, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+}
+
+pub async fn get(app: &Shared, path: &str, key: Option<&str>) -> (StatusCode, HeaderMap, Value) {
+    send(app, Request::get(path), key, axum::body::Body::empty()).await
+}
+
+pub async fn post_json(app: &Shared, path: &str, key: Option<&str>, body: Value) -> (StatusCode, Value) {
+    let req = Request::post(path).header(header::CONTENT_TYPE, "application/json");
+    let (s, _, v) = send(app, req, key, axum::body::Body::from(body.to_string())).await;
+    (s, v)
+}
+
+pub fn key(app: &Shared, scopes: &[Scope]) -> String {
+    harness_cms::auth::create_key(&app.conn(), "test", scopes).unwrap()
+}
