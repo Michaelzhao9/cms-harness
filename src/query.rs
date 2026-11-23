@@ -2,7 +2,7 @@
 //! Field expressions are exactly `json_extract(<column>,'$.<field>')` so that expression indexes can match them.
 
 use crate::changes;
-use crate::schema::{project, valid_name, CollectionDef, FieldType};
+use crate::schema::{normalize, project, valid_name, CollectionDef, FieldDef, FieldType};
 use rusqlite::{params_from_iter, types::Value as Sql, Connection};
 use serde_json::Value;
 
@@ -46,12 +46,36 @@ fn check_field(def: &CollectionDef, name: &str) -> Result<(), String> {
     }
 }
 
+fn kind_of(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "null", Value::Bool(_) => "布尔值", Value::Number(_) => "数字",
+        Value::String(_) => "字符串", Value::Array(_) => "数组", Value::Object(_) => "对象",
+    }
+}
+
 fn check_filter(def: &CollectionDef, field: &str, op: Op, v: &Value) -> Result<(), String> {
     check_field(def, field)?;
-    if to_sql(v).is_none() {
-        return Err(format!("筛选字段“{field}”的值 {v} 不合法：只能是字符串、数字或布尔值。"));
+    let f = def.field(field);
+    let (want, ok) = match f.map(|f| f.kind) {
+        None | Some(FieldType::Relation) => ("整数", v.as_i64().is_some()),
+        Some(FieldType::Number) => ("数字", v.is_number()),
+        Some(FieldType::Boolean) => ("布尔值", v.is_boolean()),
+        Some(_) => ("字符串", v.is_string()),
+    };
+    if !ok {
+        return Err(format!(
+            "筛选字段“{field}”的值 {v} 类型不对：它需要{want}，收到的是{}。",
+            kind_of(v)
+        ));
     }
-    if op == Op::Contains && (field == "id" || def.field(field).map(|f| f.kind) != Some(FieldType::Text) || !v.is_string()) {
+    if let Some(f) = f.filter(|f| matches!(f.kind, FieldType::Date | FieldType::Select)) {
+        // reuse the record validator on a one-field definition so dates and options are judged the same way
+        let one = CollectionDef { name: def.name.clone(), title: String::new(), single: false, access: Default::default(),
+            fields: vec![FieldDef { required: false, ..f.clone() }] };
+        normalize(&one, &Value::Null, &serde_json::json!({ field: v }))
+            .map_err(|e| format!("筛选字段“{field}”的值不合法：{e}"))?;
+    }
+    if op == Op::Contains && f.map(|f| f.kind) != Some(FieldType::Text) {
         return Err(format!("字段“{field}”不能用 contains：它只能用于 text 字段，且值必须是字符串。"));
     }
     Ok(())
@@ -65,6 +89,9 @@ pub fn parse_filter(def: &CollectionDef, filter: &Value) -> Result<Vec<(String, 
             Value::Object(m) => m.iter().map(|(k, v)| (k.as_str(), v)).collect(),
             _ => vec![("eq", v)],
         };
+        if ops.is_empty() {
+            return Err(format!("筛选字段“{field}”没有给出任何运算符：请写成 {{\"{field}\": {{\"gte\": 值}}}} 或直接写值。"));
+        }
         for (name, val) in ops {
             let op = match name {
                 "eq" => Op::Eq, "ne" => Op::Ne, "gt" => Op::Gt, "gte" => Op::Gte,
@@ -78,23 +105,27 @@ pub fn parse_filter(def: &CollectionDef, filter: &Value) -> Result<Vec<(String, 
     Ok(out)
 }
 
-fn expr(field: &str) -> String {
+fn expr(field: &str, col: &str) -> Result<String, String> {
     if field == "id" {
-        return "id".into();
+        return Ok("id".into());
     }
-    debug_assert!(valid_name(field));
-    format!("json_extract({{col}},'$.{field}')")
+    if !valid_name(field) {
+        return Err(format!("字段名“{field}”不合法，不能用于查询。"));
+    }
+    Ok(format!("json_extract({col},'$.{field}')"))
 }
 
 /// (column, WHERE clause, parameters) shared by the page query and the count query.
 fn build(def: &CollectionDef, q: &Query, live: bool) -> Result<(&'static str, String, Vec<Sql>), String> {
-    debug_assert!(valid_name(&def.name));
+    if !valid_name(&def.name) {
+        return Err(format!("集合名“{}”不合法，不能用于查询。", def.name));
+    }
     let col = if live { "published" } else { "coalesce(draft, published)" };
     let mut wh = format!("collection = '{}' AND {col} IS NOT NULL", def.name);
     let mut params = vec![];
     for (field, op, v) in &q.filters {
         check_filter(def, field, *op, v)?;
-        let e = expr(field).replace("{col}", col);
+        let e = expr(field, col)?;
         let mut p = to_sql(v).expect("checked by check_filter");
         let sql = match op {
             Op::Eq => "=", Op::Ne => "!=", Op::Gt => ">", Op::Gte => ">=", Op::Lt => "<", Op::Lte => "<=",
@@ -124,7 +155,7 @@ pub fn run(conn: &Connection, def: &CollectionDef, q: &Query, live: bool) -> Res
         Some((f, desc)) => {
             check_field(def, f)?;
             let d = if *desc { "DESC" } else { "ASC" };
-            format!("{} {d}, id {d}", expr(f).replace("{col}", col))
+            format!("{} {d}, id {d}", expr(f, col)?)
         }
     };
     let err = |e: rusqlite::Error| format!("查询集合“{}”失败：{e}", def.name);

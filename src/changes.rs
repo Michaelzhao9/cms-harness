@@ -226,10 +226,14 @@ pub fn insert_record(conn: &Connection, actor: &Actor, collection: &str, doc: &V
 /// Every `unique` field of `doc` must differ from the same field of all other records of the collection
 /// (tombstones skipped). `live_only` compares against published values only, else against drafts too.
 pub fn check_unique(conn: &Connection, def: &CollectionDef, id: Option<i64>, doc: &Value, live_only: bool) -> Result<(), String> {
-    debug_assert!(crate::schema::valid_name(&def.name));
+    if !crate::schema::valid_name(&def.name) {
+        return Err(format!("集合名“{}”不合法，无法检查唯一性。", def.name));
+    }
     for f in def.fields.iter().filter(|f| f.unique) {
+        if !crate::schema::valid_name(&f.name) {
+            return Err(format!("字段名“{}”不合法，无法检查唯一性。", f.name));
+        }
         let Some(p) = doc.get(&f.name).and_then(crate::query::to_sql) else { continue };
-        debug_assert!(crate::schema::valid_name(&f.name));
         let draft = if live_only { String::new() } else { format!(" OR json_extract(draft,'$.{0}') = ?2", f.name) };
         let sql = format!(
             "SELECT id FROM records WHERE collection = ?1 AND id IS NOT ?3 AND (published IS NOT NULL OR draft IS NOT NULL) \
@@ -241,10 +245,9 @@ pub fn check_unique(conn: &Connection, def: &CollectionDef, id: Option<i64>, doc
             .optional()
             .map_err(|e| format!("检查字段“{}”是否唯一失败：{e}", f.name))?;
         if let Some(other) = other {
-            return Err(format!(
-                "字段“{}”必须唯一：值 {} 已被记录 {other} 使用，请换一个值。",
-                f.name, doc[&f.name]
-            ));
+            let shown = doc[&f.name].to_string();
+            let shown = if shown.chars().count() > 50 { format!("{}…", shown.chars().take(50).collect::<String>()) } else { shown };
+            return Err(format!("字段“{}”必须唯一：值 {shown} 已被记录 {other} 使用，请换一个值。", f.name));
         }
     }
     Ok(())
