@@ -545,6 +545,62 @@ fn verify(conn: &Connection, touched: &[String], released: &[(i64, String)], pro
     Ok(())
 }
 
+/// (name, definition) of every collection that is live: published and not deleted.
+fn live_defs(conn: &Connection) -> Result<Vec<(String, CollectionDef)>, String> {
+    let fail = |e: rusqlite::Error| format!("读取线上的集合失败：{e}");
+    let mut stmt = conn.prepare("SELECT name, published FROM collections WHERE deleted = 0 AND published IS NOT NULL ORDER BY name").map_err(fail)?;
+    let rows: Vec<(String, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;
+    rows.into_iter().map(|(name, json)| Ok((name.clone(), parse_def(&name, &json)?))).collect()
+}
+
+/// After a release, a live record may only point at live records, and a live collection only at live collections.
+/// Checks the touched collections and every live collection that points at one of them.
+pub fn check_relations(conn: &Connection, touched: &[String], problems: &mut Vec<String>) -> Result<(), String> {
+    use crate::schema::FieldType;
+    let defs = live_defs(conn)?;
+    let is_live = |name: &str| defs.iter().any(|(n, _)| n == name);
+    for (name, def) in &defs {
+        let relations: Vec<_> = def.fields.iter().filter(|f| f.kind == FieldType::Relation).collect();
+        for f in &relations {
+            let target = f.target.as_deref().unwrap_or_default();
+            if !is_live(target) {
+                problems.push(format!("collection:{name} 的关联字段“{}”指向集合“{target}”，它不在线上：请把它一起发布，或先去掉这个字段。", f.name));
+            }
+        }
+        let in_scope = touched.contains(name) || relations.iter().any(|f| touched.iter().any(|t| Some(t.as_str()) == f.target.as_deref()));
+        if relations.is_empty() || !in_scope {
+            continue;
+        }
+        let fail = |e: rusqlite::Error| format!("检查集合“{name}”的关联失败：{e}");
+        let mut stmt = conn.prepare("SELECT id, published FROM records WHERE collection = ?1 AND published IS NOT NULL").map_err(fail)?;
+        let rows: Vec<(i64, String)> = stmt.query_map([name], |r| Ok((r.get(0)?, r.get(1)?))).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;
+        for (id, json) in rows {
+            let doc: Value = serde_json::from_str(&json).map_err(|e| format!("记录 {id} 的内容已损坏：{e}"))?;
+            for f in &relations {
+                let target = f.target.as_deref().unwrap_or_default();
+                let ids: Vec<i64> = match doc.get(&f.name) {
+                    Some(Value::Array(a)) => a.iter().filter_map(Value::as_i64).collect(),
+                    Some(v) => v.as_i64().into_iter().collect(),
+                    None => vec![],
+                };
+                for rid in ids {
+                    let live: Option<i64> = conn
+                        .query_row("SELECT id FROM records WHERE id = ?1 AND collection = ?2 AND published IS NOT NULL", params![rid, target], |r| r.get(0))
+                        .optional()
+                        .map_err(fail)?;
+                    if live.is_none() {
+                        problems.push(format!(
+                            "record:{id} 的字段“{}”指向 record:{rid}，而它不在线上（还没发布，或正在被删除）：请把两者一起发布，或先改掉这个引用。",
+                            f.name
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Publishes pending changes in one transaction: all of the actor's, or only the listed ones.
 /// Nothing goes live unless the whole release passes verification.
 pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: &str) -> Result<Release, String> {
@@ -622,6 +678,7 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
     touched.sort();
     touched.dedup();
     verify(&tx, &touched, &released, &mut problems)?;
+    check_relations(&tx, &touched, &mut problems)?;
     if !problems.is_empty() {
         problems.dedup();
         let more = if problems.len() > 10 { format!("（另有 {} 个问题未列出）", problems.len() - 10) } else { String::new() };
