@@ -50,15 +50,44 @@ fn a_record_may_point_at_another_record_of_its_own_collection() {
 }
 
 #[test]
-fn unrelated_collections_are_not_rescanned_into_false_alarms() {
+fn a_release_is_not_blocked_by_a_collection_it_did_not_touch() {
     let app = app();
     coll(&app, "people", json!([{ "name": "name", "title": "姓名", "type": "text" }]));
     coll(&app, "posts", json!([{ "name": "author", "title": "作者", "type": "relation", "target": "people" }]));
     news(&app);
     let p = rec(&app, "people", json!({ "name": "张" }));
-    rec(&app, "posts", json!({ "author": p }));
+    let post = rec(&app, "posts", json!({ "author": p }));
     publish_all(&app);
-    // A later release that only touches news goes through.
+    // Simulate an old dangling reference in posts; a release that only touches news must still go through.
+    app.conn().execute("UPDATE records SET published = '{\"author\": 9999}' WHERE id = ?1", [post]).unwrap();
     ok(&app, &editor(), "create_record", json!({ "collection": "news", "note": "n", "data": { "title": "A", "slug": "a" } }));
     assert_eq!(publish_all(&app)["published"].as_array().unwrap().len(), 1);
+    // The moment posts or people is touched, the dangling reference is reported.
+    rec(&app, "people", json!({ "name": "李" }));
+    assert!(err(&app, &builder(), "publish", json!({ "note": "n" })).contains(&format!("record:{post}")));
+}
+
+#[test]
+fn a_target_in_the_wrong_collection_is_refused() {
+    let app = app();
+    coll(&app, "people", json!([{ "name": "name", "title": "姓名", "type": "text" }]));
+    coll(&app, "posts", json!([{ "name": "author", "title": "作者", "type": "relation", "target": "people" }]));
+    let p = rec(&app, "people", json!({ "name": "张" }));
+    let post = rec(&app, "posts", json!({ "author": p }));
+    publish_all(&app);
+    // A draft that points at a posts record, slipped past the draft-time check.
+    app.conn().execute("INSERT INTO records(collection, draft) VALUES('posts', ?1)", [format!("{{\"author\": {post}}}")]).unwrap();
+    let e = err(&app, &builder(), "publish", json!({ "note": "n" }));
+    assert!(e.contains(&format!("record:{post}")) && e.contains("people"), "{e}");
+}
+
+#[test]
+fn the_collection_level_problem_names_both_ends() {
+    let app = app();
+    coll(&app, "people", json!([{ "name": "name", "title": "姓名", "type": "text" }]));
+    coll(&app, "posts", json!([{ "name": "author", "title": "作者", "type": "relation", "target": "people" }]));
+    publish_all(&app);
+    ok(&app, &builder(), "delete_collection", json!({ "name": "people", "note": "n" }));
+    let e = err(&app, &builder(), "publish", json!({ "note": "n" }));
+    assert!(e.contains("collection:posts") && e.contains("collection:people") && e.contains("author"), "{e}");
 }

@@ -555,6 +555,8 @@ fn live_defs(conn: &Connection) -> Result<Vec<(String, CollectionDef)>, String> 
 
 /// After a release, a live record may only point at live records, and a live collection only at live collections.
 /// Checks the touched collections and every live collection that points at one of them.
+// ponytail: one lookup per relation value and a linear scan of live definitions; batch the lookups if a
+// collection reaches ~100k related records.
 pub fn check_relations(conn: &Connection, touched: &[String], problems: &mut Vec<String>) -> Result<(), String> {
     use crate::schema::FieldType;
     let defs = live_defs(conn)?;
@@ -564,7 +566,7 @@ pub fn check_relations(conn: &Connection, touched: &[String], problems: &mut Vec
         for f in &relations {
             let target = f.target.as_deref().unwrap_or_default();
             if !is_live(target) {
-                problems.push(format!("collection:{name} 的关联字段“{}”指向集合“{target}”，它不在线上：请把它一起发布，或先去掉这个字段。", f.name));
+                problems.push(format!("collection:{name} 的关联字段“{}”指向 collection:{target}，它不在线上：请把它一起发布，或先去掉这个字段。", f.name));
             }
         }
         let in_scope = touched.contains(name) || relations.iter().any(|f| touched.iter().any(|t| Some(t.as_str()) == f.target.as_deref()));
@@ -590,7 +592,7 @@ pub fn check_relations(conn: &Connection, touched: &[String], problems: &mut Vec
                         .map_err(fail)?;
                     if live.is_none() {
                         problems.push(format!(
-                            "record:{id} 的字段“{}”指向 record:{rid}，而它不在线上（还没发布，或正在被删除）：请把两者一起发布，或先改掉这个引用。",
+                            "record:{id} 的字段“{}”指向 record:{rid}，而它不是集合“{target}”里一条线上的记录（还没发布、正在被删除，或属于别的集合）：请把两者一起发布，或先改掉这个引用。",
                             f.name
                         ));
                     }
