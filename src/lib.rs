@@ -4,6 +4,7 @@ pub mod schema;
 pub mod changes;
 pub mod query;
 pub mod api;
+pub mod media;
 pub mod tools;
 
 use rusqlite::Connection;

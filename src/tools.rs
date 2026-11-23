@@ -45,6 +45,7 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<TargetArgs>("list_versions", Scope::Read, "列出一个对象的发布历史（最近 30 个版本）。target 形如 record:12、collection:news。"),
             spec::<RestoreVersion>("restore_version", Scope::Write, "把一个历史版本放回草稿，不会直接上线；发布后才生效。已删除的对象也能这样找回。"),
             spec::<TargetArgs>("discard_draft", Scope::Write, "丢弃一个对象的草稿或待删除标记，回到线上版本；从未发布过的对象会直接消失。"),
+            spec::<UploadMedia>("upload_media", Scope::Write, "上传图片或 PDF（base64，最大 5 MB）：返回 /uploads/ 路径，可填进 media 字段。"),
         ]
     })
 }
@@ -60,7 +61,7 @@ pub fn call(app: &App, actor: &Actor, name: &str, args: Value) -> Result<Value, 
     }
     let args = if args.is_null() { json!({}) } else { args };
     let conn = app.conn();
-    dispatch(&conn, actor, name, args)
+    dispatch(app, &conn, actor, name, args)
 }
 
 /// Marker of the fall-through message for a listed tool that has no dispatch arm (checked by a test).
@@ -108,7 +109,7 @@ fn parse<T: DeserializeOwned>(tool: &str, args: Value) -> Result<T, String> {
     Err(format!("“{tool}”的参数不正确，请按工具的参数说明修改（{first}）。"))
 }
 
-fn dispatch(conn: &Connection, actor: &Actor, name: &str, args: Value) -> Result<Value, String> {
+fn dispatch(app: &App, conn: &Connection, actor: &Actor, name: &str, args: Value) -> Result<Value, String> {
     match name {
         "list_collections" => parse::<NoArgs>(name, args).and_then(|_| list_collections(conn)),
         "get_collection" => get_collection(conn, parse(name, args)?),
@@ -125,6 +126,7 @@ fn dispatch(conn: &Connection, actor: &Actor, name: &str, args: Value) -> Result
         "list_versions" => list_versions(conn, parse(name, args)?),
         "restore_version" => restore_version(conn, actor, parse(name, args)?),
         "discard_draft" => discard_draft(conn, actor, parse(name, args)?),
+        "upload_media" => upload_media(app, parse(name, args)?),
         _ => Err(format!("工具“{name}”{NOT_IMPLEMENTED}：它出现在工具列表里却没有处理逻辑，请联系开发者。")),
     }
 }
@@ -577,4 +579,29 @@ fn discard_draft(conn: &Connection, actor: &Actor, a: TargetArgs) -> Result<Valu
     check_structure_scope(actor, &target)?;
     changes::discard(conn, &target)?;
     Ok(json!({ "target": a.target, "status": changes::target_status(conn, &target)? }))
+}
+
+// ---- media ----
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct UploadMedia {
+    /// Only used in error messages; the stored name and type come from the content.
+    filename: String,
+    data_base64: String,
+}
+
+fn upload_media(app: &App, a: UploadMedia) -> Result<Value, String> {
+    use base64::Engine;
+    // Reject before decoding: base64 is 4/3 the size of the bytes.
+    if a.data_base64.len() > crate::media::MAX_BYTES_INLINE / 3 * 4 + 8 {
+        return Err(format!("“{}”太大：通过工具上传最大 {} MB，更大的文件请用 POST /api/v1/media。", a.filename, crate::media::MAX_BYTES_INLINE >> 20));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(a.data_base64.trim())
+        .map_err(|e| format!("“{}”的 data_base64 不是有效的 base64：{e}。", a.filename))?;
+    if bytes.len() > crate::media::MAX_BYTES_INLINE {
+        return Err(format!("“{}”太大：通过工具上传最大 {} MB，更大的文件请用 POST /api/v1/media。", a.filename, crate::media::MAX_BYTES_INLINE >> 20));
+    }
+    Ok(json!({ "path": crate::media::store_upload(app, &a.filename, &bytes)? }))
 }
