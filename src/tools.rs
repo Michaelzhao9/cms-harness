@@ -538,7 +538,7 @@ struct RestoreVersion {
 
 /// Structure objects (collections, views, the site notes) need the structure scope on top of the tool's own.
 fn check_structure_scope(actor: &Actor, target: &Target) -> Result<(), String> {
-    if matches!(target, Target::Record(_)) || actor.can(Scope::Structure) {
+    if actor.can(changes::own_scope(target)) {
         return Ok(());
     }
     Err(format!("“{}”没有权限改动“{target}”：它属于结构，需要 structure 权限。", actor.name))

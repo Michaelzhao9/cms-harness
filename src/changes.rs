@@ -98,13 +98,30 @@ pub fn save_draft(conn: &Connection, actor: &Actor, target: &Target, doc: &Value
     Ok(())
 }
 
-fn published_is_null(conn: &Connection, target: &Target) -> Result<bool, String> {
+/// (has a published copy, has ever been published). A record deleted after being live has neither a published
+/// copy nor a draft, but it has history: its row is a tombstone that keeps the id restorable.
+fn liveness(conn: &Connection, target: &Target) -> Result<(bool, bool), String> {
     let (table, key, val, _) = target.row();
-    conn.query_row(&format!("SELECT published IS NULL FROM {table} WHERE {key} = ?1"), [val], |r| r.get(0))
+    let live: bool = conn
+        .query_row(&format!("SELECT published IS NOT NULL FROM {table} WHERE {key} = ?1"), [val], |r| r.get(0))
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => missing(target),
             e => db(target, e),
-        })
+        })?;
+    let history: bool = conn
+        .query_row("SELECT EXISTS(SELECT 1 FROM versions WHERE target = ?1)", [target.to_string()], |r| r.get(0))
+        .map_err(|e| db(target, e))?;
+    Ok((live, live || history))
+}
+
+/// Clears the draft and any pending deletion, leaving the published copy (or the tombstone) as it is.
+fn clear_draft(conn: &Connection, target: &Target) -> Result<(), String> {
+    let (table, key, val, has_dd) = target.row();
+    let reset = if has_dd { ", draft_deleted = 0" } else { "" };
+    let reset = format!("{reset}{}", touch(target));
+    conn.execute(&format!("UPDATE {table} SET draft = NULL, draft_actor = NULL, draft_note = NULL{reset} WHERE {key} = ?1"), [val])
+        .map_err(|e| db(target, e))?;
+    Ok(())
 }
 
 /// Delete the row of a never-published object (and, for a collection, its records).
@@ -122,8 +139,12 @@ pub fn mark_deleted(conn: &Connection, actor: &Actor, target: &Target, note: &st
         return Err("说明不能删除，请直接修改它的内容。".into());
     }
     let tx = conn.unchecked_transaction().map_err(|e| db(target, e))?;
-    if published_is_null(&tx, target)? {
+    let (live, ever) = liveness(&tx, target)?;
+    if !ever {
         remove_row(&tx, target)?;
+    } else if !live {
+        // A tombstone whose restored draft is being dropped again: back to the tombstone.
+        clear_draft(&tx, target)?;
     } else {
         let (table, key, val, _) = target.row();
         tx.execute(
@@ -137,17 +158,10 @@ pub fn mark_deleted(conn: &Connection, actor: &Actor, target: &Target, note: &st
 
 pub fn discard(conn: &Connection, target: &Target) -> Result<(), String> {
     let tx = conn.unchecked_transaction().map_err(|e| db(target, e))?;
-    if published_is_null(&tx, target)? && !matches!(target, Target::Notes) {
+    if !liveness(&tx, target)?.1 && !matches!(target, Target::Notes) {
         remove_row(&tx, target)?;
     } else {
-        let (table, key, val, has_dd) = target.row();
-        let reset = if has_dd { ", draft_deleted = 0" } else { "" };
-        let reset = format!("{reset}{}", touch(target));
-        tx.execute(
-            &format!("UPDATE {table} SET draft = NULL, draft_actor = NULL, draft_note = NULL{reset} WHERE {key} = ?1"),
-            [val],
-        )
-        .map_err(|e| db(target, e))?;
+        clear_draft(&tx, target)?;
     }
     tx.commit().map_err(|e| db(target, e))
 }
@@ -187,17 +201,27 @@ pub fn effective_def(conn: &Connection, name: &str) -> Result<CollectionDef, Str
     parse_def(name, r.draft.or(r.published).as_deref().ok_or_else(|| format!("集合“{name}”没有定义。"))?)
 }
 
-/// The published, non-deleted definition.
-pub fn live_def(conn: &Connection, name: &str) -> Result<CollectionDef, String> {
-    let r = coll_row_required(conn, name)?;
-    match (r.deleted, r.published) {
-        (false, Some(p)) => parse_def(name, &p),
-        _ => Err(format!("集合“{name}”尚未发布或已删除，线上没有它。")),
+/// The published, non-deleted definition, or `None` when the collection is not live.
+fn live_def_opt(conn: &Connection, name: &str) -> Result<Option<CollectionDef>, String> {
+    match coll_row(conn, name)? {
+        Some(r) if !r.deleted => r.published.map(|p| parse_def(name, &p)).transpose(),
+        _ => Ok(None),
     }
 }
 
+/// The published, non-deleted definition.
+pub fn live_def(conn: &Connection, name: &str) -> Result<CollectionDef, String> {
+    live_def_opt(conn, name)?.ok_or_else(|| format!("集合“{name}”尚未发布或已删除，线上没有它。"))
+}
+
+/// True when the collection is deleted or waiting to be deleted: its records cannot be published.
+fn collection_gone(conn: &Connection, name: &str) -> Result<bool, String> {
+    Ok(coll_row(conn, name)?.is_none_or(|r| r.deleted || r.draft_deleted))
+}
+
 fn row_status(r: &CollRow) -> &'static str {
-    if r.deleted { "deleted" } else { status(r.published.is_some(), r.draft.is_some(), r.draft_deleted) }
+    // A deleted collection whose definition was restored into the draft is on its way back.
+    if r.deleted && r.draft.is_none() { "deleted" } else { status(r.published.is_some(), r.draft.is_some(), r.draft_deleted) }
 }
 
 /// Status of a collection; a row that is gone (a never-published collection was removed) reads as "deleted".
@@ -207,7 +231,7 @@ pub fn collection_status(conn: &Connection, name: &str) -> Result<&'static str, 
 
 /// Definition (draft if any, else published) and status of a collection; `None` if it is missing or deleted.
 pub fn collection_view(conn: &Connection, name: &str) -> Result<Option<(CollectionDef, &'static str)>, String> {
-    let Some(r) = coll_row(conn, name)?.filter(|r| !r.deleted) else { return Ok(None) };
+    let Some(r) = coll_row(conn, name)?.filter(|r| !r.deleted || r.draft.is_some()) else { return Ok(None) };
     let st = row_status(&r);
     let json = r.draft.or(r.published).ok_or_else(|| format!("集合“{name}”没有定义。"))?;
     Ok(Some((parse_def(name, &json)?, st)))
@@ -474,10 +498,14 @@ pub struct Release {
     pub skipped: Vec<String>,
 }
 
-fn may_publish(actor: &Actor, target: &Target) -> bool {
+/// The scope that covers changes to this object: content needs write, everything else is structure.
+pub fn own_scope(target: &Target) -> crate::auth::Scope {
     use crate::auth::Scope;
-    let own = if matches!(target, Target::Record(_)) { Scope::Write } else { Scope::Structure };
-    actor.can(Scope::Publish) && actor.can(own)
+    if matches!(target, Target::Record(_)) { Scope::Write } else { Scope::Structure }
+}
+
+fn may_publish(actor: &Actor, target: &Target) -> bool {
+    actor.can(crate::auth::Scope::Publish) && actor.can(own_scope(target))
 }
 
 /// Order inside one release: structure first, then content, deletions last.
@@ -494,27 +522,35 @@ fn rank(target: &Target, deleting: bool) -> u8 {
 }
 
 /// Rewrites every record of a collection (both copies) from the old definition to the new one.
-fn migrate_records(conn: &Connection, name: &str, old: &CollectionDef, new: &CollectionDef, problems: &mut Vec<String>) -> Result<(), String> {
+/// Returns the records whose live copy changed, with the copy they had before.
+fn migrate_records(conn: &Connection, name: &str, old: &CollectionDef, new: &CollectionDef, problems: &mut Vec<String>) -> Result<Vec<(i64, String)>, String> {
     let fail = |e: rusqlite::Error| format!("改写集合“{name}”的记录失败：{e}");
     let mut stmt = conn
-        .prepare("SELECT id, published, draft FROM records WHERE collection = ?1 AND (published IS NOT NULL OR draft IS NOT NULL)")
+        .prepare("SELECT id, published, draft, draft_deleted FROM records WHERE collection = ?1 AND (published IS NOT NULL OR draft IS NOT NULL)")
         .map_err(fail)?;
-    let rows: Vec<(i64, Option<String>, Option<String>)> =
-        stmt.query_map([name], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;
-    for (id, published, draft) in rows {
+    let rows: Vec<(i64, Option<String>, Option<String>, bool)> =
+        stmt.query_map([name], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;
+    let mut rewritten = vec![];
+    for (id, published, draft, deleting) in rows {
         for (column, json) in [("published", published), ("draft", draft)] {
             let Some(json) = json else { continue };
             let doc: Value = serde_json::from_str(&json).map_err(|e| format!("记录 {id} 的内容已损坏：{e}"))?;
             match crate::schema::migrate(old, new, &doc) {
                 Ok(next) if next != doc => {
-                    conn.execute(&format!("UPDATE records SET {column} = ?1 WHERE id = ?2"), params![next.to_string(), id]).map_err(fail)?;
+                    conn.execute(&format!("UPDATE records SET {column} = ?1, updated_at = datetime('now') WHERE id = ?2"), params![next.to_string(), id])
+                        .map_err(fail)?;
+                    if column == "published" {
+                        rewritten.push((id, json));
+                    }
                 }
                 Ok(_) => {}
+                // The abandoned draft of a record that is being deleted must not hold up the release.
+                Err(_) if column == "draft" && deleting => {}
                 Err(e) => problems.push(format!("record:{id}：{e}")),
             }
         }
     }
-    Ok(())
+    Ok(rewritten)
 }
 
 /// Checks every live record of the touched collections against its live definition.
@@ -522,12 +558,17 @@ fn migrate_records(conn: &Connection, name: &str, old: &CollectionDef, new: &Col
 // if collections reach ~100k records.
 fn verify(conn: &Connection, touched: &[String], released: &[(i64, String)], problems: &mut Vec<String>) -> Result<(), String> {
     for (id, collection) in released {
-        if live_def(conn, collection).is_err() {
-            problems.push(format!("record:{id} 所属的集合还没有上线：请把 collection:{collection} 一起发布。"));
+        if live_def_opt(conn, collection)?.is_some() {
+            continue;
         }
+        problems.push(if collection_gone(conn, collection)? {
+            format!("record:{id} 所属的 collection:{collection} 已删除，这条记录的草稿上不了线：请用 discard_draft 放弃它，或先把集合恢复。")
+        } else {
+            format!("record:{id} 所属的集合还没有上线：请把 collection:{collection} 一起发布。")
+        });
     }
     for name in touched {
-        let Ok(def) = live_def(conn, name) else { continue };
+        let Some(def) = live_def_opt(conn, name)? else { continue };
         let fail = |e: rusqlite::Error| format!("检查集合“{name}”的记录失败：{e}");
         let mut stmt = conn.prepare("SELECT id, published FROM records WHERE collection = ?1 AND published IS NOT NULL").map_err(fail)?;
         let rows: Vec<(i64, String)> =
@@ -610,28 +651,52 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
     if all.is_empty() {
         return Err("没有待发布的改动：先修改内容或结构，再来发布。".into());
     }
+    // A record draft inside a collection that is deleted, or about to be, cannot go live.
+    let stranded = |t: &Target| -> Result<Option<String>, String> {
+        let Target::Record(id) = t else { return Ok(None) };
+        let collection: Option<String> =
+            conn.query_row("SELECT collection FROM records WHERE id = ?1", [id], |r| r.get(0)).optional().map_err(|e| db(t, e))?;
+        Ok(match collection {
+            Some(c) if collection_gone(conn, &c)? => Some(c),
+            _ => None,
+        })
+    };
     let mut skipped = vec![];
     let chosen: Vec<Target> = match only {
+        Some([]) => return Err("targets 是空的：请列出要发布的对象，或去掉 targets 来发布全部。".into()),
         Some(list) => {
             for t in list {
                 if !all.contains(t) {
                     return Err(format!("“{t}”没有待发布的改动：请先用 list_pending 查看有哪些。"));
                 }
                 if !may_publish(actor, t) {
-                    let own = if matches!(t, Target::Record(_)) { "write" } else { "structure" };
+                    let own = serde_json::to_value(own_scope(t)).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
                     return Err(format!("“{}”没有权限发布“{t}”：需要 {own} 和 publish 权限。", actor.name));
+                }
+                if let Some(c) = stranded(t)? {
+                    return Err(format!("“{t}”所属的 collection:{c} 已删除或正等待删除，它的草稿上不了线：请用 discard_draft 放弃它，或先把集合恢复。"));
                 }
             }
             all.iter().filter(|t| list.contains(t)).cloned().collect()
         }
         None => {
-            let (mine, rest): (Vec<Target>, Vec<Target>) = all.into_iter().partition(|t| may_publish(actor, t));
-            skipped = rest.iter().map(Target::to_string).collect();
+            let mut mine = vec![];
+            for t in all {
+                if may_publish(actor, &t) && stranded(&t)?.is_none() {
+                    mine.push(t);
+                } else {
+                    skipped.push(t.to_string());
+                }
+            }
             mine
         }
     };
     if chosen.is_empty() {
-        return Err(format!("“{}”没有权限发布这些改动：发布内容需要 write 和 publish 权限，发布结构需要 structure 和 publish 权限。", actor.name));
+        return Err(format!(
+            "没有可以发布的改动，这些都被跳过了：{}。原因是“{}”没有对应权限（发布内容需要 write 和 publish，发布结构需要 structure 和 publish），或者它们所属的集合已删除。",
+            skipped.join("、"),
+            actor.name
+        ));
     }
 
     let fail = |e: rusqlite::Error| format!("发布失败：{e}");
@@ -646,6 +711,8 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
     let mut problems: Vec<String> = vec![];
     let mut touched: Vec<String> = vec![];
     let mut released: Vec<(i64, String)> = vec![];
+    // (record id, live copy before the rewrite, collection whose definition change caused it)
+    let mut rewritten: Vec<(i64, String, String)> = vec![];
     for (target, s) in &items {
         let (table, key, val, has_dd) = target.row();
         let clear = if has_dd { ", draft_deleted = 0" } else { "" };
@@ -654,7 +721,8 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
             Target::Collection(name) if !s.draft_deleted => {
                 let new = parse_def(name, s.draft.as_deref().unwrap_or_default())?;
                 if let Some(old) = &s.published {
-                    migrate_records(&tx, name, &parse_def(name, old)?, &new, &mut problems)?;
+                    let changed = migrate_records(&tx, name, &parse_def(name, old)?, &new, &mut problems)?;
+                    rewritten.extend(changed.into_iter().map(|(id, before)| (id, before, name.clone())));
                 }
                 tx.execute(&format!("UPDATE collections SET published = draft, deleted = 0, {clear} WHERE name = ?1"), [name]).map_err(fail)?;
                 touched.push(name.clone());
@@ -682,7 +750,8 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
     verify(&tx, &touched, &released, &mut problems)?;
     check_relations(&tx, &touched, &mut problems)?;
     if !problems.is_empty() {
-        problems.dedup();
+        let mut seen = std::collections::HashSet::new();
+        problems.retain(|p| seen.insert(p.clone()));
         let more = if problems.len() > 10 { format!("（另有 {} 个问题未列出）", problems.len() - 10) } else { String::new() };
         problems.truncate(10);
         // Dropping the transaction rolls everything back.
@@ -691,15 +760,28 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
 
     tx.execute("INSERT INTO releases(actor, note) VALUES(?1, ?2)", params![actor.name, note]).map_err(fail)?;
     let release = tx.last_insert_rowid();
+    let version = "INSERT INTO versions(release_id, target, doc, prev, actor, note) VALUES(?1, ?2, ?3, ?4, ?5, ?6)";
+    // History stores what actually went live: read it back, since a definition change in the same release
+    // may have rewritten a document after its draft was read.
+    let live_copy = |target: &Target| -> Result<Option<String>, String> {
+        let (table, key, val, _) = target.row();
+        tx.query_row(&format!("SELECT published FROM {table} WHERE {key} = ?1"), [val], |r| r.get(0)).map_err(fail)
+    };
     let mut published = vec![];
     for (target, s) in items {
-        let doc = if s.draft_deleted { None } else { s.draft };
-        tx.execute(
-            "INSERT INTO versions(release_id, target, doc, prev, actor, note) VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
-            params![release, target.to_string(), doc, s.published, s.actor.unwrap_or_else(|| actor.name.clone()), s.note.unwrap_or_else(|| note.to_string())],
-        )
-        .map_err(fail)?;
+        let doc = if s.draft_deleted { None } else { live_copy(&target)? };
+        tx.execute(version, params![release, target.to_string(), doc, s.published, s.actor.unwrap_or_else(|| actor.name.clone()), s.note.unwrap_or_else(|| note.to_string())])
+            .map_err(fail)?;
         published.push(target.to_string());
+    }
+    // Records rewritten by a definition change, but not themselves part of the release, get a version too.
+    for (id, before, collection) in rewritten {
+        let target = Target::Record(id);
+        if published.contains(&target.to_string()) {
+            continue;
+        }
+        let why = format!("随集合“{collection}”的结构改动自动转换");
+        tx.execute(version, params![release, target.to_string(), live_copy(&target)?, before, actor.name, why]).map_err(fail)?;
     }
     tx.commit().map_err(fail)?;
     Ok(Release { id: release, published, skipped })
