@@ -2,7 +2,7 @@
 
 use crate::auth::Actor;
 use crate::schema::CollectionDef;
-use rusqlite::{params, types::Value as Sql, Connection};
+use rusqlite::{params, types::Value as Sql, Connection, OptionalExtension};
 use serde_json::Value;
 use std::fmt;
 
@@ -21,8 +21,8 @@ impl Target {
             return Ok(Target::Notes);
         }
         match s.split_once(':').ok_or_else(bad)? {
-            ("collection", n) if !n.is_empty() => Ok(Target::Collection(n.into())),
-            ("view", n) if !n.is_empty() => Ok(Target::View(n.into())),
+            ("collection", n) if crate::schema::valid_name(n) => Ok(Target::Collection(n.into())),
+            ("view", n) if crate::schema::valid_name(n) => Ok(Target::View(n.into())),
             ("record", n) => n.parse().map(Target::Record).map_err(|_| bad()),
             _ => Err(bad()),
         }
@@ -152,14 +152,16 @@ struct CollRow {
     deleted: bool,
 }
 
-fn coll_row(conn: &Connection, name: &str) -> Result<CollRow, String> {
+fn coll_row(conn: &Connection, name: &str) -> Result<Option<CollRow>, String> {
     conn.query_row("SELECT published, draft, draft_deleted, deleted FROM collections WHERE name = ?1", [name], |r| {
         Ok(CollRow { published: r.get(0)?, draft: r.get(1)?, draft_deleted: r.get(2)?, deleted: r.get(3)? })
     })
-    .map_err(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => format!("集合“{name}”不存在，请检查名字。"),
-        e => format!("读取集合“{name}”失败：{e}"),
-    })
+    .optional()
+    .map_err(|e| format!("读取集合“{name}”失败：{e}"))
+}
+
+fn coll_row_required(conn: &Connection, name: &str) -> Result<CollRow, String> {
+    coll_row(conn, name)?.ok_or_else(|| format!("集合“{name}”不存在，请检查名字。"))
 }
 
 fn parse_def(name: &str, json: &str) -> Result<CollectionDef, String> {
@@ -168,7 +170,7 @@ fn parse_def(name: &str, json: &str) -> Result<CollectionDef, String> {
 
 /// Draft definition if there is one, else the published one; errors if the collection is gone or pending deletion.
 pub fn effective_def(conn: &Connection, name: &str) -> Result<CollectionDef, String> {
-    let r = coll_row(conn, name)?;
+    let r = coll_row_required(conn, name)?;
     if r.deleted {
         return Err(format!("集合“{name}”已被删除。"));
     }
@@ -180,15 +182,26 @@ pub fn effective_def(conn: &Connection, name: &str) -> Result<CollectionDef, Str
 
 /// The published, non-deleted definition.
 pub fn live_def(conn: &Connection, name: &str) -> Result<CollectionDef, String> {
-    let r = coll_row(conn, name)?;
+    let r = coll_row_required(conn, name)?;
     match (r.deleted, r.published) {
         (false, Some(p)) => parse_def(name, &p),
         _ => Err(format!("集合“{name}”尚未发布或已删除，线上没有它。")),
     }
 }
 
-/// Status of a collection row, treating the `deleted` flag as "deleted".
+fn row_status(r: &CollRow) -> &'static str {
+    if r.deleted { "deleted" } else { status(r.published.is_some(), r.draft.is_some(), r.draft_deleted) }
+}
+
+/// Status of a collection; a row that is gone (a never-published collection was removed) reads as "deleted".
 pub fn collection_status(conn: &Connection, name: &str) -> Result<&'static str, String> {
-    let r = coll_row(conn, name)?;
-    Ok(if r.deleted { "deleted" } else { status(r.published.is_some(), r.draft.is_some(), r.draft_deleted) })
+    Ok(coll_row(conn, name)?.map_or("deleted", |r| row_status(&r)))
+}
+
+/// Definition (draft if any, else published) and status of a collection; `None` if it is missing or deleted.
+pub fn collection_view(conn: &Connection, name: &str) -> Result<Option<(CollectionDef, &'static str)>, String> {
+    let Some(r) = coll_row(conn, name)?.filter(|r| !r.deleted) else { return Ok(None) };
+    let st = row_status(&r);
+    let json = r.draft.or(r.published).ok_or_else(|| format!("集合“{name}”没有定义。"))?;
+    Ok(Some((parse_def(name, &json)?, st)))
 }

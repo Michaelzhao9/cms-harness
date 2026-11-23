@@ -5,7 +5,7 @@ use crate::auth::{Actor, Scope};
 use crate::changes::{self, Target};
 use crate::schema::{check_def, CollectionDef, FieldDef, FieldType};
 use crate::App;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::{json, Value};
@@ -52,18 +52,59 @@ pub fn call(app: &App, actor: &Actor, name: &str, args: Value) -> Result<Value, 
     dispatch(&conn, actor, name, args)
 }
 
-fn parse<T: DeserializeOwned>(args: Value) -> Result<T, String> {
-    serde_json::from_value(args).map_err(|e| format!("参数不正确：{e}。请对照工具的参数说明修改后重试。"))
+/// Marker of the fall-through message for a listed tool that has no dispatch arm (checked by a test).
+const NOT_IMPLEMENTED: &str = "尚未实现";
+
+fn first_quoted(msg: &str) -> Option<&str> {
+    let rest = &msg[msg.find('`')? + 1..];
+    Some(&rest[..rest.find('`')?])
+}
+
+/// Deserialise a tool's arguments; every failure is a Chinese sentence that names the offending parameter.
+fn parse<T: DeserializeOwned>(tool: &str, args: Value) -> Result<T, String> {
+    let Value::Object(map) = &args else {
+        return Err(format!("“{tool}”的参数必须是一个 JSON 对象，请用 {{\"参数名\": 值}} 的形式传参。"));
+    };
+    let first = match serde_json::from_value::<T>(args.clone()) {
+        Ok(v) => return Ok(v),
+        Err(e) => e.to_string(),
+    };
+    let accepted = || -> String {
+        specs()
+            .iter()
+            .find(|s| s.name == tool)
+            .and_then(|s| s.schema["properties"].as_object())
+            .map(|p| p.keys().cloned().collect::<Vec<_>>().join("、"))
+            .unwrap_or_default()
+    };
+    if let Some(k) = first_quoted(&first) {
+        if first.starts_with("unknown field") && map.contains_key(k) {
+            return Err(format!("“{tool}”没有参数“{k}”：可用的参数是 {}。", accepted()));
+        }
+        if first.starts_with("missing field") && !map.contains_key(k) {
+            return Err(format!("“{tool}”缺少必填参数“{k}”：请补上它。"));
+        }
+    }
+    // Find the top-level parameter whose removal changes the outcome.
+    for key in map.keys() {
+        let mut copy = map.clone();
+        copy.remove(key);
+        let same = matches!(serde_json::from_value::<T>(Value::Object(copy)), Err(e) if e.to_string() == first);
+        if !same {
+            return Err(format!("参数“{key}”不正确，请按工具的参数说明修改（{first}）。"));
+        }
+    }
+    Err(format!("“{tool}”的参数不正确，请按工具的参数说明修改（{first}）。"))
 }
 
 fn dispatch(conn: &Connection, actor: &Actor, name: &str, args: Value) -> Result<Value, String> {
     match name {
-        "list_collections" => parse::<NoArgs>(args).and_then(|_| list_collections(conn)),
-        "get_collection" => get_collection(conn, parse(args)?),
-        "create_collection" => create_collection(conn, actor, parse(args)?),
-        "update_collection" => update_collection(conn, actor, parse(args)?),
-        "delete_collection" => delete_collection(conn, actor, parse(args)?),
-        _ => Err(format!("工具“{name}”没有实现。")),
+        "list_collections" => parse::<NoArgs>(name, args).and_then(|_| list_collections(conn)),
+        "get_collection" => get_collection(conn, parse(name, args)?),
+        "create_collection" => create_collection(conn, actor, parse(name, args)?),
+        "update_collection" => update_collection(conn, actor, parse(name, args)?),
+        "delete_collection" => delete_collection(conn, actor, parse(name, args)?),
+        _ => Err(format!("工具“{name}”{NOT_IMPLEMENTED}：它出现在工具列表里却没有处理逻辑，请联系开发者。")),
     }
 }
 
@@ -155,24 +196,21 @@ fn record_count(conn: &Connection, name: &str) -> Result<i64, String> {
 
 /// (name, definition, status) of every collection that is not deleted.
 fn collections(conn: &Connection, only: Option<&str>) -> Result<Vec<(String, CollectionDef, &'static str)>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT name, published, draft, draft_deleted, deleted FROM collections
-             WHERE deleted = 0 AND (?1 IS NULL OR name = ?1) ORDER BY name",
-        )
-        .map_err(|e| format!("读取集合失败：{e}"))?;
-    let rows = stmt
-        .query_map([only], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?, r.get::<_, bool>(3)?))
-        })
-        .map_err(|e| format!("读取集合失败：{e}"))?;
+    let names: Vec<String> = match only {
+        Some(n) => vec![n.to_string()],
+        None => {
+            let mut stmt = conn
+                .prepare("SELECT name FROM collections WHERE deleted = 0 ORDER BY name")
+                .map_err(|e| format!("读取集合失败：{e}"))?;
+            let rows = stmt.query_map([], |r| r.get(0)).map_err(|e| format!("读取集合失败：{e}"))?;
+            rows.collect::<Result<_, _>>().map_err(|e| format!("读取集合失败：{e}"))?
+        }
+    };
     let mut out = vec![];
-    for row in rows {
-        let (name, published, draft, dd) = row.map_err(|e| format!("读取集合失败：{e}"))?;
-        let status = changes::status(published.is_some(), draft.is_some(), dd);
-        let json = draft.or(published).ok_or_else(|| format!("集合“{name}”没有定义。"))?;
-        let def = serde_json::from_str(&json).map_err(|e| format!("集合“{name}”的定义已损坏：{e}"))?;
-        out.push((name, def, status));
+    for name in names {
+        if let Some((def, st)) = changes::collection_view(conn, &name)? {
+            out.push((name, def, st));
+        }
     }
     Ok(out)
 }
@@ -200,7 +238,9 @@ fn check_targets(conn: &Connection, def: &CollectionDef) -> Result<(), String> {
         let exists = t == def.name
             || conn
                 .query_row("SELECT 1 FROM collections WHERE name = ?1 AND deleted = 0", [t], |_| Ok(()))
-                .is_ok();
+                .optional()
+                .map_err(|e| format!("检查目标集合“{t}”失败：{e}"))?
+                .is_some();
         if !exists {
             return Err(format!("关联字段“{}”的目标集合“{t}”不存在：请先创建它，或改成已有集合的名字。", f.name));
         }
@@ -224,8 +264,11 @@ fn create_collection(conn: &Connection, actor: &Actor, a: CreateCollection) -> R
         access: crate::schema::Access { public_read: a.public_read },
         fields: a.fields,
     };
-    check_def(&def)?;
-    if conn.query_row("SELECT 1 FROM collections WHERE name = ?1", [&def.name], |_| Ok(())).is_ok() {
+    let taken = conn
+        .query_row("SELECT 1 FROM collections WHERE name = ?1", [&def.name], |_| Ok(()))
+        .optional()
+        .map_err(|e| format!("检查集合名“{}”失败：{e}", def.name))?;
+    if taken.is_some() {
         return Err(format!("集合“{}”已存在（可能是已删除或待删除的）：请换一个名字。", def.name));
     }
     save_collection(conn, actor, &def, note)
@@ -278,6 +321,6 @@ fn delete_collection(conn: &Connection, actor: &Actor, a: DeleteCollection) -> R
     changes::effective_def(conn, &a.name)?;
     changes::mark_deleted(conn, actor, &Target::Collection(a.name.clone()), note)?;
     // A never-published collection's row is gone, so its status is "deleted".
-    let status = changes::collection_status(conn, &a.name).unwrap_or("deleted");
+    let status = changes::collection_status(conn, &a.name)?;
     Ok(json!({ "name": a.name, "status": status }))
 }
