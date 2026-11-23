@@ -1,6 +1,8 @@
 pub mod auth;
 pub mod store;
 pub mod schema;
+pub mod changes;
+pub mod tools;
 
 use rusqlite::Connection;
 use std::path::PathBuf;
