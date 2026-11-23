@@ -75,3 +75,80 @@ fn a_name_pending_deletion_is_simply_taken() {
     let e = err(&app, &builder(), "create_collection", json!({ "name": "news", "title": "新的", "fields": [], "note": "n" }));
     assert!(e.contains("已存在") && !e.contains("restore_version"), "{e}");
 }
+
+fn items(app: &harness_cms::Shared) {
+    ok(app, &builder(), "create_collection", json!({ "name": "items", "title": "条目", "note": "n", "fields": [
+        { "name": "name", "title": "名称", "type": "text" },
+        { "name": "views", "title": "浏览", "type": "number" },
+        { "name": "kind", "title": "种类", "type": "select", "options": ["a", "b"] }
+    ] }));
+}
+
+fn item(app: &harness_cms::Shared, data: serde_json::Value) -> i64 {
+    ok(app, &editor(), "create_record", json!({ "collection": "items", "note": "n", "data": data }))["id"].as_i64().unwrap()
+}
+
+fn draft_of(app: &harness_cms::Shared, id: i64) -> serde_json::Value {
+    let json: String = app.conn().query_row("SELECT coalesce(draft, published) FROM records WHERE id = ?1", [id], |r| r.get(0)).unwrap();
+    serde_json::from_str(&json).unwrap()
+}
+
+#[test]
+fn record_drafts_follow_the_draft_definition() {
+    let app = app();
+    items(&app);
+    publish_all(&app);
+    let a = item(&app, json!({ "name": "A", "views": 5 })); // a draft written under the live definition
+    ok(&app, &builder(), "update_collection", json!({ "name": "items", "note": "n", "change_fields": [{ "name": "views", "type": "text" }] }));
+    assert_eq!(draft_of(&app, a)["views"], "5"); // rewritten when the definition draft was saved
+    // A later, unrelated change is not refused because of that record.
+    ok(&app, &builder(), "update_collection", json!({ "name": "items", "note": "n", "title": "条目们" }));
+    publish_all(&app);
+    assert_eq!(draft_of(&app, a)["views"], "5");
+    assert_eq!(ok(&app, &reader(), "get_record", json!({ "id": a }))["status"], "published");
+}
+
+#[test]
+fn a_never_published_collection_can_change_type_and_still_publish() {
+    let app = app();
+    items(&app);
+    let a = item(&app, json!({ "name": "A", "views": 5 }));
+    ok(&app, &builder(), "update_collection", json!({ "name": "items", "note": "n", "change_fields": [{ "name": "views", "type": "text" }] }));
+    publish_all(&app);
+    assert_eq!(draft_of(&app, a)["views"], "5");
+}
+
+#[test]
+fn dropping_a_definition_draft_brings_record_drafts_back() {
+    let app = app();
+    items(&app);
+    publish_all(&app);
+    let a = item(&app, json!({ "name": "A", "views": 5 }));
+    ok(&app, &builder(), "update_collection", json!({ "name": "items", "note": "n", "change_fields": [{ "name": "views", "type": "text" }] }));
+    ok(&app, &builder(), "discard_draft", json!({ "target": "collection:items" }));
+    assert_eq!(draft_of(&app, a)["views"], 5);
+
+    // A draft that only makes sense under the definition draft holds the discard back.
+    ok(&app, &builder(), "update_collection", json!({ "name": "items", "note": "n", "change_fields": [{ "name": "views", "type": "text" }] }));
+    ok(&app, &editor(), "update_record", json!({ "id": a, "note": "n", "data": { "views": "很多" } }));
+    let e = err(&app, &builder(), "discard_draft", json!({ "target": "collection:items" }));
+    assert!(e.contains("有 1 条") && e.contains(&format!("record:{a}")), "{e}");
+    assert_eq!(ok(&app, &reader(), "get_collection", json!({ "name": "items" }))["status"], "changed");
+    assert_eq!(draft_of(&app, a)["views"], "很多"); // nothing was half-converted
+}
+
+#[test]
+fn restoring_an_old_definition_goes_through_the_same_gate() {
+    let app = app();
+    items(&app);
+    publish_all(&app);
+    ok(&app, &builder(), "update_collection", json!({ "name": "items", "note": "n", "change_fields": [{ "name": "kind", "options": ["a", "b", "c"] }] }));
+    publish_all(&app);
+    let c = item(&app, json!({ "name": "C", "kind": "c" }));
+    publish_all(&app);
+    let first = ok(&app, &reader(), "list_versions", json!({ "target": "collection:items" }))[1]["id"].clone();
+    // The first definition has no option "c": record C could not follow it.
+    let e = err(&app, &builder(), "restore_version", json!({ "target": "collection:items", "version_id": first, "note": "回到最初" }));
+    assert!(e.contains("kind") && e.contains(&format!("记录 {c}")), "{e}");
+    assert_eq!(ok(&app, &reader(), "get_collection", json!({ "name": "items" }))["status"], "published");
+}

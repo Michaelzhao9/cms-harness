@@ -262,7 +262,7 @@ fn check_targets(conn: &Connection, def: &CollectionDef) -> Result<(), String> {
 fn save_collection(conn: &Connection, actor: &Actor, def: &CollectionDef, note: &str) -> Result<Value, String> {
     check_def(def)?;
     check_targets(conn, def)?;
-    changes::save_draft(conn, actor, &Target::Collection(def.name.clone()), &json!(def), note)?;
+    changes::save_definition(conn, actor, def, note)?;
     Ok(json!({ "name": def.name, "status": changes::collection_status(conn, &def.name)? }))
 }
 
@@ -286,7 +286,12 @@ fn create_collection(conn: &Connection, actor: &Actor, a: CreateCollection) -> R
                 def.name
             ));
         }
-        return Err(format!("集合“{}”已存在：请换一个名字，或用 update_collection 修改它。", def.name));
+        let pending = if changes::collection_status(conn, &def.name)? == "deleting" {
+            format!("它正等待删除；对 collection:{} 调用 discard_draft 可以取消删除。", def.name)
+        } else {
+            "要修改它请用 update_collection。".to_string()
+        };
+        return Err(format!("集合“{}”已存在，请换一个名字。{pending}", def.name));
     }
     save_collection(conn, actor, &def, note)
 }
@@ -338,7 +343,6 @@ fn update_collection(conn: &Connection, actor: &Actor, a: UpdateCollection) -> R
             removed.join("、")
         ));
     }
-    changes::check_structure(conn, &a.name, &def)?;
     save_collection(conn, actor, &def, note)
 }
 
@@ -347,7 +351,12 @@ fn delete_collection(conn: &Connection, actor: &Actor, a: DeleteCollection) -> R
     changes::effective_def(conn, &a.name)?;
     let count = changes::record_count(conn, &a.name)?;
     if count > 0 && a.confirm != Some(count) {
-        return Err(format!("集合“{}”里有 {count} 条记录：确认要删除，请加上参数 confirm: {count}。", a.name));
+        let fate = if changes::collection_status(conn, &a.name)? == "draft" {
+            "这个集合从未发布，它和这些记录会被直接清除、无法恢复"
+        } else {
+            "发布删除后记录会保留，恢复集合就能找回"
+        };
+        return Err(format!("集合“{}”里有 {count} 条记录（{fate}）：确认要删除，请加上参数 confirm: {count}。", a.name));
     }
     changes::mark_deleted(conn, actor, &Target::Collection(a.name.clone()), note)?;
     // A never-published collection's row is gone, so its status is "deleted".

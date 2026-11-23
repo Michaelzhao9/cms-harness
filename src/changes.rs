@@ -161,6 +161,21 @@ pub fn discard(conn: &Connection, target: &Target) -> Result<(), String> {
     if !liveness(&tx, target)?.1 && !matches!(target, Target::Notes) {
         remove_row(&tx, target)?;
     } else {
+        if let Target::Collection(name) = target {
+            // Record drafts follow the draft definition; dropping it means they must fit the live one again.
+            let row = coll_row_required(&tx, name)?;
+            if let (Some(live), Some(draft)) = (&row.published, &row.draft) {
+                let stuck = rewrite_drafts(&tx, name, &parse_def(name, draft)?, &parse_def(name, live)?)?;
+                if !stuck.is_empty() {
+                    let ids: Vec<String> = stuck.iter().take(5).map(|id| format!("record:{id}")).collect();
+                    return Err(format!(
+                        "有 {} 条记录的草稿是按这份草稿定义写的，退不回线上的定义（例如 {}）：请先修改或放弃这些记录的草稿，再放弃集合的草稿。",
+                        stuck.len(),
+                        ids.join("、")
+                    ));
+                }
+            }
+        }
         clear_draft(&tx, target)?;
     }
     tx.commit().map_err(|e| db(target, e))
@@ -278,6 +293,54 @@ pub fn check_unique(conn: &Connection, def: &CollectionDef, id: Option<i64>, doc
 }
 
 // ---- structural change rules ----
+//
+// Invariant: a record's published copy follows the collection's live definition, and its draft copy follows the
+// definition in force for drafts (the draft definition when there is one, else the live one). Saving or dropping a
+// draft definition therefore rewrites the record drafts in the same transaction.
+
+/// The definition drafts are written against: the draft definition if any, else the published one.
+fn current_def(conn: &Connection, name: &str) -> Result<Option<CollectionDef>, String> {
+    let Some(row) = coll_row(conn, name)? else { return Ok(None) };
+    row.draft.or(row.published).map(|j| parse_def(name, &j)).transpose()
+}
+
+/// Rewrites every record draft of a collection from one definition to another. Returns the ids that cannot
+/// follow; drafts of records that are being deleted are left alone.
+fn rewrite_drafts(conn: &Connection, name: &str, from: &CollectionDef, to: &CollectionDef) -> Result<Vec<i64>, String> {
+    let fail = |e: rusqlite::Error| format!("改写集合“{name}”的记录草稿失败：{e}");
+    let mut stmt = conn.prepare("SELECT id, draft, draft_deleted FROM records WHERE collection = ?1 AND draft IS NOT NULL ORDER BY id").map_err(fail)?;
+    let rows: Vec<(i64, String, bool)> =
+        stmt.query_map([name], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;
+    let mut stuck = vec![];
+    for (id, json, deleting) in rows {
+        let doc: Value = serde_json::from_str(&json).map_err(|e| format!("记录 {id} 的内容已损坏：{e}"))?;
+        match crate::schema::migrate(from, to, &doc) {
+            Ok(next) if next != doc => {
+                conn.execute("UPDATE records SET draft = ?1, updated_at = datetime('now') WHERE id = ?2", params![next.to_string(), id]).map_err(fail)?;
+            }
+            Ok(_) => {}
+            Err(_) if deleting => {}
+            Err(_) => stuck.push(id),
+        }
+    }
+    Ok(stuck)
+}
+
+/// Saves a draft definition for a collection. For an existing collection it first refuses anything the stored
+/// records cannot follow, then brings every record draft into the new shape, all in one transaction.
+pub fn save_definition(conn: &Connection, actor: &Actor, new: &CollectionDef, note: &str) -> Result<(), String> {
+    let target = Target::Collection(new.name.clone());
+    check_structure(conn, &new.name, new)?;
+    let tx = conn.unchecked_transaction().map_err(|e| db(&target, e))?;
+    if let Some(current) = current_def(&tx, &new.name)? {
+        let stuck = rewrite_drafts(&tx, &new.name, &current, new)?;
+        if let Some(id) = stuck.first() {
+            return Err(format!("记录 {id} 的草稿跟不上新的定义，改动没有保存：请先修改这条记录。"));
+        }
+    }
+    save_draft(&tx, actor, &target, &serde_json::json!(new), note)?;
+    tx.commit().map_err(|e| db(&target, e))
+}
 
 /// Rejects a new definition that existing records cannot follow: values that do not convert, required fields
 /// left empty, unique fields holding duplicates. Looks at both copies of every record of the collection.
@@ -303,7 +366,7 @@ pub fn check_structure(conn: &Connection, name: &str, new: &CollectionDef) -> Re
             failing.push(id);
         }
         let why = why.trim_end_matches('。').to_string();
-        if samples.len() < 3 && !samples.contains(&why) {
+        if !why.is_empty() && samples.len() < 3 && !samples.contains(&why) {
             samples.push(why);
         }
     };
@@ -323,7 +386,8 @@ pub fn check_structure(conn: &Connection, name: &str, new: &CollectionDef) -> Re
                 let Some(v) = next.get(&f.name).filter(|v| !v.is_null()) else { continue };
                 match seen.get(&(f.name.clone(), v.to_string())) {
                     Some(other) if *other != id => {
-                        let shown: String = v.to_string().chars().take(50).collect();
+                        let full = v.to_string();
+                        let shown = if full.chars().count() > 50 { format!("{}…", full.chars().take(50).collect::<String>()) } else { full };
                         note(id, format!("字段“{}”的值 {shown} 在记录 {other} 和记录 {id} 里重复", f.name), &mut failing);
                         note(*other, String::new(), &mut failing);
                     }
@@ -338,9 +402,9 @@ pub fn check_structure(conn: &Connection, name: &str, new: &CollectionDef) -> Re
     if failing.is_empty() {
         return Ok(());
     }
-    samples.retain(|s| !s.is_empty());
+    let hint = if samples.iter().any(|s| s.contains("必填")) { "；如果是新增的必填字段，可以给它一个默认值，或者先不设为必填" } else { "" };
     Err(format!(
-        "有 {} 条记录不符合新的定义，改动没有保存。例如：{}。请先修改这些记录；如果是新增的必填字段，可以给它一个默认值，或者先不设为必填。",
+        "有 {} 条记录不符合新的定义，改动没有保存。例如：{}。请先修改这些记录，或调整这次改动{hint}。",
         failing.len(),
         samples.join("；")
     ))
@@ -828,5 +892,11 @@ pub fn restore(conn: &Connection, actor: &Actor, target: &Target, version_id: i6
         return Err(format!("版本 {version_id} 是一次删除，没有内容可以恢复：请选更早的版本。"));
     };
     let doc: Value = serde_json::from_str(&doc).map_err(|e| format!("版本 {version_id} 的内容已损坏：{e}"))?;
+    if let Target::Collection(name) = target {
+        // An old definition is a structure change like any other: it must suit the records that exist now.
+        let def = parse_def(name, &doc.to_string())?;
+        crate::schema::check_def(&def)?;
+        return save_definition(conn, actor, &def, note);
+    }
     save_draft(conn, actor, target, &doc, note)
 }
