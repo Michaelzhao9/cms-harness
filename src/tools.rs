@@ -98,7 +98,11 @@ fn parse<T: DeserializeOwned>(tool: &str, args: Value) -> Result<T, String> {
         if first.starts_with("unknown field") && map.contains_key(k) {
             return Err(format!("“{tool}”没有参数“{k}”：可用的参数是 {}。", accepted()));
         }
-        if first.starts_with("missing field") && !map.contains_key(k) {
+        let top_level = specs()
+            .iter()
+            .find(|s| s.name == tool)
+            .is_some_and(|s| s.schema["properties"].get(k).is_some());
+        if first.starts_with("missing field") && !map.contains_key(k) && top_level {
             return Err(format!("“{tool}”缺少必填参数“{k}”：请补上它。"));
         }
     }
@@ -139,6 +143,11 @@ fn dispatch(app: &App, conn: &Connection, actor: &Actor, name: &str, args: Value
         "upload_media" => upload_media(app, parse(name, args)?),
         _ => Err(format!("工具“{name}”{NOT_IMPLEMENTED}：它出现在工具列表里却没有处理逻辑，请联系开发者。")),
     }
+}
+
+/// Distinguishes a key that is present with `null` (`Some(None)`) from one that is absent (`None`).
+fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<Value>>, D::Error> {
+    Ok(Some(Option::deserialize(d)?))
 }
 
 fn check_note(note: &str) -> Result<&str, String> {
@@ -189,7 +198,10 @@ struct FieldChange {
     unique: Option<bool>,
     index: Option<bool>,
     multiple: Option<bool>,
-    default: Option<Value>,
+    /// A value sets the default; `null` removes it.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Option<Value>")]
+    default: Option<Option<Value>>,
     options: Option<Vec<String>>,
     target: Option<String>,
 }
@@ -335,7 +347,7 @@ fn update_collection(conn: &Connection, actor: &Actor, a: UpdateCollection) -> R
         if let Some(v) = c.unique { f.unique = v }
         if let Some(v) = c.index { f.index = v }
         if let Some(v) = c.multiple { f.multiple = v }
-        if let Some(v) = c.default { f.default = Some(v) }
+        if let Some(v) = c.default { f.default = v }
         if let Some(v) = c.options { f.options = v }
         if let Some(v) = c.target { f.target = Some(v) }
     }
@@ -471,7 +483,7 @@ fn create_record(conn: &Connection, actor: &Actor, a: CreateRecord) -> Result<Va
     if def.single && changes::record_count(conn, &a.collection)? > 0 {
         return Err(format!("集合“{}”是单例集合，已经有一条记录：请用 update_record 修改它。", a.collection));
     }
-    let doc = normalize(&def, &json!({}), &a.data)?;
+    let doc = crate::schema::fill_defaults(&def, normalize(&def, &json!({}), &a.data)?)?;
     changes::check_unique(conn, &def, None, &doc, false)?;
     check_relations(conn, &def, &doc)?;
     let id = changes::insert_record(conn, actor, &a.collection, &doc, note)?;
@@ -485,8 +497,15 @@ fn update_record(conn: &Connection, actor: &Actor, a: UpdateRecord) -> Result<Va
         return Err(format!("记录 {} 正等待删除，不能修改：如要保留它，请先用 discard_draft 放弃删除。", a.id));
     }
     let def = changes::effective_def(conn, &row.collection)?;
-    let base: Value = serde_json::from_str(row.draft.or(row.published).as_deref().unwrap_or("{}"))
-        .map_err(|e| format!("记录 {} 的内容已损坏：{e}", a.id))?;
+    let base: Value = match (&row.draft, &row.published) {
+        (Some(d), _) => serde_json::from_str(d).map_err(|e| format!("记录 {} 的内容已损坏：{e}", a.id))?,
+        (None, Some(p)) => {
+            // Only a live copy: it follows the live definition, drafts follow the one in force for drafts.
+            let live: Value = serde_json::from_str(p).map_err(|e| format!("记录 {} 的内容已损坏：{e}", a.id))?;
+            changes::to_current(conn, &row.collection, &live)?
+        }
+        (None, None) => json!({}),
+    };
     let doc = normalize(&def, &base, &a.data)?;
     changes::check_unique(conn, &def, Some(a.id), &doc, false)?;
     check_relations(conn, &def, &a.data)?;
@@ -646,6 +665,9 @@ fn set_view(conn: &Connection, actor: &Actor, a: SetView) -> Result<Value, Strin
     let def = changes::effective_def(conn, &view.collection)?;
     check_view(&view, &def)?;
     let target = Target::View(view.name.clone());
+    if changes::target_status(conn, &target)? == "deleting" {
+        return Err(format!("界面“{}”正等待删除，不能修改：如要保留它，请先对 view:{} 调用 discard_draft 放弃删除。", view.name, view.name));
+    }
     changes::save_draft(conn, actor, &target, &json!(view), note)?;
     Ok(json!({ "name": view.name, "status": changes::target_status(conn, &target)? }))
 }
@@ -701,7 +723,8 @@ fn upload_media(app: &App, a: UploadMedia) -> Result<Value, String> {
         return Err(format!("“{}”太大：通过工具上传最大 {} MB，更大的文件请用 POST /api/v1/media。", a.filename, crate::media::MAX_BYTES_INLINE >> 20));
     }
     let bytes = base64::engine::general_purpose::STANDARD
-        .decode(a.data_base64.trim())
+        // Some clients wrap base64 at 76 characters; line breaks and spaces are not part of the data.
+        .decode(a.data_base64.chars().filter(|c| !c.is_ascii_whitespace()).collect::<String>())
         .map_err(|e| format!("“{}”的 data_base64 不是有效的 base64：{e}。", a.filename))?;
     if bytes.len() > crate::media::MAX_BYTES_INLINE {
         return Err(format!("“{}”太大：通过工具上传最大 {} MB，更大的文件请用 POST /api/v1/media。", a.filename, crate::media::MAX_BYTES_INLINE >> 20));

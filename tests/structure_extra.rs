@@ -23,7 +23,9 @@ fn drafts_are_checked_too() {
     ok(&app, &builder(), "update_collection", json!({ "name": "news", "note": "n",
         "change_fields": [{ "name": "tag", "required": true, "default": "公司" }] }));
     // A record whose tag was cleared on purpose (explicit null) still blocks it.
-    ok(&app, &builder(), "discard_draft", json!({ "target": "collection:news" }));
+    // Discarding a never-published collection that holds records is refused; deleting it needs the count.
+    assert!(err(&app, &builder(), "discard_draft", json!({ "target": "collection:news" })).contains("confirm: 1"));
+    ok(&app, &builder(), "delete_collection", json!({ "name": "news", "note": "n", "confirm": 1 }));
     news(&app);
     let b = add(&app, "B", "b", Some("行业"));
     ok(&app, &editor(), "update_record", json!({ "id": b, "note": "n", "data": { "tag": null } }));

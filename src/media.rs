@@ -70,7 +70,8 @@ pub fn store_upload(app: &App, filename: &str, bytes: &[u8]) -> Result<String, S
     let dest = dir.join(&name);
     if !dest.exists() {
         // Write under a temporary name, then rename, so a half-written file is never served.
-        let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+        // A random suffix keeps two simultaneous uploads of the same file from sharing a temporary file.
+        let tmp = dir.join(format!(".{name}.{}.{:016x}.tmp", std::process::id(), rand::random::<u64>()));
         std::fs::write(&tmp, bytes).map_err(io)?;
         std::fs::rename(&tmp, &dest).map_err(io)?;
     }

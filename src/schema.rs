@@ -325,23 +325,57 @@ pub fn convert(value: &Value, from: &FieldDef, to: &FieldDef) -> Option<Value> {
     check_value(to, &converted).ok()
 }
 
-/// Brings a stored document in line with a changed definition: keeps values that are still valid,
-/// converts the rest, and fails naming the field that cannot be converted.
+/// Brings a stored document in line with a changed definition: converts values whose field changed type,
+/// keeps values that are still valid under a changed field of the same type, fills the default of a newly
+/// added field, and fails naming the field that cannot follow.
 pub fn migrate(old: &CollectionDef, new: &CollectionDef, doc: &Value) -> Result<Value, String> {
     let mut doc = doc.clone();
     for f in &new.fields {
-        let Some(o) = old.field(&f.name) else { continue };
+        let Some(o) = old.field(&f.name) else {
+            // A field new to the definition: an absent value takes its default, so queries see it too.
+            if let (Some(d), Some(map)) = (&f.default, doc.as_object_mut()) {
+                if !map.contains_key(&f.name) {
+                    map.insert(f.name.clone(), check_value(f, d)?);
+                }
+            }
+            continue;
+        };
         if (o.kind, o.multiple, &o.options) == (f.kind, f.multiple, &f.options) { continue; }
         let Some(v) = doc.get(&f.name).filter(|v| !v.is_null()).cloned() else { continue };
-        let fixed = match check_value(f, &v) {
-            Ok(c) => c,
-            Err(_) => convert(&v, o, f).ok_or_else(|| {
-                format!("字段“{}”的现有值 {} 无法转换成新的类型或选项：请先修改或清空这个值，再改字段定义。", f.name, show(&v))
-            })?,
+        let cannot = || format!("字段“{}”的现有值 {} 无法转换成新的类型或选项：请先修改或清空这个值，再改字段定义。", f.name, show(&v));
+        // A change of type always goes through the conversion rules: plain text must be escaped on its way to
+        // rich text, never read as HTML.
+        let fixed = if o.kind != f.kind {
+            convert(&v, o, f).ok_or_else(cannot)?
+        } else {
+            match check_value(f, &v) {
+                Ok(c) => c,
+                Err(_) => convert(&v, o, f).ok_or_else(cannot)?,
+            }
         };
         doc[&f.name] = fixed;
     }
     normalize(new, &doc, &serde_json::json!({}))
+}
+
+/// Fills every declared field that is absent from `doc` with its default (cleaned). Explicit `null` stays.
+pub fn fill_defaults(def: &CollectionDef, doc: Value) -> Result<Value, String> {
+    let Value::Object(mut map) = doc else { return Ok(doc) };
+    for f in &def.fields {
+        if let (Some(d), false) = (&f.default, map.contains_key(&f.name)) {
+            map.insert(f.name.clone(), check_value(f, d)?);
+        }
+    }
+    Ok(Value::Object(map))
+}
+
+/// Validates a whole stored document (for example an old version being restored) against `def`: every
+/// declared field is checked and cleaned, undeclared keys are kept as they are.
+pub fn fit(def: &CollectionDef, doc: &Value) -> Result<Value, String> {
+    let map = doc.as_object().ok_or("要恢复的内容不是 JSON 对象，无法恢复。")?;
+    let (declared, rest): (serde_json::Map<String, Value>, serde_json::Map<String, Value>) =
+        map.iter().map(|(k, v)| (k.clone(), v.clone())).partition(|(k, _)| def.field(k).is_some());
+    normalize(def, &Value::Object(rest), &Value::Object(declared))
 }
 
 pub const MAX_NOTES: usize = 20_000;

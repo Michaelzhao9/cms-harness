@@ -38,7 +38,8 @@ pub fn error_response(status: StatusCode, msg: String) -> Response {
 /// The key from an `Authorization: Bearer <key>` header.
 pub fn bearer(headers: &HeaderMap) -> Option<String> {
     let v = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    v.strip_prefix("Bearer ").map(|k| k.trim().to_string())
+    let (scheme, key) = v.trim().split_once(' ')?;
+    scheme.eq_ignore_ascii_case("bearer").then(|| key.trim().to_string()).filter(|k| !k.is_empty())
 }
 
 fn db(e: impl std::fmt::Display) -> Fail {
@@ -278,6 +279,9 @@ async fn mcp(State(app): State<Shared>, headers: HeaderMap, body: Bytes) -> Resp
         Ok(v) => v,
         Err(e) => return rpc_error(&Value::Null, -32700, format!("请求不是合法的 JSON：{e}")),
     };
+    if req.is_array() {
+        return rpc_error(&Value::Null, -32600, "不支持 JSON-RPC 批量请求：请一次发送一个请求。".into());
+    }
     // A request without an id is a notification: nothing to answer.
     let Some(id) = req.get("id").cloned() else {
         return StatusCode::ACCEPTED.into_response();

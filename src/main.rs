@@ -22,6 +22,16 @@ fn env(name: &str, default: &str) -> String {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Check the command before anything is created on disk.
+    let known = match args.first().map(String::as_str) {
+        None => true,
+        Some("admin" | "key") => args.len() >= 2,
+        Some(_) => false,
+    };
+    if !known {
+        eprintln!("{USAGE}");
+        return ExitCode::from(2);
+    }
     let port = env("HC_PORT", "4200");
     let data = PathBuf::from(env("HC_DATA", "data"));
     let db = env("HC_DB", &data.join("harness.db").to_string_lossy());
@@ -118,7 +128,17 @@ fn serve(conn: rusqlite::Connection, data: PathBuf, port: String) -> ExitCode {
             }
         };
         println!("harness-cms 已启动：http://{addr}");
+        // Stop on Ctrl-C, or on SIGTERM from a process manager such as systemd.
         let stop = async {
+            #[cfg(unix)]
+            {
+                let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = async { match term.as_mut() { Some(t) => { t.recv().await; } None => std::future::pending::<()>().await } } => {}
+                }
+            }
+            #[cfg(not(unix))]
             let _ = tokio::signal::ctrl_c().await;
         };
         match axum::serve(listener, api::router(app)).with_graceful_shutdown(stop).await {

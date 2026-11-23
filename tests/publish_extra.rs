@@ -272,7 +272,7 @@ fn a_collection_only_marked_for_deletion_does_not_hold_drafts_back() {
 }
 
 #[test]
-fn a_draft_that_cannot_follow_is_reported_by_the_definition_change_itself() {
+fn a_bad_draft_outside_the_release_does_not_hold_up_a_definition_change() {
     let app = app();
     news(&app);
     publish_all(&app);
@@ -280,7 +280,10 @@ fn a_draft_that_cannot_follow_is_reported_by_the_definition_change_itself() {
     // A draft written behind the tools' back, not part of the release.
     app.conn().execute("INSERT INTO records(collection, draft) VALUES('news', '{\"title\":\"x\",\"slug\":\"q\",\"tag\":\"不存在的选项\"}')", []).unwrap();
     let id = app.conn().last_insert_rowid();
-    let e = err(&app, &builder(), "publish", json!({ "note": "n", "targets": ["collection:news"] }));
+    // Drafts already follow the definition being published, so publishing the definition alone goes through.
+    ok(&app, &builder(), "publish", json!({ "note": "n", "targets": ["collection:news"] }));
+    // The bad draft is caught when it is the one being published.
+    let e = err(&app, &builder(), "publish", json!({ "note": "n", "targets": [format!("record:{id}")] }));
     assert!(e.contains(&format!("record:{id}")) && e.contains("tag"), "{e}");
 }
 

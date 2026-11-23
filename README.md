@@ -50,7 +50,13 @@ cargo build --release
 | `limit`、`offset` | 分页，`limit` 为 1 到 100 |
 | `expand=字段` | 把关联字段展开成目标记录 |
 
-只有声明了 `index` 或 `unique` 的字段能用来筛选和排序。
+只有声明了 `index` 或 `unique` 的字段能用来筛选和排序。展开关联时，如果目标集合不公开而请求没有带密钥，这个字段保持为编号。
+
+### 上传文件
+
+`POST /api/v1/media`，multipart 表单，文件放在名为 `file` 的字段里，需要带 write 权限的密钥，单个文件最大 20 MB。也可以用工具 `upload_media` 以 base64 传（最大 5 MB）。支持 JPEG、PNG、GIF、WebP 和 PDF，按文件内容判断格式，不看扩展名；图片最大四千万像素。
+
+返回的路径形如 `/uploads/<32 位十六进制>.png`，直接用 `GET` 读取。文件名由内容决定，同一个文件只存一份，长期缓存。上传的文件是公开的，不随集合的公开设置变化，不要上传需要保密的文件。
 
 ### 工具
 
@@ -140,6 +146,8 @@ Or use REST: `GET /api/v1/tools` lists the tools your key may call with their JS
 ### Read content from your site
 
 `GET /api/v1/content/<collection>` returns published records; `GET /api/v1/content/<collection>/<id>` returns one. Public collections need no key; others need any valid key.
+
+Uploads: `POST /api/v1/media` (multipart, field `file`, write scope, up to 20 MB) or the `upload_media` tool (base64, up to 5 MB). JPEG, PNG, GIF, WebP and PDF are accepted, detected from the content. Files are served at `/uploads/<32 hex>.<ext>`, named by content, cached long-term, and public regardless of collection settings.
 
 Query parameters: `field=value` (equals); `field__ne`, `__gt`, `__gte`, `__lt`, `__lte`, `__contains`; `sort=field` or `sort=-field`; `limit` (1 to 100) and `offset`; `expand=field` for relation fields. Only fields declared with `index` or `unique` can be filtered or sorted on.
 
