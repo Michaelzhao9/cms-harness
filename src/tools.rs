@@ -3,7 +3,8 @@
 
 use crate::auth::{Actor, Scope};
 use crate::changes::{self, Target};
-use crate::schema::{check_def, CollectionDef, FieldDef, FieldType};
+use crate::query::{self, Query};
+use crate::schema::{check_def, normalize, project, CollectionDef, FieldDef, FieldType};
 use crate::App;
 use rusqlite::{Connection, OptionalExtension};
 use schemars::JsonSchema;
@@ -34,6 +35,11 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<CreateCollection>("create_collection", Scope::Structure, "新建集合草稿：名字、标题和字段列表。发布后才对外生效。"),
             spec::<UpdateCollection>("update_collection", Scope::Structure, "修改集合草稿：标题、公开读取、增加/修改/删除字段。"),
             spec::<DeleteCollection>("delete_collection", Scope::Structure, "删除集合草稿；从未发布的集合直接消失，已发布的待发布时才真正删除。"),
+            spec::<CreateRecord>("create_record", Scope::Write, "新建记录草稿：集合名和字段值（data）。发布后才对外生效。"),
+            spec::<UpdateRecord>("update_record", Scope::Write, "修改记录草稿：只需传要改的字段，null 表示清空该字段。"),
+            spec::<DeleteRecord>("delete_record", Scope::Write, "删除记录；从未发布的记录直接消失，已发布的待发布时才真正删除。"),
+            spec::<GetRecord>("get_record", Scope::Read, "按编号读取一条记录（有草稿时返回草稿）和状态。"),
+            spec::<QueryRecords>("query_records", Scope::Read, "查询集合的记录（草稿视图）。filter 与 sort 只能用 id 或设置了 index/unique 的字段。"),
         ]
     })
 }
@@ -104,6 +110,11 @@ fn dispatch(conn: &Connection, actor: &Actor, name: &str, args: Value) -> Result
         "create_collection" => create_collection(conn, actor, parse(name, args)?),
         "update_collection" => update_collection(conn, actor, parse(name, args)?),
         "delete_collection" => delete_collection(conn, actor, parse(name, args)?),
+        "create_record" => create_record(conn, actor, parse(name, args)?),
+        "update_record" => update_record(conn, actor, parse(name, args)?),
+        "delete_record" => delete_record(conn, actor, parse(name, args)?),
+        "get_record" => get_record(conn, parse(name, args)?),
+        "query_records" => query_records(conn, parse(name, args)?),
         _ => Err(format!("工具“{name}”{NOT_IMPLEMENTED}：它出现在工具列表里却没有处理逻辑，请联系开发者。")),
     }
 }
@@ -323,4 +334,160 @@ fn delete_collection(conn: &Connection, actor: &Actor, a: DeleteCollection) -> R
     // A never-published collection's row is gone, so its status is "deleted".
     let status = changes::collection_status(conn, &a.name)?;
     Ok(json!({ "name": a.name, "status": status }))
+}
+
+// ---- record tools ----
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateRecord {
+    collection: String,
+    data: Value,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct UpdateRecord {
+    id: i64,
+    data: Value,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeleteRecord {
+    id: i64,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct GetRecord {
+    id: i64,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct QueryRecords {
+    collection: String,
+    /// `{"field": value}` or `{"field": {"gte": value}}`; operators: eq ne gt gte lt lte contains.
+    filter: Option<Value>,
+    /// Field name, or `-field` for descending. Default: newest first.
+    sort: Option<String>,
+    /// 1 to 100, default 20.
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+struct RecRow {
+    collection: String,
+    published: Option<String>,
+    draft: Option<String>,
+    draft_deleted: bool,
+}
+
+impl RecRow {
+    fn status(&self) -> &'static str {
+        changes::status(self.published.is_some(), self.draft.is_some(), self.draft_deleted)
+    }
+}
+
+fn find_record(conn: &Connection, id: i64) -> Result<Option<RecRow>, String> {
+    conn.query_row("SELECT collection, published, draft, draft_deleted FROM records WHERE id = ?1", [id], |r| {
+        Ok(RecRow { collection: r.get(0)?, published: r.get(1)?, draft: r.get(2)?, draft_deleted: r.get(3)? })
+    })
+    .optional()
+    .map(|r| r.filter(|r| r.published.is_some() || r.draft.is_some()))
+    .map_err(|e| format!("读取记录 {id} 失败：{e}"))
+}
+
+fn load_record(conn: &Connection, id: i64) -> Result<RecRow, String> {
+    find_record(conn, id)?.ok_or_else(|| format!("记录 {id} 不存在或已被删除：请检查编号。"))
+}
+
+/// Every relation value in `changed` must be a live record of the field's target collection.
+fn check_relations(conn: &Connection, def: &CollectionDef, changed: &Value) -> Result<(), String> {
+    for f in def.fields.iter().filter(|f| f.kind == FieldType::Relation) {
+        let ids = match changed.get(&f.name) {
+            Some(Value::Array(a)) => a.clone(),
+            Some(Value::Null) | None => continue,
+            Some(v) => vec![v.clone()],
+        };
+        let target = f.target.as_deref().unwrap_or_default();
+        for id in ids.iter().filter_map(Value::as_i64) {
+            let found = find_record(conn, id)?.filter(|r| r.collection == target);
+            if found.is_none() {
+                return Err(format!("关联字段“{}”指向的记录 {id} 不存在：它必须是集合“{target}”里现有的记录，请检查编号。", f.name));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn create_record(conn: &Connection, actor: &Actor, a: CreateRecord) -> Result<Value, String> {
+    let note = check_note(&a.note)?;
+    let def = changes::effective_def(conn, &a.collection)?;
+    if def.single && record_count(conn, &a.collection)? > 0 {
+        return Err(format!("集合“{}”是单例集合，已经有一条记录：请用 update_record 修改它。", a.collection));
+    }
+    let doc = normalize(&def, &json!({}), &a.data)?;
+    changes::check_unique(conn, &def, None, &doc, false)?;
+    check_relations(conn, &def, &doc)?;
+    let id = changes::insert_record(conn, actor, &a.collection, &doc, note)?;
+    Ok(json!({ "id": id, "status": load_record(conn, id)?.status() }))
+}
+
+fn update_record(conn: &Connection, actor: &Actor, a: UpdateRecord) -> Result<Value, String> {
+    let note = check_note(&a.note)?;
+    let row = load_record(conn, a.id)?;
+    if row.status() == "deleting" {
+        return Err(format!("记录 {} 正等待删除，不能修改：如要保留它，请先用 discard_draft 放弃删除。", a.id));
+    }
+    let def = changes::effective_def(conn, &row.collection)?;
+    let base: Value = serde_json::from_str(row.draft.or(row.published).as_deref().unwrap_or("{}"))
+        .map_err(|e| format!("记录 {} 的内容已损坏：{e}", a.id))?;
+    let doc = normalize(&def, &base, &a.data)?;
+    changes::check_unique(conn, &def, Some(a.id), &doc, false)?;
+    check_relations(conn, &def, &a.data)?;
+    changes::save_draft(conn, actor, &Target::Record(a.id), &doc, note)?;
+    Ok(json!({ "id": a.id, "status": load_record(conn, a.id)?.status() }))
+}
+
+fn delete_record(conn: &Connection, actor: &Actor, a: DeleteRecord) -> Result<Value, String> {
+    let note = check_note(&a.note)?;
+    load_record(conn, a.id)?;
+    changes::mark_deleted(conn, actor, &Target::Record(a.id), note)?;
+    let status = find_record(conn, a.id)?.map_or("deleted", |r| r.status());
+    Ok(json!({ "id": a.id, "status": status }))
+}
+
+fn collection_def_for_read(conn: &Connection, name: &str) -> Result<CollectionDef, String> {
+    changes::collection_view(conn, name)?
+        .map(|(d, _)| d)
+        .ok_or_else(|| format!("集合“{name}”不存在或已删除，请先用 list_collections 查看现有集合。"))
+}
+
+fn get_record(conn: &Connection, a: GetRecord) -> Result<Value, String> {
+    let row = load_record(conn, a.id)?;
+    let def = collection_def_for_read(conn, &row.collection)?;
+    let doc: Value = serde_json::from_str(row.draft.as_deref().or(row.published.as_deref()).unwrap_or("{}"))
+        .map_err(|e| format!("记录 {} 的内容已损坏：{e}", a.id))?;
+    Ok(json!({ "id": a.id, "collection": row.collection, "status": row.status(), "data": project(&def, &doc) }))
+}
+
+fn query_records(conn: &Connection, a: QueryRecords) -> Result<Value, String> {
+    let def = collection_def_for_read(conn, &a.collection)?;
+    let q = Query {
+        filters: a.filter.as_ref().map(|f| query::parse_filter(&def, f)).transpose()?.unwrap_or_default(),
+        sort: a.sort.map(|s| match s.strip_prefix('-') {
+            Some(f) => (f.to_string(), true),
+            None => (s, false),
+        }),
+        limit: a.limit.unwrap_or(20),
+        offset: a.offset.unwrap_or(0),
+    };
+    let (rows, total) = query::run(conn, &def, &q, false)?;
+    let items: Vec<Value> = rows.into_iter().map(|r| json!({ "id": r.id, "status": r.status, "data": r.doc })).collect();
+    Ok(json!({ "items": items, "total": total }))
 }

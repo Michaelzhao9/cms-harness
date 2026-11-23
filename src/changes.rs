@@ -68,10 +68,16 @@ fn missing(target: &Target) -> String {
     format!("“{target}”不存在，请检查名字或编号。")
 }
 
+/// Records carry `updated_at`; every write to one refreshes it.
+fn touch(target: &Target) -> &'static str {
+    if matches!(target, Target::Record(_)) { ", updated_at = datetime('now')" } else { "" }
+}
+
 pub fn save_draft(conn: &Connection, actor: &Actor, target: &Target, doc: &Value, note: &str) -> Result<(), String> {
     let (table, key, val, has_dd) = target.row();
     let doc = doc.to_string();
     let reset = if has_dd { ", draft_deleted = 0" } else { "" };
+    let reset = format!("{reset}{}", touch(target));
     let n = conn
         .execute(
             &format!("UPDATE {table} SET draft = ?1, draft_actor = ?2, draft_note = ?3{reset} WHERE {key} = ?4"),
@@ -121,7 +127,7 @@ pub fn mark_deleted(conn: &Connection, actor: &Actor, target: &Target, note: &st
     } else {
         let (table, key, val, _) = target.row();
         tx.execute(
-            &format!("UPDATE {table} SET draft_deleted = 1, draft_actor = ?1, draft_note = ?2 WHERE {key} = ?3"),
+            &format!("UPDATE {table} SET draft_deleted = 1, draft_actor = ?1, draft_note = ?2{} WHERE {key} = ?3", touch(target)),
             params![actor.name, note, val],
         )
         .map_err(|e| db(target, e))?;
@@ -136,6 +142,7 @@ pub fn discard(conn: &Connection, target: &Target) -> Result<(), String> {
     } else {
         let (table, key, val, has_dd) = target.row();
         let reset = if has_dd { ", draft_deleted = 0" } else { "" };
+        let reset = format!("{reset}{}", touch(target));
         tx.execute(
             &format!("UPDATE {table} SET draft = NULL, draft_actor = NULL, draft_note = NULL{reset} WHERE {key} = ?1"),
             [val],
@@ -204,4 +211,41 @@ pub fn collection_view(conn: &Connection, name: &str) -> Result<Option<(Collecti
     let st = row_status(&r);
     let json = r.draft.or(r.published).ok_or_else(|| format!("集合“{name}”没有定义。"))?;
     Ok(Some((parse_def(name, &json)?, st)))
+}
+
+/// Inserts a new record whose draft is `doc` (already normalized) and returns its id.
+pub fn insert_record(conn: &Connection, actor: &Actor, collection: &str, doc: &Value, note: &str) -> Result<i64, String> {
+    conn.execute(
+        "INSERT INTO records(collection, draft, draft_actor, draft_note) VALUES(?1, ?2, ?3, ?4)",
+        params![collection, doc.to_string(), actor.name, note],
+    )
+    .map_err(|e| format!("新建集合“{collection}”的记录失败：{e}"))?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Every `unique` field of `doc` must differ from the same field of all other records of the collection
+/// (tombstones skipped). `live_only` compares against published values only, else against drafts too.
+pub fn check_unique(conn: &Connection, def: &CollectionDef, id: Option<i64>, doc: &Value, live_only: bool) -> Result<(), String> {
+    debug_assert!(crate::schema::valid_name(&def.name));
+    for f in def.fields.iter().filter(|f| f.unique) {
+        let Some(p) = doc.get(&f.name).and_then(crate::query::to_sql) else { continue };
+        debug_assert!(crate::schema::valid_name(&f.name));
+        let draft = if live_only { String::new() } else { format!(" OR json_extract(draft,'$.{0}') = ?2", f.name) };
+        let sql = format!(
+            "SELECT id FROM records WHERE collection = ?1 AND id IS NOT ?3 AND (published IS NOT NULL OR draft IS NOT NULL) \
+             AND (json_extract(published,'$.{0}') = ?2{draft}) LIMIT 1",
+            f.name
+        );
+        let other: Option<i64> = conn
+            .query_row(&sql, params![def.name, p, id], |r| r.get(0))
+            .optional()
+            .map_err(|e| format!("检查字段“{}”是否唯一失败：{e}", f.name))?;
+        if let Some(other) = other {
+            return Err(format!(
+                "字段“{}”必须唯一：值 {} 已被记录 {other} 使用，请换一个值。",
+                f.name, doc[&f.name]
+            ));
+        }
+    }
+    Ok(())
 }
