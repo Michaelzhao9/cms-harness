@@ -112,3 +112,57 @@ fn dates_leap_years_and_extra_conversions() {
         { "name": "d", "title": "D", "type": "date", "default": "2026-02-30" }] })).unwrap();
     assert!(check_def(&bad).unwrap_err().contains("d"));
 }
+
+#[test]
+fn default_is_sanitised_on_read() {
+    let d: CollectionDef = serde_json::from_value(json!({ "name": "c", "title": "C", "fields": [
+        { "name": "b", "title": "B", "type": "richtext", "default": "<p>hi<script>alert(1)</script></p>" }] })).unwrap();
+    let out = project(&d, &json!({}));
+    assert!(!out["b"].as_str().unwrap().contains("script"));
+}
+
+#[test]
+fn errors_do_not_echo_huge_values() {
+    let e = normalize(&news(), &json!({}), &json!({ "title": "x".repeat(MAX_TEXT + 1) })).unwrap_err();
+    assert!(e.chars().count() < 300 && e.contains("100001"), "{e}");
+}
+
+#[test]
+fn null_is_a_value_defaults_are_for_absent_keys() {
+    let d = news();
+    // non-required field with default, cleared: stays null
+    let doc = normalize(&d, &json!({ "title": "a" }), &json!({ "views": null })).unwrap();
+    assert_eq!(project(&d, &doc)["views"], Value::Null);
+    assert_eq!(project(&d, &json!({ "title": "a" }))["views"], 0);
+    // required + default
+    let r: CollectionDef = serde_json::from_value(json!({ "name": "c", "title": "C", "fields": [
+        { "name": "n", "title": "N", "type": "number", "required": true, "default": 1 }] })).unwrap();
+    assert!(normalize(&r, &json!({}), &json!({ "n": null })).unwrap_err().contains("n"));
+    assert!(normalize(&r, &json!({}), &json!({})).is_ok());
+    assert_eq!(project(&r, &json!({}))["n"], 1);
+}
+
+#[test]
+fn sanitiser_rules() {
+    let d = news();
+    let cases = [
+        "<a href=\"JaVaScRiPt:alert(1)\">x</a>", "<a href=\"java\tscript:alert(1)\">x</a>",
+        "<a href=\"data:text/html,x\">x</a>", "<img src=\"data:image/svg+xml,x\">",
+        "<p style=\"x\" onmouseover=\"y\">t</p>",
+    ];
+    for c in cases {
+        let doc = normalize(&d, &json!({}), &json!({ "title": "a", "body": c })).unwrap();
+        let body = doc["body"].as_str().unwrap().to_lowercase();
+        for gone in ["javascript", "data:", "style=", "onmouseover"] { assert!(!body.contains(gone), "{gone} in {body} from {c}"); }
+    }
+}
+
+#[test]
+fn malformed_dates_and_long_arrays() {
+    let d = news();
+    for s in ["2026", "", "２０２６-11-23", "2026-13-01"] {
+        assert!(normalize(&d, &json!({}), &json!({ "title": "a", "date": s })).is_err(), "{s}");
+    }
+    let ids: Vec<u32> = (1..=1001).collect();
+    assert!(normalize(&d, &json!({}), &json!({ "title": "a", "related": ids })).unwrap_err().contains("1000"));
+}

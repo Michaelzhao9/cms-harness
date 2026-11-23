@@ -117,9 +117,7 @@ pub fn check_def(def: &CollectionDef) -> Result<(), String> {
 }
 
 fn check_default(f: &FieldDef, d: &Value) -> Result<(), String> {
-    check_value(f, d)
-        .map(|_| ())
-        .map_err(|e| format!("字段“{}”的默认值不合法：{e}", f.name))
+    check_value(f, d).map(|_| ()).map_err(|e| format!("默认值不合法，{e}"))
 }
 
 pub const MAX_TEXT: usize = 100_000;
@@ -147,10 +145,15 @@ fn valid_date(s: &str) -> bool {
 
 fn sanitise(html: &str) -> String {
     use std::collections::HashSet;
-    // style and on* attributes are not in ammonia's allow-list; script content is dropped explicitly.
+    // ammonia cannot express "all on* attributes" as a rule, so the allow-list is its default plus a filter that drops them.
     ammonia::Builder::default()
         .url_schemes(HashSet::from(["http", "https", "mailto", "tel"]))
         .clean_content_tags(HashSet::from(["script", "style"]))
+        .rm_generic_attributes(&["style"])
+        .attribute_filter(|_, attr, v| {
+            let a = attr.to_ascii_lowercase();
+            (a != "style" && !a.starts_with("on")).then(|| v.into())
+        })
         .clean(html)
         .to_string()
 }
@@ -159,24 +162,32 @@ fn pos_int(v: &Value) -> bool {
     v.as_u64().is_some_and(|n| n > 0)
 }
 
+const MAX_ITEMS: usize = 1000;
+
+/// The value for error messages: at most 50 characters.
+fn show(v: &Value) -> String {
+    let s = v.to_string();
+    if s.chars().count() > 50 { format!("{}…", s.chars().take(50).collect::<String>()) } else { s }
+}
+
 /// Checks one value against one field and returns the cleaned value. `null` is always accepted.
 fn check_value(f: &FieldDef, value: &Value) -> Result<Value, String> {
     use FieldType::*;
     let n = &f.name;
     if value.is_null() { return Ok(Value::Null); }
-    let bad = |why: &str| format!("字段“{n}”的值 {value} 不合法：{why}");
+    let bad = |v: &Value, why: &str| format!("字段“{n}”的值 {} 不合法：{why}", show(v));
     let single = |v: &Value| -> Result<Value, String> {
-        let bad = |why: &str| format!("字段“{n}”的值 {v} 不合法：{why}");
+        let bad = |why: &str| bad(v, why);
         let s = v.as_str();
         match f.kind {
             Text => match s {
                 Some(s) if s.chars().count() <= MAX_TEXT => Ok(v.clone()),
-                Some(_) => Err(bad(&format!("文本最长 {MAX_TEXT} 个字符，请缩短。"))),
+                Some(s) => Err(bad(&format!("文本有 {} 个字符，超过上限 {MAX_TEXT}，请缩短。", s.chars().count()))),
                 None => Err(bad("必须是字符串。")),
             },
             Richtext => match s {
                 Some(s) if s.chars().count() <= MAX_RICHTEXT => Ok(Value::String(sanitise(s))),
-                Some(_) => Err(bad(&format!("富文本最长 {MAX_RICHTEXT} 个字符，请缩短。"))),
+                Some(s) => Err(bad(&format!("富文本有 {} 个字符，超过上限 {MAX_RICHTEXT}，请缩短。", s.chars().count()))),
                 None => Err(bad("必须是字符串。")),
             },
             Number if v.as_f64().is_some_and(f64::is_finite) => Ok(v.clone()),
@@ -194,12 +205,15 @@ fn check_value(f: &FieldDef, value: &Value) -> Result<Value, String> {
         }
     };
     if !f.multiple { return single(value); }
-    let Some(items) = value.as_array() else { return Err(bad("多值字段必须是数组。")) };
+    let Some(items) = value.as_array() else { return Err(bad(value, "多值字段必须是数组。")) };
+    if items.len() > MAX_ITEMS {
+        return Err(bad(value, &format!("数组有 {} 个元素，超过上限 {MAX_ITEMS}。", items.len())));
+    }
     let mut out: Vec<Value> = Vec::with_capacity(items.len());
     for it in items {
         let c = single(it)?;
         if f.kind != FieldType::Media && out.contains(&c) {
-            return Err(bad(&format!("数组里有重复的元素 {it}。")));
+            return Err(bad(value, &format!("数组里有重复的元素 {}。", show(it))));
         }
         out.push(c);
     }
@@ -230,19 +244,24 @@ pub fn normalize(def: &CollectionDef, base: &Value, changes: &Value) -> Result<V
         if let Some(v) = changes.get(&f.name).or_else(|| base.get(&f.name)) {
             out.insert(f.name.clone(), check_value(f, v)?);
         }
-        if f.required && f.default.is_none() && out.get(&f.name).is_none_or(is_empty) {
+        // explicit null/empty always fails a required field; an absent key passes only with a default
+        if f.required && out.get(&f.name).map_or(f.default.is_none(), is_empty) {
             return Err(format!("字段“{}”是必填的：请提供一个非空的值。", f.name));
         }
     }
     Ok(Value::Object(out))
 }
 
-/// Declared fields only; a missing or null value falls back to the field's default, else `null`.
+/// Declared fields only; an absent key takes the field's default (cleaned), else `null`. Explicit `null` stays `null`.
 pub fn project(def: &CollectionDef, doc: &Value) -> Value {
     let mut out = serde_json::Map::new();
     for f in &def.fields {
-        let v = doc.get(&f.name).filter(|v| !v.is_null()).or(f.default.as_ref());
-        out.insert(f.name.clone(), v.cloned().unwrap_or(Value::Null));
+        let v = match (doc.get(&f.name), &f.default) {
+            (Some(v), _) => v.clone(),
+            (None, Some(d)) => check_value(f, d).unwrap_or(Value::Null),
+            (None, None) => Value::Null,
+        };
+        out.insert(f.name.clone(), v);
     }
     Value::Object(out)
 }
@@ -317,7 +336,7 @@ pub fn migrate(old: &CollectionDef, new: &CollectionDef, doc: &Value) -> Result<
         let fixed = match check_value(f, &v) {
             Ok(c) => c,
             Err(_) => convert(&v, o, f).ok_or_else(|| {
-                format!("字段“{}”的现有值 {v} 无法转换成新的类型或选项：请先修改或清空这个值，再改字段定义。", f.name)
+                format!("字段“{}”的现有值 {} 无法转换成新的类型或选项：请先修改或清空这个值，再改字段定义。", f.name, show(&v))
             })?,
         };
         doc[&f.name] = fixed;
