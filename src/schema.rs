@@ -106,6 +106,9 @@ pub fn check_def(def: &CollectionDef) -> Result<(), String> {
         if f.unique && (!matches!(f.kind, Text | Number | Date) || f.multiple) {
             return Err(format!("字段“{n}”不能设置 unique：只有单值的 text、number、date 字段可以要求唯一。"));
         }
+        if f.unique && f.default.is_some() {
+            return Err(format!("字段“{n}”不能同时设置 unique 和默认值：每条记录都会拿到同一个默认值，必然重复。请去掉其中一个。"));
+        }
         if f.index && (!matches!(f.kind, Text | Number | Boolean | Date | Select | Relation) || f.multiple) {
             return Err(format!("字段“{n}”不能设置 index：只有单值的 text、number、boolean、date、select、relation 字段可以建索引。"));
         }
@@ -331,15 +334,14 @@ pub fn convert(value: &Value, from: &FieldDef, to: &FieldDef) -> Option<Value> {
 pub fn migrate(old: &CollectionDef, new: &CollectionDef, doc: &Value) -> Result<Value, String> {
     let mut doc = doc.clone();
     for f in &new.fields {
-        let Some(o) = old.field(&f.name) else {
-            // A field new to the definition: an absent value takes its default, so queries see it too.
-            if let (Some(d), Some(map)) = (&f.default, doc.as_object_mut()) {
-                if !map.contains_key(&f.name) {
-                    map.insert(f.name.clone(), check_value(f, d)?);
-                }
+        // An absent value takes the field's default (new field, or a default added later), so queries see it too.
+        if let (Some(d), Some(map)) = (&f.default, doc.as_object_mut()) {
+            if !map.contains_key(&f.name) {
+                map.insert(f.name.clone(), check_value(f, d)?);
+                continue;
             }
-            continue;
-        };
+        }
+        let Some(o) = old.field(&f.name) else { continue };
         if (o.kind, o.multiple, &o.options) == (f.kind, f.multiple, &f.options) { continue; }
         let Some(v) = doc.get(&f.name).filter(|v| !v.is_null()).cloned() else { continue };
         let cannot = || format!("字段“{}”的现有值 {} 无法转换成新的类型或选项：请先修改或清空这个值，再改字段定义。", f.name, show(&v));

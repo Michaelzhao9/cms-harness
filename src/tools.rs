@@ -719,12 +719,13 @@ struct UploadMedia {
 fn upload_media(app: &App, a: UploadMedia) -> Result<Value, String> {
     use base64::Engine;
     // Reject before decoding: base64 is 4/3 the size of the bytes.
-    if a.data_base64.len() > crate::media::MAX_BYTES_INLINE / 3 * 4 + 8 {
+    // Some clients wrap base64 at 76 characters; line breaks and spaces are not part of the data.
+    let data: String = a.data_base64.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    if data.len() > crate::media::MAX_BYTES_INLINE / 3 * 4 + 8 {
         return Err(format!("“{}”太大：通过工具上传最大 {} MB，更大的文件请用 POST /api/v1/media。", a.filename, crate::media::MAX_BYTES_INLINE >> 20));
     }
     let bytes = base64::engine::general_purpose::STANDARD
-        // Some clients wrap base64 at 76 characters; line breaks and spaces are not part of the data.
-        .decode(a.data_base64.chars().filter(|c| !c.is_ascii_whitespace()).collect::<String>())
+        .decode(&data)
         .map_err(|e| format!("“{}”的 data_base64 不是有效的 base64：{e}。", a.filename))?;
     if bytes.len() > crate::media::MAX_BYTES_INLINE {
         return Err(format!("“{}”太大：通过工具上传最大 {} MB，更大的文件请用 POST /api/v1/media。", a.filename, crate::media::MAX_BYTES_INLINE >> 20));

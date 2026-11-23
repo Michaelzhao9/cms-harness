@@ -152,8 +152,10 @@ pub fn mark_deleted(conn: &Connection, actor: &Actor, target: &Target, note: &st
             back_to_live(&tx, name, "删除集合")?;
         }
         let (table, key, val, _) = target.row();
+        // For a collection the deletion replaces its pending definition, which was just undone above.
+        let drop_def = if matches!(target, Target::Collection(_)) { ", draft = NULL" } else { "" };
         tx.execute(
-            &format!("UPDATE {table} SET draft_deleted = 1, draft_actor = ?1, draft_note = ?2{} WHERE {key} = ?3", touch(target)),
+            &format!("UPDATE {table} SET draft_deleted = 1{drop_def}, draft_actor = ?1, draft_note = ?2{} WHERE {key} = ?3", touch(target)),
             params![actor.name, note, val],
         )
         .map_err(|e| db(target, e))?;
@@ -797,6 +799,34 @@ pub fn check_views(conn: &Connection, released: &[String], collections: &[String
     Ok(())
 }
 
+/// What a record draft becomes when it goes live. The draft follows the definition in force for drafts; when that is
+/// a pending definition outside this release, the draft is brought back to the live definition first. Either way
+/// the result is validated and cleaned against the live definition, so what goes live is exactly what the rules allow.
+fn live_copy_of(conn: &Connection, id: i64, collection: &str, draft: Option<&str>, problems: &mut Vec<String>) -> Result<Option<String>, String> {
+    let Some(draft) = draft else { return Ok(None) };
+    let Some(def) = live_def_opt(conn, collection)? else {
+        // Not live: verification reports it; keep the draft as it is.
+        return Ok(Some(draft.to_string()));
+    };
+    let doc: Value = serde_json::from_str(draft).map_err(|e| format!("记录 {id} 的内容已损坏：{e}"))?;
+    let pending = coll_row(conn, collection)?.and_then(|r| r.draft);
+    let hint = |e: String| match &pending {
+        Some(_) => format!("record:{id}：{e}（这条记录的草稿是按 collection:{collection} 尚未发布的定义写的，请把 collection:{collection} 一起发布）"),
+        None => format!("record:{id}：{e}"),
+    };
+    let fitted = match &pending {
+        Some(p) => crate::schema::migrate(&parse_def(collection, p)?, &def, &doc),
+        None => crate::schema::normalize(&def, &doc, &serde_json::json!({})),
+    };
+    match fitted {
+        Ok(v) => Ok(Some(v.to_string())),
+        Err(e) => {
+            problems.push(hint(e));
+            Ok(Some(draft.to_string()))
+        }
+    }
+}
+
 /// Publishes pending changes in one transaction: all of the actor's, or only the listed ones.
 /// Nothing goes live unless the whole release passes verification.
 pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: &str) -> Result<Release, String> {
@@ -849,7 +879,8 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
             && match (&c.published, &draft) {
                 (Some(live), Some(d)) => {
                     let doc: Value = serde_json::from_str(d).unwrap_or(Value::Null);
-                    crate::schema::normalize(&parse_def(&collection, live)?, &doc, &serde_json::json!({})).is_err()
+                    let pending = parse_def(&collection, c.draft.as_deref().unwrap_or_default())?;
+                    crate::schema::migrate(&pending, &parse_def(&collection, live)?, &doc).is_err()
                 }
                 _ => false,
             };
@@ -926,8 +957,9 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
             }
             Target::Record(id) => {
                 let collection: String = tx.query_row("SELECT collection FROM records WHERE id = ?1", [id], |r| r.get(0)).map_err(fail)?;
-                let copy = if s.draft_deleted { "published = NULL" } else { "published = draft" };
-                tx.execute(&format!("UPDATE records SET {copy}, {clear}, updated_at = datetime('now') WHERE id = ?1"), [id]).map_err(fail)?;
+                let live = if s.draft_deleted { None } else { Some(live_copy_of(&tx, *id, &collection, s.draft.as_deref(), &mut problems)?) };
+                tx.execute(&format!("UPDATE records SET published = ?2, {clear}, updated_at = datetime('now') WHERE id = ?1"), params![id, live])
+                    .map_err(fail)?;
                 if !s.draft_deleted {
                     released.push((*id, collection.clone()));
                 }

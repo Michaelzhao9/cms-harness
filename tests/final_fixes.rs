@@ -199,3 +199,94 @@ async fn mcp_rejects_batches_and_accepts_a_lowercase_scheme() {
 }
 
 use tower::ServiceExt;
+
+// ---- found by the re-review of the fix wave ----
+
+fn draft(app: &harness_cms::Shared, id: i64) -> Value {
+    let json: String = app.conn().query_row("SELECT coalesce(draft, published) FROM records WHERE id = ?1", [id], |r| r.get(0)).unwrap();
+    serde_json::from_str(&json).unwrap()
+}
+
+#[test]
+fn deleting_then_discarding_or_restoring_keeps_the_text() {
+    let app = app();
+    items(&app, json!([{ "name": "name", "title": "名称", "type": "text" }]));
+    let a = item(&app, json!({ "name": "a" }));
+    publish_all(&app);
+    ok(&app, &editor(), "update_record", json!({ "id": a, "note": "n", "data": { "name": "c<d" } }));
+    ok(&app, &builder(), "update_collection", json!({ "name": "items", "note": "n", "change_fields": [{ "name": "name", "type": "richtext" }] }));
+    ok(&app, &builder(), "delete_collection", json!({ "name": "items", "note": "n", "confirm": 1 }));
+    ok(&app, &builder(), "discard_draft", json!({ "target": "collection:items" }));
+    assert_eq!(draft(&app, a)["name"], "c<d");
+    // The same, published and then restored.
+    ok(&app, &builder(), "update_collection", json!({ "name": "items", "note": "n", "change_fields": [{ "name": "name", "type": "richtext" }] }));
+    ok(&app, &builder(), "delete_collection", json!({ "name": "items", "note": "n", "confirm": 1 }));
+    publish_all(&app);
+    let v = ok(&app, &reader(), "list_versions", json!({ "target": "collection:items" }));
+    ok(&app, &builder(), "restore_version", json!({ "target": "collection:items", "version_id": v[1]["id"], "note": "恢复" }));
+    publish_all(&app);
+    assert_eq!(live(&app, a)["name"], "c<d");
+}
+
+#[test]
+fn discarding_a_deletion_with_a_number_to_text_change_pending_works() {
+    let app = app();
+    items(&app, json!([{ "name": "views", "title": "浏览", "type": "number" }]));
+    let a = item(&app, json!({ "views": 5 }));
+    publish_all(&app);
+    ok(&app, &editor(), "update_record", json!({ "id": a, "note": "n", "data": { "views": 6 } }));
+    ok(&app, &builder(), "update_collection", json!({ "name": "items", "note": "n", "change_fields": [{ "name": "views", "type": "text" }] }));
+    ok(&app, &builder(), "delete_collection", json!({ "name": "items", "note": "n", "confirm": 1 }));
+    ok(&app, &builder(), "discard_draft", json!({ "target": "collection:items" }));
+    assert_eq!(draft(&app, a)["views"], 6);
+}
+
+#[test]
+fn a_record_published_ahead_of_its_definition_is_converted_once() {
+    let app = app();
+    items(&app, json!([{ "name": "name", "title": "名称", "type": "text" }]));
+    let a = item(&app, json!({ "name": "a" }));
+    publish_all(&app);
+    ok(&app, &builder(), "update_collection", json!({ "name": "items", "note": "n", "change_fields": [{ "name": "name", "type": "richtext" }] }));
+    ok(&app, &editor(), "update_record", json!({ "id": a, "note": "n", "data": { "name": "c&lt;d" } }));
+    ok(&app, &editor(), "publish", json!({ "note": "n", "targets": [format!("record:{a}")] }));
+    assert_eq!(live(&app, a)["name"], "c<d"); // back in the live (text) shape
+    publish_all(&app);
+    assert_eq!(live(&app, a)["name"], "c&lt;d"); // converted once by the definition
+}
+
+#[test]
+fn raw_html_cannot_go_live_ahead_of_a_richtext_to_text_change() {
+    let app = app();
+    items(&app, json!([{ "name": "body", "title": "正文", "type": "richtext" }]));
+    let a = item(&app, json!({ "body": "<p>x</p>" }));
+    publish_all(&app);
+    ok(&app, &builder(), "update_collection", json!({ "name": "items", "note": "n", "change_fields": [{ "name": "body", "type": "text" }] }));
+    ok(&app, &editor(), "update_record", json!({ "id": a, "note": "n", "data": { "body": "<img src=x onerror=alert(1)> 1<2" } }));
+    ok(&app, &editor(), "publish", json!({ "note": "n", "targets": [format!("record:{a}")] }));
+    let body = live(&app, a)["body"].as_str().unwrap().to_string();
+    // Escaped into harmless text: no real tag survives.
+    assert!(!body.contains("<img") && body.contains("1&lt;2"), "{body}");
+}
+
+#[tokio::test]
+async fn a_default_added_to_an_existing_field_is_stored() {
+    let app = app();
+    items(&app, json!([
+        { "name": "name", "title": "名称", "type": "text" },
+        { "name": "featured", "title": "推荐", "type": "boolean", "index": true }
+    ]));
+    item(&app, json!({ "name": "A" }));
+    publish_all(&app);
+    ok(&app, &builder(), "update_collection", json!({ "name": "items", "note": "n", "change_fields": [{ "name": "featured", "default": false }] }));
+    publish_all(&app);
+    assert_eq!(get(&app, "/api/v1/content/items?featured=false", None).await.2["total"], 1);
+}
+
+#[test]
+fn unique_and_default_cannot_be_combined() {
+    let app = app();
+    let e = err(&app, &builder(), "create_collection", json!({ "name": "x", "title": "X", "note": "n",
+        "fields": [{ "name": "code", "title": "编号", "type": "text", "unique": true, "default": "x" }] }));
+    assert!(e.contains("code") && e.contains("unique"), "{e}");
+}
