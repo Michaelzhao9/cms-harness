@@ -198,8 +198,8 @@ fn drafts_left_in_a_deleted_collection_do_not_block_later_releases() {
     publish_all(&app);
     ok(&app, &editor(), "update_record", json!({ "id": a, "note": "改到一半", "data": { "title": "A2" } }));
     ok(&app, &builder(), "delete_collection", json!({ "name": "news", "note": "不要了", "confirm": 1 }));
-    // Naming the stranded draft explains what to do.
-    assert!(err(&app, &builder(), "publish", json!({ "note": "n", "targets": [format!("record:{a}")] })).contains("discard_draft"));
+    // Naming the draft together with the deletion explains what to do.
+    assert!(err(&app, &builder(), "publish", json!({ "note": "n", "targets": ["collection:news", format!("record:{a}")] })).contains("discard_draft"));
     // Publishing everything deletes the collection and leaves the draft alone.
     let release = publish_all(&app);
     assert_eq!(release["published"], json!(["collection:news"]));
@@ -217,4 +217,82 @@ fn an_empty_target_list_is_called_out() {
     let app = app();
     news(&app);
     assert!(err(&app, &builder(), "publish", json!({ "note": "n", "targets": [] })).contains("targets"));
+}
+
+#[test]
+fn a_record_deletion_is_never_held_back_by_its_collection() {
+    let app = app();
+    news(&app);
+    let (a, b) = (one(&app, "A", "a"), one(&app, "B", "b"));
+    publish_all(&app);
+    ok(&app, &editor(), "delete_record", json!({ "id": a, "note": "删" }));
+    ok(&app, &builder(), "delete_collection", json!({ "name": "news", "note": "删", "confirm": 2 }));
+    let release = publish_all(&app);
+    assert_eq!(release["skipped"], json!([]));
+    assert_eq!(release["published"].as_array().unwrap().len(), 2);
+    // Bring the collection back: the deleted record must stay deleted.
+    let v = ok(&app, &reader(), "list_versions", json!({ "target": "collection:news" }));
+    ok(&app, &builder(), "restore_version", json!({ "target": "collection:news", "version_id": v[1]["id"], "note": "恢复" }));
+    publish_all(&app);
+    let q = ok(&app, &reader(), "query_records", json!({ "collection": "news" }));
+    assert_eq!((q["total"].as_i64(), q["items"][0]["id"].as_i64()), (Some(1), Some(b)));
+}
+
+#[test]
+fn a_restored_collection_and_its_record_drafts_go_out_together() {
+    let app = app();
+    news(&app);
+    let a = one(&app, "A", "a");
+    publish_all(&app);
+    ok(&app, &editor(), "update_record", json!({ "id": a, "note": "改", "data": { "title": "A2" } }));
+    ok(&app, &builder(), "delete_collection", json!({ "name": "news", "note": "删", "confirm": 1 }));
+    publish_all(&app); // the deletion goes out, the draft is held
+    let v = ok(&app, &reader(), "list_versions", json!({ "target": "collection:news" }));
+    ok(&app, &builder(), "restore_version", json!({ "target": "collection:news", "version_id": v[1]["id"], "note": "恢复" }));
+    // The collection is visible again while its return is pending.
+    let listed = ok(&app, &reader(), "list_collections", json!({}));
+    assert_eq!((listed[0]["name"].as_str(), listed[0]["status"].as_str()), (Some("news"), Some("changed")));
+    let release = publish_all(&app);
+    assert_eq!(release["published"], json!(["collection:news", format!("record:{a}")]));
+    assert_eq!(ok(&app, &reader(), "get_record", json!({ "id": a }))["data"]["title"], "A2");
+}
+
+#[test]
+fn a_collection_only_marked_for_deletion_does_not_hold_drafts_back() {
+    let app = app();
+    news(&app);
+    let a = one(&app, "A", "a");
+    publish_all(&app);
+    ok(&app, &editor(), "update_record", json!({ "id": a, "note": "改", "data": { "title": "A2" } }));
+    ok(&app, &builder(), "delete_collection", json!({ "name": "news", "note": "删", "confirm": 1 }));
+    // The editor cannot publish the deletion, so the collection stays live and the edit goes out.
+    let release = ok(&app, &editor(), "publish", json!({ "note": "n" }));
+    assert_eq!(release["published"], json!([format!("record:{a}")]));
+    assert_eq!(release["skipped"], json!(["collection:news"]));
+}
+
+#[test]
+fn a_draft_that_cannot_follow_is_reported_by_the_definition_change_itself() {
+    let app = app();
+    news(&app);
+    publish_all(&app);
+    ok(&app, &builder(), "update_collection", json!({ "name": "news", "note": "n", "change_fields": [{ "name": "tag", "multiple": true, "index": false }] }));
+    // A draft written behind the tools' back, not part of the release.
+    app.conn().execute("INSERT INTO records(collection, draft) VALUES('news', '{\"title\":\"x\",\"slug\":\"q\",\"tag\":\"不存在的选项\"}')", []).unwrap();
+    let id = app.conn().last_insert_rowid();
+    let e = err(&app, &builder(), "publish", json!({ "note": "n", "targets": ["collection:news"] }));
+    assert!(e.contains(&format!("record:{id}")) && e.contains("tag"), "{e}");
+}
+
+#[test]
+fn a_record_deleted_in_the_release_cannot_block_its_collections_change() {
+    let app = app();
+    news(&app);
+    let a = ok(&app, &editor(), "create_record", json!({ "collection": "news", "note": "n", "data": { "title": "A", "slug": "a", "tag": "公司" } }))["id"].as_i64().unwrap();
+    publish_all(&app);
+    ok(&app, &builder(), "update_collection", json!({ "name": "news", "note": "n", "change_fields": [{ "name": "tag", "multiple": true, "index": false }] }));
+    // Its live copy can no longer follow, but the record is being deleted in the same release.
+    app.conn().execute("UPDATE records SET published = '{\"title\":\"A\",\"slug\":\"a\",\"tag\":\"不存在的选项\"}' WHERE id = ?1", [a]).unwrap();
+    ok(&app, &editor(), "delete_record", json!({ "id": a, "note": "删" }));
+    assert_eq!(publish_all(&app)["published"].as_array().unwrap().len(), 2);
 }

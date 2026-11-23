@@ -587,7 +587,7 @@ fn rank(target: &Target, deleting: bool) -> u8 {
 
 /// Rewrites every record of a collection (both copies) from the old definition to the new one.
 /// Returns the records whose live copy changed, with the copy they had before.
-fn migrate_records(conn: &Connection, name: &str, old: &CollectionDef, new: &CollectionDef, problems: &mut Vec<String>) -> Result<Vec<(i64, String)>, String> {
+fn migrate_records(conn: &Connection, name: &str, old: &CollectionDef, new: &CollectionDef, doomed: &[i64], problems: &mut Vec<String>) -> Result<Vec<(i64, String)>, String> {
     let fail = |e: rusqlite::Error| format!("改写集合“{name}”的记录失败：{e}");
     let mut stmt = conn
         .prepare("SELECT id, published, draft, draft_deleted FROM records WHERE collection = ?1 AND (published IS NOT NULL OR draft IS NOT NULL)")
@@ -608,8 +608,9 @@ fn migrate_records(conn: &Connection, name: &str, old: &CollectionDef, new: &Col
                     }
                 }
                 Ok(_) => {}
-                // The abandoned draft of a record that is being deleted must not hold up the release.
-                Err(_) if column == "draft" && deleting => {}
+                // The abandoned draft of a record that is being deleted must not hold up the release,
+                // and neither must the live copy of a record this release deletes.
+                Err(_) if (column == "draft" && deleting) || doomed.contains(&id) => {}
                 Err(e) => problems.push(format!("record:{id}：{e}")),
             }
         }
@@ -715,18 +716,9 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
     if all.is_empty() {
         return Err("没有待发布的改动：先修改内容或结构，再来发布。".into());
     }
-    // A record draft inside a collection that is deleted, or about to be, cannot go live.
-    let stranded = |t: &Target| -> Result<Option<String>, String> {
-        let Target::Record(id) = t else { return Ok(None) };
-        let collection: Option<String> =
-            conn.query_row("SELECT collection FROM records WHERE id = ?1", [id], |r| r.get(0)).optional().map_err(|e| db(t, e))?;
-        Ok(match collection {
-            Some(c) if collection_gone(conn, &c)? => Some(c),
-            _ => None,
-        })
-    };
-    let mut skipped = vec![];
-    let chosen: Vec<Target> = match only {
+    // Candidates: the listed targets, or everything the actor may publish.
+    let mut no_right: Vec<String> = vec![];
+    let mut chosen: Vec<Target> = match only {
         Some([]) => return Err("targets 是空的：请列出要发布的对象，或去掉 targets 来发布全部。".into()),
         Some(list) => {
             for t in list {
@@ -737,31 +729,51 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
                     let own = serde_json::to_value(own_scope(t)).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
                     return Err(format!("“{}”没有权限发布“{t}”：需要 {own} 和 publish 权限。", actor.name));
                 }
-                if let Some(c) = stranded(t)? {
-                    return Err(format!("“{t}”所属的 collection:{c} 已删除或正等待删除，它的草稿上不了线：请用 discard_draft 放弃它，或先把集合恢复。"));
-                }
             }
             all.iter().filter(|t| list.contains(t)).cloned().collect()
         }
         None => {
-            let mut mine = vec![];
-            for t in all {
-                if may_publish(actor, &t) && stranded(&t)?.is_none() {
-                    mine.push(t);
-                } else {
-                    skipped.push(t.to_string());
-                }
-            }
+            let (mine, rest): (Vec<Target>, Vec<Target>) = all.into_iter().partition(|t| may_publish(actor, t));
+            no_right = rest.iter().map(Target::to_string).collect();
             mine
         }
     };
-    if chosen.is_empty() {
-        return Err(format!(
-            "没有可以发布的改动，这些都被跳过了：{}。原因是“{}”没有对应权限（发布内容需要 write 和 publish，发布结构需要 structure 和 publish），或者它们所属的集合已删除。",
-            skipped.join("、"),
-            actor.name
-        ));
+    // A record draft cannot go live into a collection that will not be live once this release is applied:
+    // one that is deleted and not being restored here, or one whose deletion is part of this release.
+    // Record deletions are never held back.
+    let mut stranded: Vec<(Target, String)> = vec![];
+    for t in &chosen {
+        let Target::Record(id) = t else { continue };
+        let row: Option<(String, bool)> = conn
+            .query_row("SELECT collection, draft_deleted FROM records WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()
+            .map_err(|e| db(t, e))?;
+        let Some((collection, deleting)) = row else { continue };
+        let Some(c) = coll_row(conn, &collection)? else { continue };
+        let in_release = chosen.contains(&Target::Collection(collection.clone()));
+        let gone_after = if in_release { c.draft_deleted } else { c.deleted };
+        if !deleting && gone_after {
+            stranded.push((t.clone(), collection));
+        }
     }
+    if only.is_some() {
+        if let Some((t, c)) = stranded.first() {
+            return Err(format!("“{t}”所属的 collection:{c} 已删除，或正在这次发布里被删除，它的草稿上不了线：请用 discard_draft 放弃它，或先把集合恢复。"));
+        }
+    }
+    chosen.retain(|t| !stranded.iter().any(|(s, _)| s == t));
+    let held: Vec<String> = stranded.iter().map(|(t, _)| t.to_string()).collect();
+    if chosen.is_empty() {
+        let mut why = vec![];
+        if !no_right.is_empty() {
+            why.push(format!("“{}”没有权限发布 {}（发布内容需要 write 和 publish，发布结构需要 structure 和 publish）", actor.name, no_right.join("、")));
+        }
+        if !held.is_empty() {
+            why.push(format!("{} 所属的集合已删除，它们的草稿上不了线，可以用 discard_draft 放弃，或先恢复集合", held.join("、")));
+        }
+        return Err(format!("没有可以发布的改动：{}。", why.join("；")));
+    }
+    let skipped: Vec<String> = no_right.into_iter().chain(held).collect();
 
     let fail = |e: rusqlite::Error| format!("发布失败：{e}");
     let tx = conn.unchecked_transaction().map_err(fail)?;
@@ -771,6 +783,13 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
         items.push((target, s));
     }
     items.sort_by_key(|(t, s)| rank(t, s.draft_deleted));
+    let doomed: Vec<i64> = items
+        .iter()
+        .filter_map(|(t, s)| match t {
+            Target::Record(id) if s.draft_deleted => Some(*id),
+            _ => None,
+        })
+        .collect();
 
     let mut problems: Vec<String> = vec![];
     let mut touched: Vec<String> = vec![];
@@ -785,7 +804,7 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
             Target::Collection(name) if !s.draft_deleted => {
                 let new = parse_def(name, s.draft.as_deref().unwrap_or_default())?;
                 if let Some(old) = &s.published {
-                    let changed = migrate_records(&tx, name, &parse_def(name, old)?, &new, &mut problems)?;
+                    let changed = migrate_records(&tx, name, &parse_def(name, old)?, &new, &doomed, &mut problems)?;
                     rewritten.extend(changed.into_iter().map(|(id, before)| (id, before, name.clone())));
                 }
                 tx.execute(&format!("UPDATE collections SET published = draft, deleted = 0, {clear} WHERE name = ?1"), [name]).map_err(fail)?;

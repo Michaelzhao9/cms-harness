@@ -211,7 +211,7 @@ fn collections(conn: &Connection, only: Option<&str>) -> Result<Vec<(String, Col
         Some(n) => vec![n.to_string()],
         None => {
             let mut stmt = conn
-                .prepare("SELECT name FROM collections WHERE deleted = 0 ORDER BY name")
+                .prepare("SELECT name FROM collections WHERE deleted = 0 OR draft IS NOT NULL ORDER BY name")
                 .map_err(|e| format!("读取集合失败：{e}"))?;
             let rows = stmt.query_map([], |r| r.get(0)).map_err(|e| format!("读取集合失败：{e}"))?;
             rows.collect::<Result<_, _>>().map_err(|e| format!("读取集合失败：{e}"))?
