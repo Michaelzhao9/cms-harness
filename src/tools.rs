@@ -681,6 +681,19 @@ struct SetView {
     sort: Option<String>,
     #[serde(default)]
     actions: Vec<Action>,
+    /// table (default), cards (a grid with picture, title, subtitle) or list.
+    #[serde(default)]
+    layout: crate::schema::Layout,
+    /// Cards and lists: the field used as each item's title (default: the first column).
+    title_field: Option<String>,
+    subtitle_field: Option<String>,
+    /// Cards: a media field shown as the picture.
+    image_field: Option<String>,
+    /// comfortable (default) or compact.
+    #[serde(default)]
+    density: crate::schema::Density,
+    /// An indexed select field: one section per option.
+    group_by: Option<String>,
     note: String,
 }
 
@@ -806,7 +819,21 @@ fn list_views(conn: &Connection) -> Result<Value, String> {
 
 fn set_view(conn: &Connection, actor: &Actor, a: SetView) -> Result<Value, String> {
     let note = check_note(&a.note)?;
-    let view = ViewDef { name: a.name, title: a.title, collection: a.collection, columns: a.columns, filters: a.filters, sort: a.sort, actions: a.actions };
+    let view = ViewDef {
+        name: a.name,
+        title: a.title,
+        collection: a.collection,
+        columns: a.columns,
+        filters: a.filters,
+        sort: a.sort,
+        actions: a.actions,
+        layout: a.layout,
+        title_field: a.title_field,
+        subtitle_field: a.subtitle_field,
+        image_field: a.image_field,
+        density: a.density,
+        group_by: a.group_by,
+    };
     let def = changes::effective_def(conn, &view.collection)?;
     check_view(&view, &def)?;
     let target = Target::View(view.name.clone());

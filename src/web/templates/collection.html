@@ -25,11 +25,43 @@
 </form>
 {% endif -%}
 {% if list_error %}<p class="note bad" role="alert">{{ list_error }}</p>{% endif %}
+{% for sec in sections -%}
+{% if sec.title %}<h2 class="group">{{ sec.title }}<span class="num">{{ sec.rows|length }}</span></h2>{% endif %}
+{% if layout == "cards" -%}
+<ul class="cards{% if density == "compact" %} compact{% endif %}">
+{% for r in sec.rows -%}
+<li class="card{% if r.current %} on{% endif %}">
+{%- if r.link %}<a class="cover" href="/admin/r/{{ r.id }}">{% else %}<div class="cover">{% endif %}
+{%- if r.image %}<img src="/uploads/{{ r.image }}" alt="" loading="lazy">{% else %}<span class="noimg" aria-hidden="true">{{ i.icon("image", 22) }}</span>{% endif %}
+{%- if r.link %}</a>{% else %}</div>{% endif %}
+<div class="body">
+{% if r.link %}<a class="ttl" href="/admin/r/{{ r.id }}">{{ r.title }}</a>{% else %}<span class="ttl">{{ r.title }}</span>{% endif %}
+{% if r.subtitle %}<span class="sub">{{ r.subtitle }}</span>{% endif %}
+{% if r.status == "changed" or r.status == "deleting" %}<span class="flag"><span class="mk" aria-hidden="true"></span>{{ r.label }}</span>{% elif r.status == "draft" %}<span class="draft">{{ r.label }}</span>{% endif %}
+</div>
+</li>
+{% else -%}
+<li class="empty">{{ "没有这种状态的记录。" if tab else "这里还没有记录。" }}</li>
+{% endfor -%}
+</ul>
+{% elif layout == "list" -%}
+<ul class="plain{% if density == "compact" %} compact{% endif %}">
+{% for r in sec.rows -%}
+<li{% if r.current %} class="on"{% endif %}>
+{% if r.link %}<a class="ttl" href="/admin/r/{{ r.id }}">{{ r.title }}</a>{% else %}<span class="ttl">{{ r.title }}</span>{% endif %}
+{% if r.subtitle %}<span class="sub">{{ r.subtitle }}</span>{% endif %}
+{% if r.status == "changed" or r.status == "deleting" %}<span class="flag"><span class="mk" aria-hidden="true"></span>{{ r.label }}</span>{% elif r.status == "draft" %}<span class="draft">{{ r.label }}</span>{% endif %}
+</li>
+{% else -%}
+<li class="empty">{{ "没有这种状态的记录。" if tab else "这里还没有记录。" }}</li>
+{% endfor -%}
+</ul>
+{% else -%}
 <div class="scroll">
-<table class="table">
+<table class="table{% if density == "compact" %} compact{% endif %}">
 <thead><tr>{% for c in columns %}<th scope="col">{{ c }}</th>{% endfor %}<th scope="col">状态</th>{% if row_delete %}<th><span class="sr">操作</span></th>{% endif %}</tr></thead>
 <tbody>
-{% for r in rows -%}
+{% for r in sec.rows -%}
 <tr class="row{% if r.current %} on{% endif %}">
 {%- for c in r.cells %}<td{% if loop.first %} class="lead"{% endif %}>
 {%- if loop.first and r.link %}<a href="/admin/r/{{ r.id }}">{% endif %}
@@ -45,6 +77,8 @@
 </tbody>
 </table>
 </div>
+{% endif -%}
+{% endfor -%}
 {% if pager -%}
 <nav class="pager" aria-label="分页">
 {% if pager.prev %}<a href="{{ pager.prev }}">上一页</a>{% endif %}

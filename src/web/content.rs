@@ -258,9 +258,44 @@ fn list_ctx(app: &App, user: &AdminUser, def: &CollectionDef, view: Option<&View
                     }
                 })
                 .collect();
-            json!({ "id": id, "status": status, "label": status_label(status), "cells": cells, "current": current == Some(id), "link": allows(Action::Edit) })
+            // Cards and lists: a title, a subtitle and a picture, from the view's fields (else the first columns).
+            let text_of = |name: Option<&str>| -> String {
+                match name.and_then(|n| def.field(n)) {
+                    Some(f) => show(f, &r["data"][&f.name]),
+                    None if name == Some("id") => format!("#{id}"),
+                    None => String::new(),
+                }
+            };
+            let title = view.and_then(|v| v.title_field.as_deref()).map(|f| text_of(Some(f))).or_else(|| cells.first().and_then(|c| c["text"].as_str()).map(String::from)).unwrap_or_default();
+            let subtitle = view.and_then(|v| v.subtitle_field.as_deref()).map(|f| text_of(Some(f))).or_else(|| cells.get(1).and_then(|c| c["text"].as_str()).map(String::from)).unwrap_or_default();
+            let image = view
+                .and_then(|v| v.image_field.as_deref())
+                .and_then(|f| {
+                    let v = &r["data"][f];
+                    v.as_array().and_then(|a| a.first()).unwrap_or(v).as_str().and_then(|p| p.strip_prefix("/uploads/")).filter(|n| !n.ends_with(".pdf")).map(String::from)
+                });
+            let group = view.and_then(|v| v.group_by.as_deref()).map(|g| r["data"][g].as_str().unwrap_or_default().to_string());
+            json!({ "id": id, "status": status, "label": status_label(status), "cells": cells, "current": current == Some(id), "link": allows(Action::Edit),
+                "title": if title.is_empty() { format!("#{id}") } else { title }, "subtitle": subtitle, "image": image, "group": group })
         })
         .collect();
+    // One section per option of `group_by`, in the options' order, then anything without a value; else one section.
+    let sections: Vec<Value> = match view.and_then(|v| v.group_by.as_deref()).and_then(|g| def.field(g)) {
+        Some(f) => {
+            let mut out: Vec<Value> = f
+                .options
+                .iter()
+                .map(|o| json!({ "title": o, "rows": rows.iter().filter(|r| r["group"] == *o).cloned().collect::<Vec<_>>() }))
+                .filter(|s| s["rows"].as_array().is_some_and(|r| !r.is_empty()))
+                .collect();
+            let rest: Vec<Value> = rows.iter().filter(|r| !f.options.iter().any(|o| r["group"] == *o)).cloned().collect();
+            if !rest.is_empty() {
+                out.push(json!({ "title": "未分组", "rows": rest }));
+            }
+            out
+        }
+        None => vec![json!({ "title": "", "rows": rows })],
+    };
 
     let tabs: Vec<Value> = [("", "全部"), ("changed", "有改动"), ("draft", "草稿")]
         .iter()
@@ -289,7 +324,9 @@ fn list_ctx(app: &App, user: &AdminUser, def: &CollectionDef, view: Option<&View
         "tabs": tabs,
         "filters": filters,
         "columns": titles,
-        "rows": rows,
+        "sections": sections,
+        "layout": view.map_or(crate::schema::Layout::Table, |v| v.layout),
+        "density": view.map_or(crate::schema::Density::Comfortable, |v| v.density),
         "list_error": list_error,
         "pager": pager,
         "can_create": allows(Action::Create) && user.actor().can(Scope::Write),
