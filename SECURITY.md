@@ -24,7 +24,8 @@ within a week.
 ## The chat assistant
 
 - It runs every change through the same tool layer as API keys, with the logged-in admin's permissions, minus
-  `publish`: everything it does is a draft until a person publishes. Asking it to publish, or text in a record that
+  `publish` and `set_member_status`: everything it does is a draft until a person publishes, including the site's
+  import map and script origins, and it cannot act on members. Asking it to publish, or text in a record that
   tells it to, gets a refusal from the tool layer, not from the model's good will.
 - Records, pages and uploads are data to it, never instructions; the system prompt says so, and the tool layer enforces
   the parts that matter (no publish, no keys, no admins, no passwords).

@@ -212,7 +212,7 @@ impl Visit<'_> {
     /// The common headers of a site response.
     fn finish(&self, mut resp: Response, script_hash: Option<&str>) -> Response {
         let h = resp.headers_mut();
-        let csp = site_csp(&script_origins(self.conn), script_hash, self.mode == Mode::Preview, &self.framers);
+        let csp = site_csp(&script_origins(self.conn, self.mode == Mode::Preview), script_hash, self.mode == Mode::Preview, &self.framers);
         if let Ok(v) = HeaderValue::from_str(&csp) {
             h.insert(header::CONTENT_SECURITY_POLICY, v);
         }
@@ -338,25 +338,25 @@ fn transpiled(name: &str, source: &str) -> Result<Arc<str>, String> {
     Ok(out)
 }
 
-fn setting(conn: &Connection, key: &str) -> Option<String> {
-    use rusqlite::OptionalExtension;
-    conn.query_row("SELECT value FROM site_settings WHERE key = ?1", [key], |r| r.get(0)).optional().ok().flatten()
+/// A drafted site option: the live value, or in preview the draft if there is one.
+fn setting(conn: &Connection, key: &str, preview: bool) -> Option<Value> {
+    Some(crate::changes::setting(conn, key, preview)).filter(|v| !v.is_null())
 }
 
-fn saved_map(conn: &Connection) -> Option<Value> {
-    serde_json::from_str(&setting(conn, "import_map")?).ok().filter(Value::is_object)
+fn saved_map(conn: &Connection, preview: bool) -> Option<Value> {
+    setting(conn, "import_map", preview).filter(Value::is_object)
 }
 
-/// The `import_map` setting as the text of an inline script: a JSON object, `<` escaped so it cannot end the tag.
+/// The live `import_map` as the text of an inline script: a JSON object, `<` escaped so it cannot end the tag.
 fn import_map(conn: &Connection) -> Option<String> {
-    Some(saved_map(conn)?.to_string().replace('<', "\\u003c"))
+    Some(saved_map(conn, false)?.to_string().replace('<', "\\u003c"))
 }
 
 /// The preview's import map: the saved one with its site paths moved under the preview, plus `"/"` mapped to the
 /// preview so absolute module imports (`import "/assets/x.js"`, `import("/x.js")`) load drafts. `"/_hc/"` maps
 /// to itself, so URLs already under the preview (relative imports resolve there) stay put: the longest key wins.
 fn preview_map(conn: &Connection, base: &str) -> String {
-    let mut map = saved_map(conn).unwrap_or_else(|| json!({}));
+    let mut map = saved_map(conn, true).unwrap_or_else(|| json!({}));
     let fix = |v: &mut Value| {
         if let Some(s) = v.as_str().filter(|s| site_path(s)) {
             *v = json!(format!("{base}{s}"));
@@ -509,10 +509,10 @@ fn valid_origin(s: &str) -> bool {
 }
 
 /// Where site scripts may come from besides the site: the `script_origins` setting, else `https://esm.sh`.
-fn script_origins(conn: &Connection) -> Vec<String> {
-    match setting(conn, "script_origins") {
+fn script_origins(conn: &Connection, preview: bool) -> Vec<String> {
+    match setting(conn, "script_origins", preview) {
         None => vec!["https://esm.sh".into()],
-        Some(json) => serde_json::from_str::<Vec<String>>(&json).unwrap_or_default().into_iter().filter(|o| valid_origin(o)).collect(),
+        Some(v) => serde_json::from_value::<Vec<String>>(v).unwrap_or_default().into_iter().filter(|o| valid_origin(o)).collect(),
     }
 }
 

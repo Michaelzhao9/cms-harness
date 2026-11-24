@@ -132,6 +132,7 @@ async fn the_model_never_gets_publish_and_a_publish_call_fails() {
     let offered = m.seen.lock().unwrap()[0].0.clone();
     assert!(!offered.iter().any(|t| t == "publish"));
     assert!(offered.iter().any(|t| t == "ask_user") && offered.iter().any(|t| t == "create_collection"));
+    assert!(!offered.iter().any(|t| t == "set_member_status"), "acting on members stays a human's call");
     let r = last_results(&m);
     assert!(r[0].2 && r[0].1.contains("发布"), "{r:?}");
     assert!(c.steps[0].error.is_some());

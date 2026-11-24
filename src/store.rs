@@ -48,6 +48,11 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     if !conn.prepare("SELECT 1 FROM pragma_table_info('records') WHERE name = 'owner'")?.exists([])? {
         conn.execute_batch("ALTER TABLE records ADD COLUMN owner INTEGER; ALTER TABLE records ADD COLUMN submitted_at TEXT;")?;
     }
+    // Site options used to change the live site at once; they are drafted options now. Keep what was live.
+    conn.execute_batch(
+        "INSERT OR IGNORE INTO options(key, published) SELECT key, value FROM site_settings WHERE key IN ('import_map', 'script_origins');
+         DELETE FROM site_settings WHERE key IN ('import_map', 'script_origins');",
+    )?;
     // Databases from before per-admin preferences lack the column.
     if !conn.prepare("SELECT 1 FROM pragma_table_info('admins') WHERE name = 'prefs'")?.exists([])? {
         conn.execute_batch("ALTER TABLE admins ADD COLUMN prefs TEXT NOT NULL DEFAULT '{}'")?;

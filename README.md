@@ -120,7 +120,7 @@ cargo build --release
 | `list_site_files` `get_site_file` | read | 列出、读取网站文件 |
 | `write_site_file` `delete_site_file` `upload_site_bundle` | structure | 写、删网站文件，上传整个打包好的网站 |
 | `get_site_settings` | read | 读网站的 import map 和脚本来源 |
-| `set_site_settings` | structure | 设 import map 和脚本来源（立即生效） |
+| `set_site_settings` | structure | 设 import map 和脚本来源（草稿，发布后生效） |
 | `set_member_login` | structure | 打开或关闭会员登录（草稿） |
 | `list_members` | read | 列出会员（不含密码） |
 | `set_member_status` | write | 停用或恢复会员 |

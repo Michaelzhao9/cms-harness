@@ -238,8 +238,9 @@ async fn the_import_map_is_injected_with_its_hash_and_script_origins_extend_the_
     let map = json!({ "imports": { "react": "https://esm.sh/react@19", "x": "</script><script>alert(1)</script>" } });
     {
         let conn = app.conn();
-        conn.execute("INSERT INTO site_settings(key, value) VALUES('import_map', ?1)", [map.to_string()]).unwrap();
-        conn.execute("INSERT INTO site_settings(key, value) VALUES('script_origins', ?1)",
+        // Live values as a published release leaves them (the tool path is checked below and in tests that publish).
+        conn.execute("INSERT INTO options(key, published) VALUES('import_map', ?1)", [map.to_string()]).unwrap();
+        conn.execute("INSERT INTO options(key, published) VALUES('script_origins', ?1)",
             [json!(["https://cdn.jsdelivr.net", "https://unpkg.com:8443", "javascript:alert(1)", "https://x; script-src *"]).to_string()]).unwrap();
     }
     let (_, h, body) = page(&app, "/", &[]).await;
@@ -580,17 +581,23 @@ async fn a_normal_page_stays_well_inside_the_fuel_budget() {
 }
 
 #[test]
-fn site_settings_set_the_import_map_and_script_origins() {
+fn site_settings_are_drafts_until_published() {
     let app = app();
     let map = json!({"imports": {"vue": "https://esm.sh/vue@3"}});
-    let v = ok(&app, &builder(), "set_site_settings", json!({"import_map": map, "script_origins": ["https://esm.sh/", "https://cdn.jsdelivr.net"]}));
-    assert_eq!(v["import_map"], map);
-    assert_eq!(v["script_origins"], json!(["https://esm.sh", "https://cdn.jsdelivr.net"]));
-    // Leaving a key out keeps it; null resets it.
-    let v = ok(&app, &builder(), "set_site_settings", json!({"script_origins": null}));
-    assert_eq!((v["import_map"].clone(), v["script_origins"].clone()), (map, Value::Null));
-    assert!(err(&app, &builder(), "set_site_settings", json!({"script_origins": ["https://a.example/x"]})).contains("不带路径"));
-    assert!(err(&app, &builder(), "set_site_settings", json!({"import_map": [1]})).contains("imports"));
-    assert!(err(&app, &editor(), "set_site_settings", json!({})).contains("权限"));
-    assert_eq!(ok(&app, &reader(), "get_site_settings", json!({}))["import_map"]["imports"]["vue"], "https://esm.sh/vue@3");
+    let v = ok(&app, &builder(), "set_site_settings", json!({"import_map": map, "script_origins": ["https://esm.sh/", "https://cdn.jsdelivr.net"], "note": "用 Vue"}));
+    assert_eq!(v["import_map"]["value"], map);
+    assert_eq!(v["script_origins"]["value"], json!(["https://esm.sh", "https://cdn.jsdelivr.net"]));
+    assert_eq!(v["import_map"]["status"], "draft");
+    // Nothing reaches the live site before publishing.
+    assert_eq!(cms_harness::changes::setting(&app.conn(), "import_map", false), Value::Null);
+    let pending: Vec<String> = ok(&app, &builder(), "list_pending", json!({})).as_array().unwrap().iter().map(|p| p["target"].as_str().unwrap().to_string()).collect();
+    assert!(pending.contains(&"setting:import_map".to_string()) && pending.contains(&"setting:script_origins".to_string()));
+    publish_all(&app);
+    assert_eq!(cms_harness::changes::setting(&app.conn(), "import_map", false), map);
+    // Leaving a key out keeps it; null drafts a reset to the default.
+    let v = ok(&app, &builder(), "set_site_settings", json!({"script_origins": null, "note": "默认"}));
+    assert_eq!((v["import_map"]["value"].clone(), v["script_origins"]["value"].clone()), (map, Value::Null));
+    assert!(err(&app, &builder(), "set_site_settings", json!({"script_origins": ["https://a.example/x"], "note": "x"})).contains("不带路径"));
+    assert!(err(&app, &builder(), "set_site_settings", json!({"import_map": [1], "note": "x"})).contains("imports"));
+    assert!(err(&app, &editor(), "set_site_settings", json!({"note": "x"})).contains("权限"));
 }

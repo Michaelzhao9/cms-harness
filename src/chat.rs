@@ -268,7 +268,8 @@ fn skill_tools() -> Vec<ToolDef> {
 pub fn chat_tools(actor: &Actor) -> Vec<ToolDef> {
     let mut out: Vec<ToolDef> = tools::specs()
         .iter()
-        .filter(|s| s.name != "publish" && s.scope != Scope::Publish && actor.can(s.scope))
+        // No publishing, and nothing that acts on people at once: disabling members stays a human's call.
+        .filter(|s| s.name != "publish" && s.name != "set_member_status" && s.scope != Scope::Publish && actor.can(s.scope))
         .map(|s| ToolDef { name: s.name.into(), description: s.description.into(), input_schema: s.schema.clone() })
         .collect();
     out.push(ask_user_tool());
