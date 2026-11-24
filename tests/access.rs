@@ -165,8 +165,6 @@ async fn members_only_content_on_the_site() {
     let m = member(&app, "d@example.com").await;
     let (_, _, page) = get_with(&app, "/", Some(&m)).await;
     assert!(page.contains("后台写的"));
-    assert_eq!(get_with(&app, "/notes", None).await.0, StatusCode::NOT_FOUND);
-    assert_eq!(get_with(&app, "/notes", Some(&m)).await.0, StatusCode::OK);
 }
 
 #[tokio::test]

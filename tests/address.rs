@@ -117,15 +117,15 @@ async fn separate_addresses_route_by_host() {
     let set = h[header::SET_COOKIE].to_str().unwrap().to_string();
     assert!(set.starts_with("hc_admin=") && set.contains("Path=/") && set.contains("SameSite=Strict") && !set.to_ascii_lowercase().contains("domain"), "{set}");
     let cookie = set.split(';').next().unwrap().to_string();
-    let (status, h, page) = on(&app, ADMIN_HOST, "/admin?v=split&p=/news", Some(&cookie), None, &[]).await;
+    let (status, h, page) = on(&app, ADMIN_HOST, "/admin?v=split&p=/", Some(&cookie), None, &[]).await;
     assert_eq!(status, StatusCode::OK, "{page}");
     // The admin may frame the live site's origin; 线上 is the site itself.
     let policy = h[header::CONTENT_SECURITY_POLICY].to_str().unwrap();
     assert!(policy.contains(&format!("frame-src 'self' {SITE};")) && policy.contains("frame-ancestors 'self'"), "{policy}");
     assert_eq!(h[header::X_FRAME_OPTIONS], "SAMEORIGIN");
-    assert_eq!(frame_src(&page, "live"), format!("{SITE}/news"));
+    assert_eq!(frame_src(&page, "live"), format!("{SITE}/"));
     let draft = frame_src(&page, "draft");
-    assert!(draft.starts_with("/_hc/preview/") && draft.ends_with("/news"), "{draft}");
+    assert!(draft.starts_with("/_hc/preview/") && draft.ends_with("/"), "{draft}");
     // The preview is the admin's: on its host only.
     assert_eq!(on(&app, ADMIN_HOST, &draft, None, None, &[]).await.0, StatusCode::OK);
     assert_eq!(on(&app, SITE_HOST, &draft, None, None, &[]).await.0, StatusCode::NOT_FOUND);

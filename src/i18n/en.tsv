@@ -790,13 +790,5 @@ name 要是一段文字，或者 null 恢复默认。	name must be text, or null
 站点名称和给对话模型看的说明。和内容一样，改完要发布才生效。	The site name, and notes for the chat model: what the site is, who it is for, its rules. Like content, changes go live when published.
 改什么都先是草稿。	Every change starts as a draft.
 你点发布，网站才变。	The site changes when you publish.
-栏目	Sections
-查看全部	View all
 网站已经跑起来了，内容还在路上。	The site is up. The content is on its way.
-站长从这里开始	For the site owner
-用部署时设置的管理员账号。	With the admin account set up at deploy time.
-跟 AI 说想要什么	Tell the AI what you want
-比如“做一个带作品集和联系表单的工作室网站”。	For example: “a studio site with a portfolio and a contact form”.
-看一遍，再发布	Review, then publish
-改动都是草稿，你点发布才上线。	Changes are drafts until you press Publish.
 打开后台	Open the admin

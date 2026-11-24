@@ -421,6 +421,8 @@ async fn admin_js_and_the_logo_are_served_and_pages_carry_only_the_external_scri
     // 线上 is the live site itself: no preview at all, whatever cookie the frame carries.
     assert_eq!(live, "/news");
     ok(&app, &builder(), "update_collection", json!({ "name": "news", "public_read": true, "note": "公开" }));
+    ok(&app, &builder(), "write_site_file", json!({ "path": "news.html", "note": "新闻页",
+        "content": "<!doctype html><title>news</title>{% for n in collection('news') %}<p>{{ n.title }}</p>{% endfor %}" }));
     publish_all(&app);
     ok(&app, &builder(), "update_record", json!({ "id": id, "data": { "title": "草稿标题" }, "note": "改" }));
     let (_, _, live_page) = get_with(&app, &live, Some(&s.0)).await;

@@ -173,7 +173,7 @@ impl Visit<'_> {
                 return self.file(&name, content);
             }
         }
-        // No file: the built-in templates for public collections and, when member login is on, the account pages.
+        // No file: the one built-in page (the welcome on `/`) and, when member login is on, the account pages.
         let parts: Vec<&str> = rel.trim_end_matches('/').split('/').collect();
         if let ["account", which @ ("login" | "signup")] = parts.as_slice() {
             if !crate::members::login_enabled(self.conn, self.mode == Mode::Preview) {
@@ -182,36 +182,10 @@ impl Visit<'_> {
             let next = self.query.iter().find(|(k, _)| k == "next").map(|(_, v)| safe_next(v)).unwrap_or_default();
             return Ok(self.page(&self.account_template(which), json!({ "mode": which, "next": next, "email": "", "name": "", "error": null }), StatusCode::OK));
         }
-        let viewer = self.member.as_ref().and_then(|m| m["id"].as_i64()).map_or(crate::access::Viewer::Anon, crate::access::Viewer::Member);
-        match parts.as_slice() {
-            [""] => Ok(self.page("_hc/home.html", json!({}), StatusCode::OK)),
-            [name] => match site::visible_def(self.conn, self.mode, name, viewer)? {
-                Some((def, _)) => Ok(self.page("_hc/list.html", json!({ "def": describe(&def) }), StatusCode::OK)),
-                None => Ok(self.not_found()),
-            },
-            [name, id] => {
-                let (Some((def, owner)), Ok(id)) = (site::visible_def(self.conn, self.mode, name, viewer)?, id.parse::<i64>()) else { return Ok(self.not_found()) };
-                if !self.record_exists(name, id, owner)? {
-                    return Ok(self.not_found());
-                }
-                Ok(self.page("_hc/item.html", json!({ "def": describe(&def), "id": id }), StatusCode::OK))
-            }
-            _ => Ok(self.not_found()),
+        if parts == [""] {
+            return Ok(self.page("_hc/home.html", json!({}), StatusCode::OK));
         }
-    }
-
-    fn record_exists(&self, collection: &str, id: i64, owner: Option<i64>) -> Result<bool, String> {
-        let visible = match self.mode {
-            Mode::Live => "published IS NOT NULL",
-            Mode::Preview => "(published IS NOT NULL OR draft IS NOT NULL) AND draft_deleted = 0",
-        };
-        self.conn
-            .query_row(
-                &format!("SELECT EXISTS(SELECT 1 FROM records WHERE id = ?1 AND collection = ?2 AND {visible} AND (?3 IS NULL OR owner = ?3))"),
-                rusqlite::params![id, collection, owner],
-                |r| r.get(0),
-            )
-            .map_err(|e| format!("读取记录失败：{e}"))
+        Ok(self.not_found())
     }
 
     /// The common headers of a site response.
@@ -251,17 +225,6 @@ impl Visit<'_> {
         Ok(self.finish(([(header::CONTENT_TYPE, site::content_type(name)), (header::ETAG, etag.as_str())], body).into_response(), None))
     }
 
-    fn visible_collections(&self) -> Result<Vec<Value>, String> {
-        let viewer = self.member.as_ref().and_then(|m| m["id"].as_i64()).map_or(crate::access::Viewer::Anon, crate::access::Viewer::Member);
-        let mut list = vec![];
-        for name in collection_names(self.conn)? {
-            if let Some((def, _)) = site::visible_def(self.conn, self.mode, &name, viewer)? {
-                list.push(describe(&def));
-            }
-        }
-        Ok(list)
-    }
-
     /// Renders a template into a page: the import map and, in preview, the preview's assets go after `<head>`.
     fn page(&self, template: &str, extra: Value, status: StatusCode) -> Response {
         let query: serde_json::Map<String, Value> = self.query.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
@@ -272,10 +235,8 @@ impl Visit<'_> {
             "lang": self.lang.code(),
             "html_lang": self.lang.html(),
         });
-        // The built-in theme's header: the collections this visitor may open, and the account links.
+        // The built-in pages: where the admin opens, for the welcome.
         if template.starts_with("_hc/") {
-            ctx["collections"] = json!(self.visible_collections().unwrap_or_default());
-            ctx["accounts"] = json!(crate::members::login_enabled(self.conn, self.mode == Mode::Preview));
             ctx["admin_url"] = json!(self.admin_url);
         }
         if let (Some(c), Value::Object(extra)) = (ctx.as_object_mut(), extra) {
@@ -327,22 +288,6 @@ impl Visit<'_> {
         let html = format!("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>页面出错了</title></head><body><h1>页面出错了</h1><p>请稍后再试。</p>{detail}</body></html>");
         self.finish((StatusCode::INTERNAL_SERVER_ERROR, Html(html)).into_response(), None)
     }
-}
-
-fn collection_names(conn: &Connection) -> Result<Vec<String>, String> {
-    let fail = |e: rusqlite::Error| format!("读取集合失败：{e}");
-    let mut stmt = conn.prepare("SELECT name FROM collections ORDER BY name").map_err(fail)?;
-    let names = stmt.query_map([], |r| r.get(0)).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;
-    Ok(names)
-}
-
-/// What the built-in templates need of a definition: names, titles, types, and the field that names a record.
-fn describe(def: &crate::schema::CollectionDef) -> Value {
-    use crate::schema::FieldType;
-    let label = def.fields.iter().find(|f| f.kind == FieldType::Text && !f.multiple).map(|f| f.name.clone());
-    let date = def.fields.iter().find(|f| f.kind == FieldType::Date).map(|f| f.name.clone());
-    let fields: Vec<Value> = def.fields.iter().map(|f| json!({ "name": f.name, "title": f.title, "type": f.kind, "multiple": f.multiple })).collect();
-    json!({ "name": def.name, "title": def.title, "label": label, "date": date, "fields": fields })
 }
 
 /// Transpiled scripts by content hash: a file is transpiled once per version, not per request.

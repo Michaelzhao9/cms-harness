@@ -50,27 +50,21 @@ const LIVE_CSP: &str = "default-src 'self'; img-src 'self' https: data:; style-s
 // ---- the fallback site ----
 
 #[tokio::test]
-async fn a_fresh_site_shows_its_public_collections_with_the_fallback_templates() {
+async fn a_fresh_site_is_one_welcome_page() {
     let app = app();
     let id = public_news(&app);
     let (status, h, home) = page(&app, "/", &[]).await;
     assert_eq!(status, StatusCode::OK, "{home}");
     assert!(h[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/html"));
-    assert!(home.contains("测试站") && home.contains("href=\"/news\"") && home.contains("新闻"), "{home}");
-    assert_eq!(csp(&h), LIVE_CSP);
-    assert!(!home.contains("<script"), "{home}");
-
-    let (status, _, list) = page(&app, "/news", &[]).await;
-    assert_eq!(status, StatusCode::OK, "{list}");
-    assert!(list.contains(&format!("href=\"/news/{id}\"")) && list.contains("开业"), "{list}");
-
-    let (status, h, item) = page(&app, &format!("/news/{id}"), &[]).await;
-    assert_eq!(status, StatusCode::OK, "{item}");
-    // Rich text arrives cleaned, as HTML; the script was removed when it was written.
-    assert!(item.contains("<p>欢迎<b>光临</b></p>") && !item.contains("<script") && !item.contains("alert"), "{item}");
-    assert!(item.contains("2026-11-23") && item.contains("公司"), "{item}");
+    assert!(home.contains("测试站") && home.contains("网站已经跑起来了"), "{home}");
+    // Only the welcome: content shows on the site once pages are written for it.
+    assert!(!home.contains("新闻") && !home.contains("开业"), "{home}");
     assert_eq!(csp(&h), LIVE_CSP);
     assert_eq!(h[header::CACHE_CONTROL], "no-cache");
+    assert!(!home.contains("<script"), "{home}");
+    for path in ["/news".to_string(), format!("/news/{id}")] {
+        assert_eq!(page(&app, &path, &[]).await.0, StatusCode::NOT_FOUND, "{path}");
+    }
 }
 
 #[tokio::test]
@@ -103,10 +97,6 @@ async fn stored_html_in_a_text_field_is_escaped() {
     public_news(&app);
     let id = record(&app, "news", json!({ "title": "<img src=x onerror=alert(1)>" }));
     publish_all(&app);
-    for path in ["/news".to_string(), format!("/news/{id}")] {
-        let (_, _, body) = page(&app, &path, &[]).await;
-        assert!(body.contains("&lt;img src=x onerror=alert(1)&gt;") && !body.contains("<img src=x"), "{path}: {body}");
-    }
     write(&app, "index.html", "<h1>{{ record('news', id).title }}</h1>{% include 'card.svg' %}".replace("id", &id.to_string()).as_str());
     // An included file of another type is escaped as HTML too.
     write(&app, "card.svg", "<svg><text>{{ record('news', id).title }}</text></svg>".replace("id", &id.to_string()).as_str());
@@ -570,9 +560,7 @@ async fn a_normal_page_stays_well_inside_the_fuel_budget() {
         record(&app, "news", json!({ "title": format!("第 {i} 条"), "body": "<p>正文</p>", "date": "2026-11-23", "tag": "行业" }));
     }
     publish_all(&app);
-    // The built-in list shows 100 records; a site page loops over 100 records five times.
-    let (status, _, body) = page(&app, "/news", &[]).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
+    // A site page loops over 100 records five times.
     write(&app, "index.html", "{% for _ in range(5) %}{% for n in collection('news', limit=100) %}<h2>{{ n.title }}</h2>{{ n.body }}<p>{{ n.date }} {{ n.tag }} {{ n.slug }}</p>{% endfor %}{% endfor %}");
     publish_all(&app);
     let (status, _, body) = page(&app, "/", &[]).await;
