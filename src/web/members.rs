@@ -60,11 +60,23 @@ async fn enter(app: &Shared, which: &str, f: &AccountForm, who: String) -> Optio
     let (a, which) = (app.clone(), which.to_string());
     let (email, password, name) = (f.email.clone(), f.password.clone(), f.name.clone());
     tokio::task::spawn_blocking(move || {
-        let conn = a.conn();
-        if !members::login_enabled(&conn, false) {
+        // Argon2 is slow on purpose: never run it while holding the one database lock.
+        if !members::login_enabled(&a.conn(), false) {
             return None;
         }
-        Some(if which == "signup" { members::signup(&conn, &email, &password, &name, &who) } else { members::login(&conn, &email, &password, &who) })
+        if which == "signup" {
+            if password.chars().count() < members::MIN_PASSWORD {
+                return Some(Err(format!("密码至少 {} 个字符。", members::MIN_PASSWORD)));
+            }
+            let hash = crate::auth::hash_password(&password);
+            return Some(members::signup_hashed(&a.conn(), &email, &hash, &name, &who));
+        }
+        let found = match members::login_begin(&a.conn(), &email, &who) {
+            Ok(f) => f,
+            Err(e) => return Some(Err(e)),
+        };
+        let ok = crate::auth::verify_password(found.as_ref().map_or(members::dummy_hash(), |f| f.1.as_str()), &password);
+        Some(members::login_finish(&a.conn(), &email, &who, found, ok))
     })
     .await
     .unwrap_or_else(|e| Some(Err(format!("服务器内部错误：{e}"))))

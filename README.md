@@ -134,10 +134,10 @@ cargo build --release
 | `HC_PORT` | `4200` | 端口 |
 | `HC_DATA` | `data` | 数据目录，上传的文件也在这里 |
 | `HC_DB` | `<HC_DATA>/harness.db` | 数据库文件 |
-| `HC_ORIGIN` | `http://127.0.0.1:<端口>` | 对外地址 |
+| `HC_ORIGIN` | `http://127.0.0.1:<端口>` | 对外地址。必须和浏览器地址栏里的地址完全一致（包括 http/https 和端口），否则后台和网站表单的提交会被拒绝 |
 | `HC_SITE_NAME` | `CMS Harness` | 站点名称 |
 | `HC_ADMIN_PASSWORD` | 无 | `cms-harness admin` 使用的密码，不设则随机生成 |
-| `HC_TRUST_PROXY` | 无 | 设为 `1` 时按反向代理加的 `X-Forwarded-For` 计算登录频率限制 |
+| `HC_TRUST_PROXY` | 无 | 反向代理和本程序在同一台机器上时不用设（程序自动认它加的 `X-Forwarded-For`）；代理在别的机器上时设为 `1`，登录、注册和提交的频率限制才会按访客区分 |
 | `LLM_PROVIDER` `LLM_API_KEY` `LLM_MODEL` `LLM_BASE_URL` | 无 | 对话助手用的模型，见上文；`LLM_API_KEY` 不设时读 `ANTHROPIC_API_KEY` |
 | `HC_ADMIN_ORIGIN` | 无 | 后台单独的网址（比如 `https://admin.example.com`），设了就是“分开网址”；设成 `off` 强制“同一个网址”。会盖过 设置 → 网址 里的选择。进不去后台时也可以运行 `cms-harness admin-origin off` 切回同一个网址，正在运行的服务马上生效 |
 

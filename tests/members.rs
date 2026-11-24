@@ -191,3 +191,27 @@ fn members_is_a_reserved_collection_name() {
     let e = err(&app, &builder(), "create_collection", json!({"name": "members", "title": "会员", "fields": [{"name": "email", "title": "邮箱", "type": "text"}], "note": "x"}));
     assert!(e.contains("set_member_login"));
 }
+
+#[tokio::test]
+async fn member_forms_refuse_other_sites() {
+    let app = app();
+    login_on(&app);
+    signup(&app, "attacker@example.com").await;
+    for path in ["/account/login", "/account/logout", "/account/signup", "/news/new"] {
+        let (s, h, _) = post_form_with(&app, path, None, &[("email", "attacker@example.com"), ("password", "long-enough-1")], &[("origin", "https://evil.example")]).await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "{path}");
+        assert!(h.get(header::SET_COOKIE).is_none(), "{path} must not set a cookie");
+    }
+}
+
+#[test]
+fn behind_a_local_proxy_each_visitor_gets_their_own_rate_limit_key() {
+    use cms_harness::web::client_key;
+    let mut h = HeaderMap::new();
+    h.insert("x-forwarded-for", "203.0.113.9".parse().unwrap());
+    let local: std::net::SocketAddr = "127.0.0.1:50000".parse().unwrap();
+    let remote: std::net::SocketAddr = "198.51.100.7:50000".parse().unwrap();
+    assert_eq!(client_key(&h, Some(local), false), "203.0.113.9", "the proxy on loopback reports the visitor");
+    assert_eq!(client_key(&h, Some(remote), false), "198.51.100.7", "a direct caller cannot pick its own key");
+    assert_eq!(client_key(&HeaderMap::new(), Some(local), false), "127.0.0.1");
+}

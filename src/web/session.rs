@@ -51,29 +51,38 @@ fn failures(conn: &Connection, key: &str) -> rusqlite::Result<i64> {
     conn.query_row("SELECT count(*) FROM login_attempts WHERE key = ?1 AND at > datetime('now', '-15 minutes')", [key], |r| r.get(0))
 }
 
-/// Checks the password and opens a session. Returns the cookie token; only its hash is stored.
-/// `client_key` identifies the caller (an address, or "unknown"). The error is `LOCKED` when rate limited,
-/// else `BAD_LOGIN` for both unknown emails and wrong passwords.
-pub fn login(conn: &Connection, email: &str, password: &str, client_key: &str) -> Result<String, String> {
-    // Verified when the email is unknown, so both failures take the same time.
+/// The admin a login checks against: (id, hash) when the email is known. Fails with `LOCKED` when the email or the
+/// client is rate limited. The caller verifies outside the database lock, then calls `login_finish`.
+pub fn login_begin(conn: &Connection, email: &str, client_key: &str) -> Result<Option<(i64, String)>, String> {
+    let db = |e: rusqlite::Error| format!("读取数据库失败：{e}");
+    let email = auth::normalize_email(email);
+    conn.execute("DELETE FROM login_attempts WHERE at <= datetime('now', '-15 minutes')", []).map_err(db)?;
+    if failures(conn, &format!("email:{email}")).map_err(db)? >= MAX_FAILURES || failures(conn, &format!("ip:{client_key}")).map_err(db)? >= MAX_FAILURES {
+        return Err(LOCKED.into());
+    }
+    conn.query_row("SELECT id, password_hash FROM admins WHERE lower(email) = ?1 ORDER BY id LIMIT 1", [&email], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()
+        .map_err(db)
+}
+
+/// Verified when the email is unknown, so both failures take the same time.
+pub fn dummy_hash() -> &'static str {
     static DUMMY: LazyLock<String> = LazyLock::new(|| auth::hash_password("cms-harness dummy password"));
+    DUMMY.as_str()
+}
+
+/// Records the outcome and opens a session when the password matched. Returns the cookie token; only its hash is
+/// stored. The error is `BAD_LOGIN` for both unknown emails and wrong passwords.
+pub fn login_finish(conn: &Connection, email: &str, client_key: &str, found: Option<(i64, String)>, ok: bool) -> Result<String, String> {
     let db = |e: rusqlite::Error| format!("读取数据库失败：{e}");
     let email = auth::normalize_email(email);
     let (email_key, client_key) = (format!("email:{email}"), format!("ip:{client_key}"));
-    conn.execute("DELETE FROM login_attempts WHERE at <= datetime('now', '-15 minutes')", []).map_err(db)?;
-    if failures(conn, &email_key).map_err(db)? >= MAX_FAILURES || failures(conn, &client_key).map_err(db)? >= MAX_FAILURES {
-        return Err(LOCKED.into());
-    }
-    let found: Option<(i64, String)> = conn
-        .query_row("SELECT id, password_hash FROM admins WHERE lower(email) = ?1 ORDER BY id LIMIT 1", [&email], |r| Ok((r.get(0)?, r.get(1)?)))
-        .optional()
-        .map_err(db)?;
-    let ok = auth::verify_password(found.as_ref().map_or(DUMMY.as_str(), |f| f.1.as_str()), password);
     let Some((admin_id, _)) = found.filter(|_| ok) else {
         conn.execute("INSERT INTO login_attempts(key) VALUES(?1), (?2)", params![email_key, client_key]).map_err(db)?;
         return Err(BAD_LOGIN.into());
     };
     conn.execute("DELETE FROM login_attempts WHERE key = ?1", [&email_key]).map_err(db)?;
+    conn.execute("DELETE FROM admin_sessions WHERE expires_at <= datetime('now')", []).map_err(db)?;
     let token = random_hex();
     conn.execute(
         "INSERT INTO admin_sessions(token_hash, admin_id, csrf, expires_at) VALUES(?1, ?2, ?3, datetime('now', '+30 days'))",
@@ -81,6 +90,13 @@ pub fn login(conn: &Connection, email: &str, password: &str, client_key: &str) -
     )
     .map_err(db)?;
     Ok(token)
+}
+
+/// `login_begin`, verify, `login_finish` in one go (tests and the CLI; request handlers split it).
+pub fn login(conn: &Connection, email: &str, password: &str, client_key: &str) -> Result<String, String> {
+    let found = login_begin(conn, email, client_key)?;
+    let ok = auth::verify_password(found.as_ref().map_or(dummy_hash(), |f| f.1.as_str()), password);
+    login_finish(conn, email, client_key, found, ok)
 }
 
 pub fn logout(conn: &Connection, token_hash: &str) {

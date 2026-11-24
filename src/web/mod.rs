@@ -78,21 +78,24 @@ pub fn router(app: Shared) -> Router {
         .with_state(app)
 }
 
-/// Every POST under `/admin` must come from our own origin when it says where it comes from.
+/// Every browser POST must come from our own origin when it says where it comes from.
 /// Every `/admin` path except the login page and static files needs a session; the user lands in the request extensions.
 /// Mounted in `api::router` around everything, so routes merged by later tasks are covered too.
 pub async fn guard(State(app): State<Shared>, mut req: Request, next: Next) -> Response {
     let path = req.uri().path();
-    if !(path == "/admin" || path.starts_with("/admin/")) {
-        return next.run(req).await;
-    }
-    if req.method() == Method::POST {
+    // Every browser POST (admin, member forms, site submissions) must come from the address it was sent to when the
+    // browser says where it comes from. Only the bearer-key API is exempt: keys, not cookies, authorise it.
+    let keyed = ["/api/v1/tools", "/api/v1/site", "/api/v1/media"].iter().any(|p| path == *p || path.starts_with(&format!("{p}/"))) || path == "/mcp";
+    if req.method() == Method::POST && !keyed {
         let here = req.extensions().get::<Address>().map_or(app.origin.as_str(), |a| a.here.as_str());
         if let Some(origin) = req.headers().get(header::ORIGIN) {
             if origin.as_bytes() != here.as_bytes() {
-                return (StatusCode::FORBIDDEN, format!("请求来源与后台地址（{here}）不一致，已拒绝。请用这个地址打开后台后再提交。")).into_response();
+                return (StatusCode::FORBIDDEN, format!("请求来源与这个网址（{here}）不一致，已拒绝。请在这个网址的页面上提交。")).into_response();
             }
         }
+    }
+    if !(path == "/admin" || path.starts_with("/admin/")) {
+        return next.run(req).await;
     }
     if path == "/admin/login" || path.starts_with("/admin/static/") {
         return next.run(req).await;
@@ -156,7 +159,10 @@ fn headers(app: &App, addr: &Address, path: &str, mut resp: Response) -> Respons
 /// appended last to `X-Forwarded-For` (earlier entries are whatever the client sent).
 pub fn client_key(headers: &HeaderMap, peer: Option<SocketAddr>, trust_proxy: bool) -> String {
     let forwarded = || headers.get("x-forwarded-for")?.to_str().ok()?.rsplit(',').next().map(str::trim).filter(|s| !s.is_empty());
-    match (trust_proxy, forwarded()) {
+    // The server listens on loopback only, so a loopback peer is the reverse proxy in front: the address it appended
+    // last is the visitor. Without this every visitor would share one rate-limit key.
+    let via_local_proxy = peer.is_some_and(|p| p.ip().is_loopback());
+    match (trust_proxy || via_local_proxy, forwarded()) {
         (true, Some(ip)) => ip.to_string(),
         _ => peer.map_or_else(|| "unknown".into(), |a| a.ip().to_string()),
     }
@@ -200,7 +206,12 @@ async fn login(State(app): State<Shared>, Extension(addr): Extension<Address>, p
     let trust = std::env::var("HC_TRUST_PROXY").is_ok_and(|v| v == "1");
     let client = client_key(&headers, peer.map(|Extension(ConnectInfo(a))| a), trust);
     let a = app.clone();
-    let done = tokio::task::spawn_blocking(move || session::login(&a.conn(), &f.email, &f.password, &client))
+    // Argon2 runs between the two short database steps, never under the lock.
+    let done = tokio::task::spawn_blocking(move || {
+        let found = session::login_begin(&a.conn(), &f.email, &client)?;
+        let ok = crate::auth::verify_password(found.as_ref().map_or(session::dummy_hash(), |x| x.1.as_str()), &f.password);
+        session::login_finish(&a.conn(), &f.email, &client, found, ok)
+    })
         .await
         .unwrap_or_else(|e| Err(format!("服务器内部错误：{e}")));
     match done {

@@ -99,6 +99,7 @@ fn note_attempt(conn: &Connection, keys: &[&str]) -> Result<(), String> {
 }
 
 fn open_session(conn: &Connection, member_id: i64) -> Result<String, String> {
+    conn.execute("DELETE FROM member_sessions WHERE expires_at <= datetime('now')", []).map_err(db)?;
     let token = random_hex();
     conn.execute("INSERT INTO member_sessions(token_hash, member_id, expires_at) VALUES (?1, ?2, datetime('now', '+30 days'))", params![sha256_hex(&token), member_id])
         .map_err(db)?;
@@ -108,15 +109,20 @@ fn open_session(conn: &Connection, member_id: i64) -> Result<String, String> {
 
 /// Creates a member and logs them in; returns the session token. `client` is the caller's address key.
 pub fn signup(conn: &Connection, email: &str, password: &str, name: &str, client: &str) -> Result<String, String> {
+    if password.chars().count() < MIN_PASSWORD {
+        return Err(format!("密码至少 {MIN_PASSWORD} 个字符。"));
+    }
+    signup_hashed(conn, email, &auth::hash_password(password), name, client)
+}
+
+/// `signup` with the password already hashed, so the slow hashing happens without the database lock.
+pub fn signup_hashed(conn: &Connection, email: &str, password_hash: &str, name: &str, client: &str) -> Result<String, String> {
     conn.execute("DELETE FROM member_attempts WHERE at <= datetime('now', '-1 hour')", []).map_err(db)?;
     let client_key = format!("signup:{client}");
     if attempts(conn, &client_key, "-1 hour")? >= MAX_SIGNUPS_PER_HOUR {
         return Err("注册太频繁，请过一会儿再试。".into());
     }
     let email = check_email(email)?;
-    if password.chars().count() < MIN_PASSWORD {
-        return Err(format!("密码至少 {MIN_PASSWORD} 个字符。"));
-    }
     let name: String = name.trim().chars().take(80).collect();
     note_attempt(conn, &[&client_key])?;
     // ponytail: says the email is taken; a CMS sign-up form usually does, at the cost of revealing who registered.
@@ -124,25 +130,34 @@ pub fn signup(conn: &Connection, email: &str, password: &str, name: &str, client
     if taken {
         return Err("这个邮箱已经注册过了，请直接登录。".into());
     }
-    conn.execute("INSERT INTO members(email, password_hash, name) VALUES (?1, ?2, ?3)", params![email, auth::hash_password(password), name]).map_err(db)?;
+    conn.execute("INSERT INTO members(email, password_hash, name) VALUES (?1, ?2, ?3)", params![email, password_hash, name]).map_err(db)?;
     open_session(conn, conn.last_insert_rowid())
 }
 
-/// Checks the password and opens a session. Same error for unknown email and wrong password; 5 failures per
-/// email or per client in 15 minutes lock that key.
-pub fn login(conn: &Connection, email: &str, password: &str, client: &str) -> Result<String, String> {
-    static DUMMY: LazyLock<String> = LazyLock::new(|| auth::hash_password("cms-harness member dummy"));
+/// The stored hash a login checks against: (member id, hash, status) when the email is known. Fails when the email
+/// or the client is locked out. Call `login_finish` with the result of verifying, outside the database lock.
+pub fn login_begin(conn: &Connection, email: &str, client: &str) -> Result<Option<(i64, String, String)>, String> {
     conn.execute("DELETE FROM member_attempts WHERE at <= datetime('now', '-1 hour')", []).map_err(db)?;
     let email = auth::normalize_email(email);
-    let (email_key, client_key) = (format!("login:email:{email}"), format!("login:ip:{client}"));
-    if attempts(conn, &email_key, "-15 minutes")? >= MAX_LOGIN_FAILURES || attempts(conn, &client_key, "-15 minutes")? >= MAX_LOGIN_FAILURES {
+    if attempts(conn, &format!("login:email:{email}"), "-15 minutes")? >= MAX_LOGIN_FAILURES || attempts(conn, &format!("login:ip:{client}"), "-15 minutes")? >= MAX_LOGIN_FAILURES {
         return Err(LOCKED.into());
     }
-    let found: Option<(i64, String, String)> = conn
-        .query_row("SELECT id, password_hash, status FROM members WHERE email = ?1", [&email], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+    conn.query_row("SELECT id, password_hash, status FROM members WHERE email = ?1", [&email], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
         .optional()
-        .map_err(db)?;
-    let ok = auth::verify_password(found.as_ref().map_or(DUMMY.as_str(), |f| f.1.as_str()), password);
+        .map_err(db)
+}
+
+/// The hash to verify against when the email is unknown, so both failures take the same time.
+pub fn dummy_hash() -> &'static str {
+    static DUMMY: LazyLock<String> = LazyLock::new(|| auth::hash_password("cms-harness member dummy"));
+    DUMMY.as_str()
+}
+
+/// Records the outcome of a login and opens the session when it passed. 5 failures per email or per client in
+/// 15 minutes lock that key; unknown email and wrong password get the same message.
+pub fn login_finish(conn: &Connection, email: &str, client: &str, found: Option<(i64, String, String)>, ok: bool) -> Result<String, String> {
+    let email = auth::normalize_email(email);
+    let (email_key, client_key) = (format!("login:email:{email}"), format!("login:ip:{client}"));
     match found {
         Some((id, _, status)) if ok && status == "active" => {
             conn.execute("DELETE FROM member_attempts WHERE key = ?1", [&email_key]).map_err(db)?;
@@ -154,6 +169,13 @@ pub fn login(conn: &Connection, email: &str, password: &str, client: &str) -> Re
             Err(BAD_LOGIN.into())
         }
     }
+}
+
+/// `login_begin`, verify, `login_finish` in one go, for callers that are not on a request path.
+pub fn login(conn: &Connection, email: &str, password: &str, client: &str) -> Result<String, String> {
+    let found = login_begin(conn, email, client)?;
+    let ok = auth::verify_password(found.as_ref().map_or(dummy_hash(), |f| f.1.as_str()), password);
+    login_finish(conn, email, client, found, ok)
 }
 
 pub fn logout(conn: &Connection, token: &str) {
