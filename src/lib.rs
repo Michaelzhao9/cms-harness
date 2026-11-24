@@ -10,6 +10,7 @@ pub mod render;
 pub mod site;
 pub mod llm;
 pub mod chat;
+pub mod skills;
 pub mod web;
 
 use rusqlite::Connection;

@@ -294,3 +294,22 @@ async fn image_attachments_are_uploaded_and_other_files_refused() {
     assert!(matches!(&first[0], Block::Image { media_type, .. } if media_type == "image/png"));
     assert!(matches!(&first[1], Block::Text(t) if t.contains("/uploads/")));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn installed_skills_are_offered_and_readable() {
+    let app = app();
+    let md = "---\nname: brand-voice\ndescription: 用品牌语气写文案\n---\n\n句子要短。\n";
+    harness_cms::skills::install(&app.conn(), vec![("SKILL.md".into(), md.into())], "upload", "b@test").unwrap();
+    let m = with_model(&app, Scripted {
+        replies: Mutex::new(VecDeque::from([tool("s1", "use_skill", json!({"name": "brand-voice"})), done("好")])),
+        ..Default::default()
+    });
+    let u = admin("builder");
+    chat::start(app.clone(), &u, "写个标题".into(), vec![], None).unwrap();
+    let c = idle(&app, &u.token_hash).await;
+    let (tools, _, system) = m.seen.lock().unwrap()[0].clone();
+    assert!(tools.contains(&"use_skill".to_string()) && system.contains("brand-voice：用品牌语气写文案"));
+    let r = last_results(&m);
+    assert!(!r[0].2 && r[0].1.contains("句子要短"), "{r:?}");
+    assert_eq!(c.steps[0].label, "使用技能 brand-voice");
+}

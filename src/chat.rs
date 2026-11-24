@@ -14,6 +14,8 @@ use std::sync::{Arc, Mutex};
 
 pub const MAX_MODEL_CALLS: usize = 30;
 pub const ASK_USER: &str = "ask_user";
+pub const USE_SKILL: &str = "use_skill";
+pub const READ_SKILL_FILE: &str = "read_skill_file";
 const CHANGE_FIELDS: usize = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -179,6 +181,21 @@ fn ask_user_tool() -> ToolDef {
     }
 }
 
+fn skill_tools() -> Vec<ToolDef> {
+    vec![
+        ToolDef {
+            name: USE_SKILL.into(),
+            description: "读取一个已安装技能的完整说明和它带的文件清单。做和某个技能描述相符的事之前先读它。".into(),
+            input_schema: json!({"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
+        },
+        ToolDef {
+            name: READ_SKILL_FILE.into(),
+            description: "读取技能里的一个文件（参考资料、模板、示例脚本的文本；脚本不会被执行）。".into(),
+            input_schema: json!({"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}),
+        },
+    ]
+}
+
 /// Every tool the actor may call, minus `publish`, plus `ask_user`.
 pub fn chat_tools(actor: &Actor) -> Vec<ToolDef> {
     let mut out: Vec<ToolDef> = tools::specs()
@@ -197,7 +214,7 @@ const RULES: &str = "你是这个网站后台里的助手，替管理员修改�
 - 删除任何东西之前，或者不确定管理员要什么时，用 ask_user 先问清楚。\n\
 - 改之前先读，改完说清楚改了哪里。回答用中文，简短。";
 
-fn system_prompt(app: &Shared, actor: &Actor, ctx: Option<&str>) -> String {
+fn system_prompt(app: &Shared, actor: &Actor, ctx: Option<&str>) -> (String, bool) {
     let conn = app.conn();
     let notes: Option<String> = conn
         .query_row("SELECT published FROM notes WHERE id = 1", [], |r| r.get::<_, Option<String>>(0))
@@ -206,6 +223,7 @@ fn system_prompt(app: &Shared, actor: &Actor, ctx: Option<&str>) -> String {
         .flatten()
         .flatten()
         .and_then(|j| serde_json::from_str(&j).ok());
+    let skills = crate::skills::enabled(&conn);
     drop(conn);
     let mut out = String::from(RULES);
     if let Some(n) = notes.filter(|n| !n.trim().is_empty()) {
@@ -228,10 +246,16 @@ fn system_prompt(app: &Shared, actor: &Actor, ctx: Option<&str>) -> String {
     if list.as_array().is_none_or(|l| l.is_empty()) {
         out.push_str("还没有。");
     }
+    if !skills.is_empty() {
+        out.push_str("\n\n已安装的技能（管理员装的，可以照着做；用 use_skill 读全文）：");
+        for (name, description) in &skills {
+            out.push_str(&format!("\n- {name}：{description}"));
+        }
+    }
     if let Some(ctx) = ctx.filter(|c| !c.is_empty()) {
         out.push_str(&format!("\n\n管理员现在正在看：{ctx}"));
     }
-    out
+    (out, !skills.is_empty())
 }
 
 fn step_kind(name: &str) -> StepKind {
@@ -264,6 +288,8 @@ fn step_label(name: &str, input: &Value) -> String {
         "delete_site_file" => format!("删除页面文件 {}", s("path")),
         "set_view" => format!("修改界面 {}", s("name")),
         "set_site_notes" => "修改站点说明".into(),
+        USE_SKILL => format!("使用技能 {}", s("name")),
+        READ_SKILL_FILE => format!("查看技能 {} 的 {}", s("name"), s("path")),
         ASK_USER => "向你提问".into(),
         other => other.to_string(),
     }
@@ -342,7 +368,12 @@ async fn run_tool(turn: &Turn<'_>, tool_id: &str, name: &str, input: &Value) -> 
         None
     };
     let (a, act, n, i) = (app.clone(), actor.clone(), name.to_string(), input.clone());
-    let result = blocking(move || tools::call(&a, &act, &n, i)).await;
+    let result = blocking(move || match n.as_str() {
+        USE_SKILL => crate::skills::read(&a.conn(), i["name"].as_str().unwrap_or(""), "SKILL.md"),
+        READ_SKILL_FILE => crate::skills::read(&a.conn(), i["name"].as_str().unwrap_or(""), i["path"].as_str().unwrap_or("")),
+        _ => tools::call(&a, &act, &n, i),
+    })
+    .await;
     match result {
         Ok(v) => {
             let mut changes = vec![];
@@ -372,11 +403,14 @@ async fn run_tool(turn: &Turn<'_>, tool_id: &str, name: &str, input: &Value) -> 
 }
 
 async fn run(app: Shared, token: String, id: u64, actor: Actor, ctx: Option<String>, model: Arc<dyn crate::llm::Model>) {
-    let tools_list = chat_tools(&actor);
-    let system = {
+    let mut tools_list = chat_tools(&actor);
+    let (system, has_skills) = {
         let (a, act, c) = (app.clone(), actor.clone(), ctx.clone());
         blocking(move || system_prompt(&a, &act, c.as_deref())).await
     };
+    if has_skills {
+        tools_list.extend(skill_tools());
+    }
     let finish = |app: &Shared, note: Option<String>| {
         app.chat.update(&token, id, |c| {
             c.running = false;
