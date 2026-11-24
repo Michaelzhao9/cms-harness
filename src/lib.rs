@@ -18,6 +18,7 @@ pub mod backup;
 pub mod cache;
 pub mod export;
 pub mod i18n;
+pub mod langs;
 pub mod routes;
 pub mod schedule;
 pub mod search;

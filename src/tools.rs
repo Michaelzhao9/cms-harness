@@ -44,6 +44,8 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<SchedulePublish>("schedule_publish", Scope::Publish, "定时发布：到了时间按普通发布的流程和检查上线，记在发布记录里，发布人是你。at 是时间，tz_offset_minutes 是这个时间所在时区比 UTC 快多少分钟（北京时间 480，默认 0 即 UTC）。不传 targets 就发布到时所有待发布的改动。"),
             spec::<NoArgs>("list_schedules", Scope::Read, "列出等待中的定时发布和最近执行过的定时发布（时间是 UTC）。"),
             spec::<IdArgs>("cancel_schedule", Scope::Publish, "取消一个还没执行的定时发布。"),
+            spec::<SetTranslation>("set_translation", Scope::Write, "写一条记录在某种语言里的翻译（草稿，发布后生效）：只传要翻译的文字字段；也可以给这种语言单独的网址名 slug，或用 hide 让它在这种语言里不出现。翻译会记下照着哪个版本的原文译的，原文以后改了，这段翻译就会标成过期。"),
+            spec::<TranslationStatus>("translation_status", Scope::Read, "每种语言的翻译情况：哪些记录缺翻译、哪些因为原文改过而过期。翻译前先看这个。"),
             spec::<NoArgs>("list_pending", Scope::Read, "列出所有待发布的改动：改了什么、谁改的、波及多少记录。"),
             spec::<Publish>("publish", Scope::Publish, "把待发布的改动发布上线：全部，或只发 targets 里列出的几项。发布前整体检查，不通过就什么都不上线。"),
             spec::<TargetArgs>("list_versions", Scope::Read, "列出一个对象的发布历史（最近 30 个版本）。target 形如 record:12、collection:news。"),
@@ -161,6 +163,8 @@ fn dispatch(app: &App, conn: &Connection, actor: &Actor, name: &str, args: Value
             let a: IdArgs = parse(name, args)?;
             crate::schedule::cancel(conn, a.id).map(|_| json!({ "id": a.id, "status": "cancelled" }))
         }
+        "set_translation" => set_translation(conn, actor, &app.origin, parse(name, args)?),
+        "translation_status" => translation_status(conn, parse(name, args)?),
         "list_pending" => parse::<NoArgs>(name, args).and_then(|_| Ok(json!(changes::pending(conn)?))),
         "publish" => publish(conn, actor, parse(name, args)?),
         "list_versions" => list_versions(conn, parse(name, args)?),
@@ -241,6 +245,8 @@ struct CreateCollection {
     /// Where each record's page lives, like "/news/{slug}"; "/<name>/{slug}" when left out. Pages appear once the
     /// site has a detail template: "<name>/_item.html" or the site-wide "_item.html".
     url: Option<String>,
+    /// In the site's other languages: "fallback" (default) or "hide" records without a translation.
+    untranslated: Option<crate::schema::Untranslated>,
     fields: Vec<FieldDef>,
     note: String,
 }
@@ -263,6 +269,8 @@ struct FieldChange {
     default: Option<Option<Value>>,
     options: Option<Vec<String>>,
     target: Option<String>,
+    /// false keeps a text field the same in every language (codes, names of things).
+    translate: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -278,6 +286,8 @@ struct UpdateCollection {
     create: Option<crate::schema::Create>,
     /// Where each record's page lives, like "/news/{slug}" or "/products/{category.slug}/{slug}"; "" for the default.
     url: Option<String>,
+    /// In the site's other languages: "fallback" shows untranslated records in the default language, "hide" leaves them out.
+    untranslated: Option<crate::schema::Untranslated>,
     add_fields: Option<Vec<FieldDef>>,
     change_fields: Option<Vec<FieldChange>>,
     remove_fields: Option<Vec<String>>,
@@ -368,6 +378,7 @@ fn create_collection(conn: &Connection, actor: &Actor, a: CreateCollection) -> R
         },
         fields: a.fields,
         url: a.url.filter(|u| !u.trim().is_empty()),
+        untranslated: a.untranslated,
     };
     let taken = conn
         .query_row("SELECT 1 FROM collections WHERE name = ?1", [&def.name], |_| Ok(()))
@@ -408,6 +419,9 @@ fn update_collection(conn: &Connection, actor: &Actor, a: UpdateCollection) -> R
     if let Some(u) = a.url {
         def.url = Some(u.trim().to_string()).filter(|u| !u.is_empty());
     }
+    if let Some(u) = a.untranslated {
+        def.untranslated = Some(u);
+    }
     for f in a.add_fields.unwrap_or_default() {
         if def.field(&f.name).is_some() {
             return Err(format!("字段“{}”已存在：不能重复添加，要修改请用 change_fields。", f.name));
@@ -429,6 +443,7 @@ fn update_collection(conn: &Connection, actor: &Actor, a: UpdateCollection) -> R
         if let Some(v) = c.default { f.default = v }
         if let Some(v) = c.options { f.options = v }
         if let Some(v) = c.target { f.target = Some(v) }
+        if let Some(v) = c.translate { f.translate = Some(v) }
     }
     let removed = a.remove_fields.unwrap_or_default();
     for n in &removed {
@@ -570,6 +585,146 @@ fn own_links(conn: &Connection, origin: &str, def: &CollectionDef, mut doc: Valu
         }
     }
     doc
+}
+
+/// Whether another record of the collection already uses `slug` in `lang`.
+fn lang_slug_taken(conn: &Connection, collection: &str, id: i64, lang: &str, slug: &str) -> Result<bool, String> {
+    conn.query_row(
+        &format!("SELECT EXISTS(SELECT 1 FROM records WHERE collection = ?1 AND id != ?2 AND json_extract(coalesce(draft, published), '$._i18n.\"{lang}\"._slug') = ?3)"),
+        rusqlite::params![collection, id, slug],
+        |r| r.get(0),
+    )
+    .map_err(|e| format!("检查网址名失败：{e}"))
+}
+
+fn set_translation(conn: &Connection, actor: &Actor, origin: &str, a: SetTranslation) -> Result<Value, String> {
+    let note = check_note(&a.note)?;
+    let langs = crate::langs::load(conn, true).ok_or("网站还没有设置多种语言：先用 set_site_settings 设 languages。")?;
+    if langs.get(&a.lang).is_none() || langs.is_default(&a.lang) {
+        let others: Vec<&str> = langs.list.iter().skip(1).map(|l| l.code.as_str()).collect();
+        return Err(format!("“{}”不是要翻译的语言：可以翻译成 {}。默认语言的文字直接用 update_record 改。", a.lang, others.join("、")));
+    }
+    let row = load_record(conn, a.id)?;
+    if row.status() == "deleting" {
+        return Err(format!("记录 {} 正等待删除，不能修改：如要保留它，请先用 discard_draft 放弃删除。", a.id));
+    }
+    let def = changes::effective_def(conn, &row.collection)?;
+    let mut doc: Value = match (&row.draft, &row.published) {
+        (Some(d), _) => serde_json::from_str(d).map_err(|e| format!("记录 {} 的内容已损坏：{e}", a.id))?,
+        (None, Some(p)) => changes::to_current(conn, &row.collection, &serde_json::from_str(p).map_err(|e| format!("记录 {} 的内容已损坏：{e}", a.id))?)?,
+        (None, None) => json!({}),
+    };
+    let mut t = doc[crate::langs::KEY][&a.lang].as_object().cloned().unwrap_or_default();
+    let mut src = t.get("_src").and_then(Value::as_object).cloned().unwrap_or_default();
+    let data = match &a.data {
+        Value::Null => serde_json::Map::new(),
+        Value::Object(o) => o.clone(),
+        _ => return Err("data 要是一个对象，比如 {\"title\": \"...\"}。".into()),
+    };
+    for (k, v) in data {
+        let f = def.field(&k).ok_or_else(|| format!("集合“{}”没有字段“{k}”：请检查字段名。", def.name))?;
+        if !crate::langs::translated(f) {
+            return Err(format!("字段“{k}”不翻译（只有文字和富文本字段会翻译，或者它设了 translate: false），各语言共用一个值，直接用 update_record 改。"));
+        }
+        if v.is_null() || v.as_str().is_some_and(|s| s.trim().is_empty()) {
+            t.remove(&k);
+            src.remove(&k);
+            continue;
+        }
+        let mut v = crate::schema::check_value(f, &v).map_err(|e| format!("字段“{k}”的值 {v} 不合法：{e}"))?;
+        if let (FieldType::Richtext, Value::String(html)) = (&f.kind, &v) {
+            v = Value::String(crate::routes::link_refs(conn, origin, html));
+        }
+        t.insert(k.clone(), v);
+        src.insert(k.clone(), json!(crate::langs::fingerprint(doc.get(&k).unwrap_or(&Value::Null))));
+    }
+    if let Some(h) = a.hide {
+        if h { t.insert("_hide".into(), json!(true)); } else { t.remove("_hide"); }
+    }
+    let wanted = match a.slug.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) => {
+            crate::routes::check_slug(s)?;
+            if lang_slug_taken(conn, &row.collection, a.id, &a.lang, s)? {
+                return Err(format!("网址名“{s}”在 {} 里已经被别的记录用了，请换一个。", a.lang));
+            }
+            Some(s.to_string())
+        }
+        // First translation of the title: an address made from it.
+        None if t.get("_slug").is_none() => {
+            let title = def.fields.iter().filter(|f| f.kind == FieldType::Text && !f.multiple).find_map(|f| t.get(&f.name).and_then(Value::as_str)).unwrap_or_default();
+            let base = crate::routes::slugify(title);
+            if base.is_empty() {
+                None
+            } else {
+                let mut s = base.clone();
+                let mut n = 2;
+                while lang_slug_taken(conn, &row.collection, a.id, &a.lang, &s)? {
+                    s = format!("{base}-{n}");
+                    n += 1;
+                }
+                Some(s)
+            }
+        }
+        None => None,
+    };
+    if let Some(s) = wanted {
+        t.insert("_slug".into(), json!(s));
+    }
+    t.insert("_src".into(), Value::Object(src));
+    if !doc.is_object() {
+        doc = json!({});
+    }
+    if !doc[crate::langs::KEY].is_object() {
+        doc[crate::langs::KEY] = json!({});
+    }
+    doc[crate::langs::KEY][&a.lang] = Value::Object(t);
+    changes::save_draft(conn, actor, &Target::Record(a.id), &doc, note)?;
+    Ok(json!({ "id": a.id, "lang": a.lang, "status": crate::langs::status(&def, &doc, &a.lang), "slug": doc[crate::langs::KEY][&a.lang]["_slug"] }))
+}
+
+fn translation_status(conn: &Connection, a: TranslationStatus) -> Result<Value, String> {
+    let langs = crate::langs::load(conn, true).ok_or("网站还没有设置多种语言。")?;
+    let codes: Vec<String> = match &a.lang {
+        Some(l) if langs.get(l).is_some() && !langs.is_default(l) => vec![l.clone()],
+        Some(l) => return Err(format!("“{l}”不是网站要翻译的语言。")),
+        None => langs.list.iter().skip(1).map(|l| l.code.clone()).collect(),
+    };
+    let names: Vec<String> = match &a.collection {
+        Some(c) => vec![c.clone()],
+        None => conn
+            .prepare("SELECT name FROM collections WHERE deleted = 0 ORDER BY name")
+            .and_then(|mut s| s.query_map([], |r| r.get(0))?.collect())
+            .map_err(|e| format!("读取集合失败：{e}"))?,
+    };
+    let mut out = vec![];
+    for name in names {
+        let Ok(def) = changes::effective_def(conn, &name) else { continue };
+        if !def.fields.iter().any(crate::langs::translated) {
+            continue;
+        }
+        let rows: Vec<(i64, String)> = conn
+            .prepare("SELECT id, coalesce(draft, published) FROM records WHERE collection = ?1 AND draft_deleted = 0 AND coalesce(draft, published) IS NOT NULL ORDER BY id")
+            .and_then(|mut s| s.query_map([&name], |r| Ok((r.get(0)?, r.get(1)?)))?.collect())
+            .map_err(|e| format!("读取记录失败：{e}"))?;
+        for code in &codes {
+            let (mut missing, mut stale, mut done) = (vec![], vec![], 0);
+            for (id, doc) in &rows {
+                let doc: Value = serde_json::from_str(doc).unwrap_or(Value::Null);
+                if doc[crate::langs::KEY][code]["_hide"].as_bool() == Some(true) {
+                    continue;
+                }
+                match crate::langs::summary(&def, &doc, code) {
+                    Some("missing") => missing.push(*id),
+                    Some("stale") => stale.push(*id),
+                    Some(_) => done += 1,
+                    None => {}
+                }
+            }
+            out.push(json!({ "collection": name, "lang": code, "done": done, "missing": missing.len(), "stale": stale.len(),
+                "missing_ids": missing.iter().take(50).collect::<Vec<_>>(), "stale_ids": stale.iter().take(50).collect::<Vec<_>>() }));
+        }
+    }
+    Ok(json!(out))
 }
 
 fn create_record(conn: &Connection, actor: &Actor, origin: &str, a: CreateRecord) -> Result<Value, String> {
@@ -794,6 +949,13 @@ struct SetSiteSettings {
     /// The site's name, shown in page titles, the built-in pages and the admin; null for the default. Leave out to keep it.
     #[serde(default, deserialize_with = "present")]
     name: Option<Option<Value>>,
+    /// The site's languages, the default first: {"list": [{"code": "zh", "name": "中文"}, {"code": "en", "name": "English",
+    /// "domain": "example.com"?, "fallback": []?}], "sync": true?}. null for a single-language site.
+    #[serde(default, deserialize_with = "present")]
+    languages: Option<Option<Value>>,
+    /// Template text per language, for `{{ "关于我们"|t }}`: {"en": {"关于我们": "About us"}, "ja": {…}}. null to clear.
+    #[serde(default, deserialize_with = "present")]
+    strings: Option<Option<Value>>,
     note: String,
 }
 
@@ -803,7 +965,8 @@ fn get_site_settings(conn: &Connection) -> Result<Value, String> {
         let target = Target::Setting(k.into());
         Ok(json!({ "value": changes::setting(conn, k, true), "status": changes::target_status(conn, &target)? }))
     };
-    Ok(json!({ "name": get("site_name")?, "import_map": get("import_map")?, "script_origins": get("script_origins")? }))
+    Ok(json!({ "name": get("site_name")?, "languages": get("languages")?, "strings": get("strings")?,
+        "import_map": get("import_map")?, "script_origins": get("script_origins")? }))
 }
 
 fn set_site_settings(conn: &Connection, actor: &Actor, a: SetSiteSettings) -> Result<Value, String> {
@@ -819,6 +982,25 @@ fn set_site_settings(conn: &Connection, actor: &Actor, a: SetSiteSettings) -> Re
             None | Some(Some("")) => writes.push(("site_name", None)),
             Some(Some(n)) if n.chars().count() <= 60 => writes.push(("site_name", Some(json!(n).to_string()))),
             Some(Some(_)) => return Err("站点名称太长：最多 60 个字符。".into()),
+        }
+    }
+    if let Some(l) = a.languages {
+        match l {
+            None | Some(Value::Null) => writes.push(("languages", None)),
+            Some(v) => {
+                let langs: crate::langs::Languages = serde_json::from_value(v.clone()).map_err(|e| format!("languages 的格式不对：{e}。要形如 {{\"list\": [{{\"code\": \"zh\", \"name\": \"中文\"}}, {{\"code\": \"en\", \"name\": \"English\"}}]}}。"))?;
+                crate::langs::check(&langs)?;
+                writes.push(("languages", Some(json!(langs).to_string())));
+            }
+        }
+    }
+    if let Some(s) = a.strings {
+        match s {
+            None | Some(Value::Null) => writes.push(("strings", None)),
+            Some(Value::Object(o)) if o.values().all(|t| t.as_object().is_some_and(|t| t.values().all(Value::is_string))) => {
+                writes.push(("strings", Some(Value::Object(o).to_string())))
+            }
+            Some(_) => return Err("strings 要形如 {\"en\": {\"关于我们\": \"About us\"}}。".into()),
         }
     }
     if let Some(m) = a.import_map {
@@ -978,6 +1160,31 @@ fn upload_media(app: &App, a: UploadMedia) -> Result<Value, String> {
 #[serde(deny_unknown_fields)]
 struct PathArgs {
     path: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SetTranslation {
+    id: i64,
+    /// A language of the site other than the default, like "en".
+    lang: String,
+    /// The translated text fields, like {"title": "...", "body": "<p>...</p>"}; an empty string removes one.
+    #[serde(default)]
+    data: Value,
+    /// This language's address segment; made from the translated title when left out the first time.
+    slug: Option<String>,
+    /// true: the record does not appear in this language at all.
+    hide: Option<bool>,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct TranslationStatus {
+    /// One collection; all when left out.
+    collection: Option<String>,
+    /// One language; all of the site's other languages when left out.
+    lang: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]

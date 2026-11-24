@@ -19,7 +19,7 @@ pub enum Target {
 }
 
 /// Site options that are drafted and published like everything else.
-pub const SETTINGS: &[(&str, &str)] = &[("site_name", "站点名称"), ("member_login", "会员登录"), ("import_map", "网站的 import map"), ("script_origins", "网站允许的脚本来源")];
+pub const SETTINGS: &[(&str, &str)] = &[("site_name", "站点名称"), ("languages", "网站语言"), ("strings", "站点文字翻译"), ("member_login", "会员登录"), ("import_map", "网站的 import map"), ("script_origins", "网站允许的脚本来源")];
 
 impl Target {
     pub fn parse(s: &str) -> Result<Target, String> {

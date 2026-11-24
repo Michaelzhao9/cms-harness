@@ -350,6 +350,8 @@ struct Server<'c> {
     viewer: crate::access::Viewer,
     /// What the render read, for the page cache: `f:<path>`, `c:<collection>`, `records`.
     deps: std::collections::BTreeSet<String>,
+    /// The language records are shown in, on a multilingual site.
+    lang: Option<crate::langs::Current>,
 }
 
 impl Server<'_> {
@@ -429,7 +431,17 @@ impl Server<'_> {
         let q = Query { filters, status, sort, limit, offset, owner };
         let (rows, _) = crate::query::run(self.conn, &def, &q, live)?;
         let mut out = vec![];
-        for row in rows {
+        let lang = self.lang.clone().filter(|l| !l.is_default());
+        for mut row in rows {
+            if let Some(l) = &lang {
+                if !crate::langs::visible(&def, &row.raw, &l.code, &l.default) {
+                    continue;
+                }
+                let url = crate::routes::url_for_in(self.conn, self.mode, &def, row.id, &row.raw, Some(l));
+                let mut doc = crate::langs::localize(&def, &row.raw, &l.chain, &l.default);
+                doc["_url"] = json!(url);
+                row.doc = doc;
+            }
             let mark = self.mark(&format!("record:{}", row.id))?;
             // A changed record: only the fields that differ from the live copy are marked.
             let live_copy = match (mark, row.status) {
@@ -437,12 +449,19 @@ impl Server<'_> {
                     let doc: Option<String> = self.conn
                         .query_row("SELECT published FROM records WHERE id = ?1", [row.id], |r| r.get(0))
                         .map_err(|e| format!("读取记录 {} 失败：{e}", row.id))?;
-                    doc.and_then(|d| serde_json::from_str::<Value>(&d).ok()).map(|d| crate::schema::project(&def, &d))
+                    doc.and_then(|d| serde_json::from_str::<Value>(&d).ok()).map(|d| match &lang {
+                        Some(l) => crate::langs::localize(&def, &d, &l.chain, &l.default),
+                        None => crate::schema::project(&def, &d),
+                    })
                 }
                 _ => None,
             };
             let mut fields = vec![("id".to_string(), json!(row.id), false, None)];
-            fields.push(("url".to_string(), json!(crate::routes::url_for(self.conn, self.mode, &def, row.id, &row.doc)), false, None));
+            let url = match row.doc.get("_url") {
+                Some(u) => u.clone(),
+                None => json!(crate::routes::url_for_in(self.conn, self.mode, &def, row.id, &row.doc, self.lang.as_ref())),
+            };
+            fields.push(("url".to_string(), url, false, None));
             for f in &def.fields {
                 let mut v = row.doc.get(&f.name).cloned().unwrap_or(Value::Null);
                 let changed = live_copy.as_ref().is_none_or(|old| old.get(&f.name) != Some(&v));
@@ -450,7 +469,7 @@ impl Server<'_> {
                     if html.contains("/_r/") {
                         self.deps.insert("records".into());
                     }
-                    v = Value::String(crate::routes::expand_refs(self.conn, self.mode, html, self.viewer));
+                    v = Value::String(crate::routes::expand_refs_in(self.conn, self.mode, html, self.viewer, self.lang.as_ref()));
                 }
                 fields.push((f.name.clone(), v, f.kind == FieldType::Richtext, mark.filter(|_| changed)));
             }
@@ -561,7 +580,23 @@ fn render_thread(asker: Asker, mode: Mode, page: &str, ctx: Value) -> Result<Str
     env.set_fuel(Some(FUEL));
     // Output is HTML whatever the template's own extension: an included `.svg` or `.txt` escapes values too.
     env.set_auto_escape_callback(|_| minijinja::AutoEscape::Html);
-    env.add_filter("t", crate::i18n::filter);
+    // Template text: the site's own string table for the page's language, then the built-in catalog.
+    env.add_filter("t", |state: &minijinja::State, value: minijinja::Value| -> String {
+        if let (Some(s), Some(table)) = (value.as_str(), state.lookup("_strings")) {
+            if let Ok(t) = table.get_attr(s) {
+                if let Some(t) = t.as_str() {
+                    return t.to_string();
+                }
+            }
+        }
+        crate::i18n::filter(state, value)
+    });
+    let page_lang = |state: &minijinja::State| state.lookup("lang").and_then(|l| l.as_str().map(String::from)).unwrap_or_else(|| "zh".into());
+    env.add_filter("date", move |state: &minijinja::State, value: String| crate::langs::format_date(&value, &page_lang(state)));
+    env.add_filter("number", move |state: &minijinja::State, value: f64, decimals: Option<usize>| crate::langs::format_number(value, &page_lang(state), decimals.unwrap_or(0)));
+    env.add_filter("money", move |state: &minijinja::State, value: f64, currency: Option<String>| {
+        crate::langs::format_money(value, currency.as_deref().unwrap_or("CNY"), &page_lang(state))
+    });
     let a = asker.clone();
     env.set_loader(move |name| {
         if let Some((_, source)) = FALLBACKS.iter().find(|(n, _)| *n == name) {
@@ -640,7 +675,8 @@ pub struct Rendered {
 /// `conn`, the caller's connection, so a render inside the publish transaction sees what is about to go live.
 pub fn render(conn: &Connection, mode: Mode, page: &str, ctx: Value) -> Result<Rendered, String> {
     let viewer = ctx["member"]["id"].as_i64().map_or(crate::access::Viewer::Anon, crate::access::Viewer::Member);
-    let mut server = Server { conn, mode, page: page.to_string(), order: None, files_changed: vec![], asks: 0, viewer, deps: Default::default() };
+    let mut server = Server { conn, mode, page: page.to_string(), order: None, files_changed: vec![], asks: 0, viewer, deps: Default::default(),
+        lang: serde_json::from_value(ctx["_site_lang"].clone()).ok() };
     let (tx, rx) = mpsc::channel::<Line>();
     // minijinja functions must be 'static, so they cannot borrow the connection: the render runs on a scoped
     // thread and asks this one, which answers until the render drops its end of the channel.

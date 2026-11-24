@@ -42,6 +42,8 @@ pub async fn serve(State(app): State<Shared>, req: Request) -> Response {
     let (path, query, if_none_match) = parts(&req);
     let lang = crate::i18n::for_visitor(req.headers(), req.uri().query());
     let picked = crate::i18n::from_query(req.uri().query());
+    let host = req.headers().get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or_default().to_ascii_lowercase();
+    let accept_language = req.headers().get(header::ACCEPT_LANGUAGE).and_then(|h| h.to_str().ok()).unwrap_or_default().to_string();
     let member_token = session::cookie_value(req.headers(), crate::members::COOKIE);
     let a = app.clone();
     let resp = tokio::task::spawn_blocking(move || {
@@ -51,7 +53,8 @@ pub async fn serve(State(app): State<Shared>, req: Request) -> Response {
             .filter(|_| crate::members::login_enabled(&conn, false))
             .and_then(|t| crate::members::from_token(&conn, &t))
             .map(|m| crate::members::member_json(&m));
-        let v = Visit { app: &a, conn: &conn, mode: Mode::Live, base: "", path: &path, query: &query, if_none_match, framers, member, lang, admin_url };
+        let v = Visit { app: &a, conn: &conn, mode: Mode::Live, base: "", path: &path, query: &query, if_none_match, framers, member, lang, admin_url,
+            host, accept_language, site: Default::default() };
         v.respond()
     })
     .await
@@ -85,7 +88,8 @@ pub async fn preview(State(app): State<Shared>, req: Request) -> Response {
         // A ?lang= link wins, then the admin's own language, then the browser's.
         let lang = picked.or_else(|| session::preview_lang(&conn, &token)).unwrap_or(lang);
         let base = format!("/_hc/preview/{token}");
-        let v = Visit { app: &a, conn: &conn, mode: Mode::Preview, base: &base, path: &path, query: &query, if_none_match: None, framers: "'self'".into(), member: None, lang, admin_url: "/admin".into() };
+        let v = Visit { app: &a, conn: &conn, mode: Mode::Preview, base: &base, path: &path, query: &query, if_none_match: None, framers: "'self'".into(), member: None, lang, admin_url: "/admin".into(),
+            host: String::new(), accept_language: String::new(), site: Default::default() };
         v.respond()
     })
     .await
@@ -128,12 +132,25 @@ struct Visit<'a> {
     lang: crate::i18n::Lang,
     /// Where the admin opens (its own origin in 分开 mode), for the empty site's welcome.
     admin_url: String,
+    /// The host the request came to (a language may have its own domain), and the browser's languages.
+    host: String,
+    accept_language: String,
+    /// The site language this request is in, and the path without its prefix; set by `respond`.
+    site: std::cell::RefCell<Option<SiteNow>>,
+}
+
+/// A multilingual site's languages, the one this request is in, and the path inside it.
+struct SiteNow {
+    langs: crate::langs::Languages,
+    cur: crate::langs::Current,
+    rest: String,
 }
 
 /// The built-in sign-up or login page after a form post (`which` is "login" or "signup"), with an error.
 pub fn account_page(app: &App, conn: &Connection, which: &str, form: Value, status: StatusCode, lang: crate::i18n::Lang) -> Response {
     let path = format!("/account/{which}");
-    let v = Visit { app, conn, mode: Mode::Live, base: "", path: &path, query: &[], if_none_match: None, framers: "'self'".into(), member: None, lang, admin_url: "/admin".into() };
+    let v = Visit { app, conn, mode: Mode::Live, base: "", path: &path, query: &[], if_none_match: None, framers: "'self'".into(), member: None, lang, admin_url: "/admin".into(),
+        host: String::new(), accept_language: String::new(), site: Default::default() };
     let mut extra = json!({ "mode": which, "next": "", "email": "", "name": "", "error": null });
     if let (Some(e), Value::Object(f)) = (extra.as_object_mut(), form) {
         e.extend(f);
@@ -161,7 +178,25 @@ impl Visit<'_> {
         if reserved(rel.trim_end_matches('/')) {
             return self.not_found();
         }
-        match self.route(rel) {
+        // A multilingual site: the language comes from the host (a language's own domain) or the first path segment.
+        let mut rel = rel.to_string();
+        if let Some(langs) = crate::langs::load(self.conn, self.mode == Mode::Preview) {
+            let host = self.host.split(':').next().unwrap_or_default();
+            let by_domain = langs.list.iter().find(|l| l.domain.as_deref().is_some_and(|d| d.eq_ignore_ascii_case(host))).map(|l| l.code.clone());
+            let first = rel.split('/').next().unwrap_or_default().to_string();
+            let by_prefix = langs.list.iter().skip(1).find(|l| l.code == first).map(|l| l.code.clone());
+            let code = by_prefix.clone().or(by_domain.clone()).or_else(|| langs.default_code().map(String::from)).unwrap_or_default();
+            if by_prefix.is_some() {
+                // `/en` alone is the English home page.
+                rel = rel.strip_prefix(&first).unwrap_or_default().trim_start_matches('/').to_string();
+            }
+            let cur = crate::langs::Current::new(&langs, &code, by_domain.as_deref() == Some(code.as_str()) && by_prefix.is_none());
+            *self.site.borrow_mut() = Some(SiteNow { langs, cur, rest: rel.clone() });
+        }
+        if reserved(rel.trim_end_matches('/')) {
+            return self.not_found();
+        }
+        match self.route(&rel) {
             Ok(resp) => resp,
             Err(e) => self.failed(&e),
         }
@@ -172,7 +207,8 @@ impl Visit<'_> {
         (self.mode == Mode::Live && self.member.is_none()).then(|| {
             let mut q: Vec<String> = self.query.iter().map(|(k, v)| format!("{k}={v}")).collect();
             q.sort();
-            format!("{}|{}?{}", self.lang.code(), self.path, q.join("&"))
+            let site = self.site.borrow().as_ref().map(|s| s.cur.code.clone()).unwrap_or_default();
+            format!("{}|{site}|{}|{}?{}", self.lang.code(), self.host, self.path, q.join("&"))
         })
     }
 
@@ -201,15 +237,16 @@ impl Visit<'_> {
         let viewer = self.member.as_ref().and_then(|m| m["id"].as_i64()).map_or(crate::access::Viewer::Anon, crate::access::Viewer::Member);
         let segments: Vec<String> = rel.trim_end_matches('/').split('/').map(crate::routes::decode).collect();
         let found = match segments.as_slice() {
-            [r, id] if r == "_r" => match id.parse::<i64>().ok().and_then(|id| crate::routes::by_id(self.conn, self.mode, id, viewer)) {
+            [r, id] if r == "_r" => match id.parse::<i64>().ok().and_then(|id| crate::routes::by_id_in(self.conn, self.mode, id, viewer, self.current().as_ref())) {
                 Some(f) => return Ok(self.redirect(&f.canonical)),
                 None => return Ok(self.not_found()),
             },
             [one] if one.is_empty() => None,
-            _ => crate::routes::resolve(self.conn, self.mode, &segments, viewer),
+            _ => crate::routes::resolve_in(self.conn, self.mode, &segments, viewer, self.current().as_ref()),
         };
         if let Some(f) = found {
-            if crate::routes::decode(&format!("/{}", rel.trim_end_matches('/'))) != f.canonical {
+            let prefix = self.current().map(|c| c.prefix).unwrap_or_default();
+            if crate::routes::decode(&format!("{prefix}/{}", rel.trim_end_matches('/'))).trim_end_matches('/') != f.canonical.trim_end_matches('/') {
                 return Ok(self.redirect(&f.canonical));
             }
             return Ok(self.page(&f.template, json!({ "route": { "collection": f.collection, "id": f.id } }), StatusCode::OK));
@@ -277,6 +314,43 @@ impl Visit<'_> {
         Ok(self.finish(([(header::CONTENT_TYPE, site::content_type(name)), (header::ETAG, etag.as_str())], body).into_response(), None))
     }
 
+    /// The language this request is in, on a multilingual site.
+    fn current(&self) -> Option<crate::langs::Current> {
+        self.site.borrow().as_ref().map(|s| s.cur.clone())
+    }
+
+    /// Absolute addresses of this page in every language it exists in, the current one marked.
+    fn alternates(&self, extra: &Value) -> Vec<Value> {
+        let site = self.site.borrow();
+        let Some(s) = site.as_ref() else { return vec![] };
+        let scheme = if self.app.origin.starts_with("https://") { "https" } else { "http" };
+        let record = match (extra["route"]["collection"].as_str(), extra["route"]["id"].as_i64()) {
+            (Some(c), Some(id)) => site::any_def(self.conn, self.mode, c).ok().flatten().map(|def| (def, id)),
+            _ => None,
+        };
+        let doc = record.as_ref().and_then(|(_, id)| {
+            let sql = if self.mode == Mode::Live { "SELECT published FROM records WHERE id = ?1" } else { "SELECT coalesce(draft, published) FROM records WHERE id = ?1" };
+            self.conn.query_row(sql, [id], |r| r.get::<_, Option<String>>(0)).ok().flatten().and_then(|d| serde_json::from_str::<Value>(&d).ok())
+        });
+        let mut out = vec![];
+        for l in &s.langs.list {
+            let cur = crate::langs::Current::new(&s.langs, &l.code, l.domain.is_some());
+            let path = match (&record, &doc) {
+                (Some((def, id)), Some(doc)) => match crate::routes::url_for_in(self.conn, self.mode, def, *id, doc, Some(&cur)) {
+                    Some(p) => p,
+                    None => continue,
+                },
+                _ => format!("{}/{}", cur.prefix, s.rest.trim_start_matches('/')),
+            };
+            let href = match (&l.domain, self.mode) {
+                (Some(d), Mode::Live) => format!("{scheme}://{d}{}", crate::routes::encode(&path)),
+                _ => format!("{}{}", if self.mode == Mode::Live { self.app.origin.as_str() } else { "" }, crate::routes::encode(&path)),
+            };
+            out.push(json!({ "code": l.code, "name": l.name, "url": href, "current": l.code == s.cur.code, "dir": crate::langs::dir(&l.code) }));
+        }
+        out
+    }
+
     /// A permanent redirect to `path` on this site (under the preview's prefix in preview).
     fn redirect(&self, path: &str) -> Response {
         let to = format!("{}{}", self.base, crate::routes::encode(path));
@@ -296,6 +370,26 @@ impl Visit<'_> {
         // The built-in pages: where the admin opens, for the welcome.
         if template.starts_with("_hc/") {
             ctx["admin_url"] = json!(self.admin_url);
+        }
+        // A multilingual site: the page's language, its other languages, and its template text.
+        let alternates = self.alternates(&extra);
+        if let Some(s) = self.site.borrow().as_ref() {
+            let code = s.cur.code.clone();
+            ctx["lang"] = json!(code);
+            ctx["html_lang"] = json!(code);
+            ctx["dir"] = json!(crate::langs::dir(&code));
+            ctx["languages"] = json!(alternates);
+            ctx["_site_lang"] = json!(s.cur);
+            ctx["_strings"] = crate::changes::setting(self.conn, "strings", self.mode == Mode::Preview)[&code].clone();
+            // The visitor's browser prefers another of the site's languages: templates may offer it.
+            let wants = self.accept_language.split(',').filter_map(|t| t.split(';').next()).map(|t| t.trim().to_ascii_lowercase());
+            let suggested = wants
+                .filter_map(|t| s.langs.list.iter().find(|l| l.code == t || t.starts_with(&format!("{}-", l.code))).map(|l| l.code.clone()))
+                .next()
+                .filter(|c| *c != code);
+            ctx["suggested_lang"] = json!(suggested.and_then(|c| alternates.iter().find(|a| a["code"] == c).cloned()));
+        } else {
+            ctx["dir"] = json!("ltr");
         }
         if let (Some(c), Value::Object(extra)) = (ctx.as_object_mut(), extra) {
             c.extend(extra);
@@ -317,6 +411,15 @@ impl Visit<'_> {
         };
         if let Some(map) = &map {
             inject.push_str(&format!("<script type=\"importmap\">{map}</script>"));
+        }
+        // Search engines learn which pages are the same in other languages.
+        if alternates.len() > 1 {
+            for a in &alternates {
+                inject.push_str(&format!("<link rel=\"alternate\" hreflang=\"{}\" href=\"{}\">", a["code"].as_str().unwrap_or_default(), a["url"].as_str().unwrap_or_default().replace('"', "%22")));
+            }
+            if let Some(d) = alternates.first() {
+                inject.push_str(&format!("<link rel=\"alternate\" hreflang=\"x-default\" href=\"{}\">", d["url"].as_str().unwrap_or_default().replace('"', "%22")));
+            }
         }
         html.insert_str(site::head_insert_at(&html), &inject);
         let hash = map.map(|m| base64::engine::general_purpose::STANDARD.encode(Sha256::digest(m.as_bytes())));
