@@ -37,6 +37,7 @@ It needs no external services. One executable and one SQLite file serve the publ
 - **Skills.** Install a skill folder (with a `SKILL.md`) from GitHub or a zip. The chat reads it when the task needs it.
 - **Your agent, too.** A built-in MCP server and a REST API with scoped keys (`read`, `write`, `structure`, `publish`).
 - **Full-text search.** `search("query")` in a page, `GET /api/v1/search` and a `search` tool. Chinese works without a dictionary, and visitors only ever find what they may open.
+- **Backup and restore.** The whole site (database and uploads) as one zip, from **Settings → Backup** or `cms-harness backup`. A restore checks the archive and saves the current site first.
 - **Chinese and English.** The admin switches in Settings. The chat replies in the admin's language. Built-in pages follow the visitor's browser, and have a 中文 / EN switch.
 
 <table>
@@ -75,6 +76,13 @@ Sign in at `http://127.0.0.1:4200/admin`. The site is at `http://127.0.0.1:4200/
 To use the chat, open **Settings → Chat model**, pick a service, paste a key and press **Detect**. You can also set `LLM_PROVIDER` (`anthropic` or `openai`), `LLM_API_KEY`, `LLM_MODEL` and `LLM_BASE_URL` in the environment. Without a model, the admin and the API still work, but there is no chat.
 
 To serve the site publicly, put a reverse proxy (nginx, Caddy) in front for HTTPS. The server only listens on the local address. Set `HC_ORIGIN` to the public address.
+
+Back up and restore from the command line too (stop the server before a restore):
+
+```sh
+./target/release/cms-harness backup site.zip
+./target/release/cms-harness restore site.zip
+```
 
 ## Connect your agent
 

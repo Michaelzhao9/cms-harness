@@ -4,6 +4,8 @@
 //!   cms-harness admin <email> [builder|editor]          create an admin or reset its password
 //!   cms-harness key <name> [write] [structure] [publish] print a new API key once
 //!   cms-harness admin-origin <url|off>                  put the admin on its own address, or back on the site's
+//!   cms-harness backup [file.zip]                       write the whole site (database and uploads) to a zip
+//!   cms-harness restore <file.zip>                      replace the whole site with a backup (stop the server first)
 //!
 //! Settings come from the environment: HC_PORT (4200), HC_DATA (data), HC_DB (<HC_DATA>/harness.db),
 //! HC_ORIGIN (http://127.0.0.1:<port>), HC_SITE_NAME (CMS Harness), HC_ADMIN_PASSWORD (for `admin`),
@@ -20,7 +22,9 @@ const USAGE: &str = "用法：
   cms-harness                                          启动服务
   cms-harness admin <邮箱> [builder|editor]            新建管理员，或重置他的密码
   cms-harness key <名字> [write] [structure] [publish]  生成一把接口密钥（只显示一次）
-  cms-harness admin-origin <网址|off>                  把后台放到自己的网址上；off 切回和网站同一个网址";
+  cms-harness admin-origin <网址|off>                  把后台放到自己的网址上；off 切回和网站同一个网址
+  cms-harness backup [文件.zip]                        把整站（数据库和上传的文件）备份成一个 zip
+  cms-harness restore <文件.zip>                       用备份替换整站（先停掉正在运行的服务）";
 
 fn env(name: &str, default: &str) -> String {
     std::env::var(name).ok().filter(|v| !v.trim().is_empty()).unwrap_or_else(|| default.to_string())
@@ -31,7 +35,8 @@ fn main() -> ExitCode {
     // Check the command before anything is created on disk.
     let known = match args.first().map(String::as_str) {
         None => true,
-        Some("admin" | "key" | "admin-origin") => args.len() >= 2,
+        Some("admin" | "key" | "admin-origin" | "restore") => args.len() >= 2,
+        Some("backup") => true,
         Some(_) => false,
     };
     if !known {
@@ -131,6 +136,58 @@ fn main() -> ExitCode {
                 println!("注意：环境变量 HC_ADMIN_ORIGIN 已设置，服务按它来，不看这里的设置。");
             }
             ExitCode::SUCCESS
+        }
+        Some("backup") => {
+            let out = args.get(1).cloned().unwrap_or_else(|| {
+                let date: String = conn.query_row("SELECT strftime('%Y%m%d-%H%M', 'now')", [], |r| r.get(0)).unwrap_or_default();
+                format!("cms-harness-backup-{date}.zip")
+            });
+            let file = match std::fs::File::create(&out) {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("无法写入 {out}：{e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match cms_harness::backup::export(&conn, &data, file) {
+                Ok(()) => {
+                    println!("已备份到 {out}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    let _ = std::fs::remove_file(&out);
+                    eprintln!("{e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("restore") => {
+            let bytes = match std::fs::read(&args[1]) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("无法读取 {}：{e}", args[1]);
+                    return ExitCode::FAILURE;
+                }
+            };
+            let db_path = PathBuf::from(&db);
+            let restored = cms_harness::backup::unpack(&bytes, &db_path, &data).and_then(|unpacked| {
+                let saved = cms_harness::backup::safety_copy(&conn, &data)?;
+                drop(conn);
+                cms_harness::backup::swap_in(unpacked, &db_path)?;
+                store::open(&db).map_err(|e| format!("打开恢复后的数据库失败：{e}"))?;
+                Ok(saved)
+            });
+            match restored {
+                Ok(saved) => {
+                    println!("已从 {} 恢复。恢复前的整站另存在 {}。", args[1], saved.display());
+                    println!("如果服务正在运行，请重启它。");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    ExitCode::FAILURE
+                }
+            }
         }
         Some(_) => {
             eprintln!("{USAGE}");

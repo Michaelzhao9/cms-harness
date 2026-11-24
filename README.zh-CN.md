@@ -37,6 +37,7 @@
 - **技能。** 从 GitHub 或 zip 安装技能文件夹（带 `SKILL.md`），对话遇到相关的事会自己去读。
 - **你的 agent 也能接。** 内置 MCP 服务和 REST 接口，密钥分权限（`read`、`write`、`structure`、`publish`）。
 - **全文搜索。** 页面里用 `search("关键词")`，接口 `GET /api/v1/search`，还有 `search` 工具。中文不用词库也能搜，访客只会搜到自己能看的内容。
+- **备份和恢复。** 整站（数据库和上传的文件）打成一个 zip，在 **设置 → 备份** 下载，或运行 `cms-harness backup`。恢复前会先检查备份，并把现在的整站另存一份。
 - **中文和英文。** 后台在设置里切换，对话按管理员的语言回答。内置页面按访客的浏览器显示，也有 中文 / EN 切换。
 
 <table>
@@ -75,6 +76,13 @@ cargo build --release
 要用对话，打开 **设置 → 对话用的模型**，选一家服务、填密钥、点「检测」。也可以用环境变量 `LLM_PROVIDER`（`anthropic` 或 `openai`）、`LLM_API_KEY`、`LLM_MODEL`、`LLM_BASE_URL` 配置。不配模型时，后台和接口照常可用，只是没有对话。
 
 对外提供服务时，在前面放一个反向代理（nginx、Caddy）负责 HTTPS。服务只监听本机地址。把 `HC_ORIGIN` 设成对外的网址。
+
+命令行也能备份和恢复（恢复前先停掉服务）：
+
+```sh
+./target/release/cms-harness backup site.zip
+./target/release/cms-harness restore site.zip
+```
 
 ## 接入 agent
 

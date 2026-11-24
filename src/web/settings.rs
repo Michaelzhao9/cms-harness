@@ -476,6 +476,55 @@ pub async fn detect_models(State(app): State<Shared>, Extension(user): Extension
 
 // ---- skills ----
 
+/// `POST /admin/settings/backup`: the whole site as a zip download (builders only).
+pub async fn download_backup(State(app): State<Shared>, Extension(user): Extension<AdminUser>, req: Request) -> Response {
+    if let Err(o) = content::checked(&user, req).await {
+        return o.into_response();
+    }
+    if user.role != "builder" {
+        return (StatusCode::FORBIDDEN, format!("“{}”是编辑：只有搭建者（builder）可以备份和恢复。", user.email)).into_response();
+    }
+    let made = tokio::task::spawn_blocking(move || {
+        // ponytail: the archive is built in memory; stream it from a temporary file if sites grow past a few hundred MB.
+        let mut out = std::io::Cursor::new(Vec::new());
+        let conn = app.conn();
+        crate::backup::export(&conn, &app.data_dir, &mut out)?;
+        let date: String = conn.query_row("SELECT strftime('%Y%m%d-%H%M', 'now')", [], |r| r.get(0)).unwrap_or_default();
+        Ok::<_, String>((out.into_inner(), date))
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()));
+    match made {
+        Ok((bytes, date)) => (
+            [
+                (header::CONTENT_TYPE, "application/zip".to_string()),
+                (header::CONTENT_DISPOSITION, format!("attachment; filename=\"cms-harness-backup-{date}.zip\"")),
+                (header::CACHE_CONTROL, "no-store".to_string()),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+/// `POST /admin/settings/restore`: replaces the whole site with an uploaded backup (builders only, confirmed).
+pub async fn restore_backup(State(app): State<Shared>, Extension(user): Extension<AdminUser>, req: Request) -> Response {
+    handle(app, user, req, true, |app, user, posted| {
+        let Some((_, _, bytes)) = posted.files.iter().find(|(input, _, _)| input == "file") else {
+            return refused(app, user, "请先选择一个备份文件（.zip）。".into());
+        };
+        if posted.one("confirm") != "yes" {
+            return refused(app, user, "恢复会替换现在的全部内容：请先勾选确认。".into());
+        }
+        match crate::backup::restore_live(app, bytes) {
+            Ok(_) => Ok(Out::Go("/admin/settings?saved=restored#s-backup".into())),
+            Err(e) => refused(app, user, e),
+        }
+    })
+    .await
+}
+
 pub async fn install_skill(State(app): State<Shared>, Extension(user): Extension<AdminUser>, req: Request) -> Response {
     let posted = match content::checked(&user, req).await {
         Ok(p) => p,

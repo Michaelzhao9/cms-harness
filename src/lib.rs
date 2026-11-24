@@ -13,6 +13,7 @@ pub mod chat;
 pub mod skills;
 pub mod members;
 pub mod access;
+pub mod backup;
 pub mod i18n;
 pub mod search;
 pub mod web;

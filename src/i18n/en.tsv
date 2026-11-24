@@ -797,3 +797,31 @@ name 要是一段文字，或者 null 恢复默认。	name must be text, or null
 设置会员登录	Set member login
 搜索 {}	Search {}
 搜索失败：{}	Search failed: {}
+备份	Backup
+整站打成一个 zip：数据库（内容、草稿、历史、账号、设置）和上传的文件。	The whole site as one zip: the database (content, drafts, history, accounts, settings) and the uploaded files.
+已经恢复。恢复前的整站另存了一份，在数据目录的 backups 里。	Restored. The site as it was before is saved in the data folder, under backups.
+下载备份	Download a backup
+也可以在服务器上运行 cms-harness backup。	Or run cms-harness backup on the server.
+下载	Download
+从备份恢复	Restore from a backup
+我知道这会用备份替换现在的全部内容	I understand this replaces everything with the backup
+恢复	Restore
+只有搭建者可以备份和恢复。	Only builders can back up and restore.
+“{}”是编辑：只有搭建者（builder）可以备份和恢复。	“{}” is an editor: only builders can back up and restore.
+请先选择一个备份文件（.zip）。	Choose a backup file (.zip) first.
+恢复会替换现在的全部内容：请先勾选确认。	A restore replaces everything: tick the box to confirm.
+复制数据库失败：{}	Could not copy the database: {}
+写备份失败：{}	Could not write the backup: {}
+备份文件读不出来：{}。请选择 CMS Harness 导出的 zip 备份。	Could not read the backup: {}. Choose a zip backup made by CMS Harness.
+备份里有不认识的文件“{}”：这不是 CMS Harness 导出的备份。	The backup holds an unknown file “{}”: it is not a CMS Harness backup.
+备份里没有 harness.db：这不是 CMS Harness 导出的备份。	The backup has no harness.db: it is not a CMS Harness backup.
+备份解压后太大：最多 8 GB。	The backup unpacks to more than 8 GB.
+写入“{}”失败：{}	Could not write “{}”: {}
+备份里的数据库打不开：{}	The database in the backup does not open: {}
+备份里的数据库不完整：{}	The database in the backup is incomplete: {}
+备份里没有搭建者账号，恢复后就没人能管理后台了：没有恢复。	The backup has no builder account, so nobody could run the admin after restoring: nothing was restored.
+创建上传目录失败：{}	Could not create the uploads folder: {}
+换上备份的数据库失败：{}	Could not put the backup's database in place: {}
+创建备份目录失败：{}	Could not create the backups folder: {}
+这个数据库在内存里，不能恢复。	This database lives in memory and cannot be restored.
+打开恢复后的数据库失败：{}。恢复前的整站备份在 {}。	Could not open the restored database: {}. The site as it was before is saved at {}.
