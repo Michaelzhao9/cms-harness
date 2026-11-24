@@ -241,7 +241,8 @@ pub fn start(app: Shared, user: &AdminUser, text: String, attachments: Vec<Attac
         c.messages.push(Message { role: Role::User, content });
         Ok(c.id)
     })?;
-    tokio::spawn(run(app, token, id, actor, model));
+    let lang = crate::i18n::Lang::of_prefs(&user.prefs);
+    tokio::spawn(run(app, token, id, actor, model, lang));
     Ok(())
 }
 
@@ -294,7 +295,7 @@ const RULES: &str = "你是这个网站后台里的助手，替管理员修改�
   · 网站上删掉某个功能时，同一轮里用 delete_view 删掉它的管理界面。\n\
 - 这个系统完全独立运行：不要把数据推送或同步到任何外部平台，也不要接入外部服务。需要保存的数据，都建成这里的集合。\n\
 - 写网站代码时没有打包工具：用浏览器能直接运行的写法（HTML、CSS、JavaScript；JSX 和 TypeScript 会自动转换）。第三方库（React、Vue、Three.js 等）通过 import map 从 https://esm.sh 加载，用 set_site_settings 设置；Vue 用浏览器版写法，不写 .vue 文件。\n\
-- 改之前先读，改完说清楚改了哪里。回答用中文，简短。";
+- 改之前先读，改完说清楚改了哪里。回答简短。";
 
 fn system_prompt(app: &Shared, actor: &Actor) -> (String, bool) {
     let conn = app.conn();
@@ -481,12 +482,16 @@ async fn run_tool(turn: &Turn<'_>, tool_id: &str, name: &str, input: &Value) -> 
     }
 }
 
-async fn run(app: Shared, token: String, id: u64, actor: Actor, model: Arc<dyn crate::llm::Model>) {
+async fn run(app: Shared, token: String, id: u64, actor: Actor, model: Arc<dyn crate::llm::Model>, lang: crate::i18n::Lang) {
     let mut tools_list = chat_tools(&actor);
-    let (system, has_skills) = {
+    let (mut system, has_skills) = {
         let (a, act) = (app.clone(), actor.clone());
         blocking(move || system_prompt(&a, &act)).await
     };
+    system.push_str(match lang {
+        crate::i18n::Lang::Zh => "\n\n回答用中文。",
+        crate::i18n::Lang::En => "\n\nThe admin uses the English interface: reply in English.",
+    });
     if has_skills {
         tools_list.extend(skill_tools());
     }

@@ -39,6 +39,7 @@ pub async fn serve(State(app): State<Shared>, req: Request) -> Response {
         None => "'self'".into(),
     };
     let (path, query, if_none_match) = parts(&req);
+    let lang = crate::i18n::from_headers(req.headers());
     let member_token = session::cookie_value(req.headers(), crate::members::COOKIE);
     let a = app.clone();
     tokio::task::spawn_blocking(move || {
@@ -48,7 +49,7 @@ pub async fn serve(State(app): State<Shared>, req: Request) -> Response {
             .filter(|_| crate::members::login_enabled(&conn, false))
             .and_then(|t| crate::members::from_token(&conn, &t))
             .map(|m| crate::members::member_json(&m));
-        let v = Visit { app: &a, conn: &conn, mode: Mode::Live, base: "", path: &path, query: &query, if_none_match, framers, member };
+        let v = Visit { app: &a, conn: &conn, mode: Mode::Live, base: "", path: &path, query: &query, if_none_match, framers, member, lang };
         v.respond()
     })
     .await
@@ -66,6 +67,7 @@ pub async fn preview(State(app): State<Shared>, req: Request) -> Response {
         return if rest.is_empty() { gone() } else { Redirect::to(&format!("/_hc/preview/{rest}/")).into_response() };
     };
     let (_, query, _) = parts(&req);
+    let lang = crate::i18n::from_headers(req.headers());
     let a = app.clone();
     tokio::task::spawn_blocking(move || {
         let conn = a.conn();
@@ -73,7 +75,7 @@ pub async fn preview(State(app): State<Shared>, req: Request) -> Response {
             return gone();
         }
         let base = format!("/_hc/preview/{token}");
-        let v = Visit { app: &a, conn: &conn, mode: Mode::Preview, base: &base, path: &path, query: &query, if_none_match: None, framers: "'self'".into(), member: None };
+        let v = Visit { app: &a, conn: &conn, mode: Mode::Preview, base: &base, path: &path, query: &query, if_none_match: None, framers: "'self'".into(), member: None, lang };
         v.respond()
     })
     .await
@@ -112,12 +114,14 @@ struct Visit<'a> {
     framers: String,
     /// The logged-in member (live site only), as templates see it.
     member: Option<Value>,
+    /// The visitor's language, for the built-in pages.
+    lang: crate::i18n::Lang,
 }
 
 /// The built-in sign-up or login page after a form post (`which` is "login" or "signup"), with an error.
-pub fn account_page(app: &App, conn: &Connection, which: &str, form: Value, status: StatusCode) -> Response {
+pub fn account_page(app: &App, conn: &Connection, which: &str, form: Value, status: StatusCode, lang: crate::i18n::Lang) -> Response {
     let path = format!("/account/{which}");
-    let v = Visit { app, conn, mode: Mode::Live, base: "", path: &path, query: &[], if_none_match: None, framers: "'self'".into(), member: None };
+    let v = Visit { app, conn, mode: Mode::Live, base: "", path: &path, query: &[], if_none_match: None, framers: "'self'".into(), member: None, lang };
     let mut extra = json!({ "mode": which, "next": "", "email": "", "name": "", "error": null });
     if let (Some(e), Value::Object(f)) = (extra.as_object_mut(), form) {
         e.extend(f);
@@ -253,6 +257,8 @@ impl Visit<'_> {
             "site": { "name": self.app.site_name, "origin": self.app.origin },
             "request": { "path": self.path, "query": query },
             "member": self.member,
+            "lang": self.lang.code(),
+            "html_lang": self.lang.html(),
         });
         if let (Some(c), Value::Object(extra)) = (ctx.as_object_mut(), extra) {
             c.extend(extra);

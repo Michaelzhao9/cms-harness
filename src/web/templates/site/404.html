@@ -1,6 +1,6 @@
 {% extends "_hc/layout.html" %}
-{% block title %}页面不存在 · {% endblock %}
+{% block title %}{{ "页面不存在 ·"|t }} {% endblock %}
 {% block main %}
-<h1>页面不存在</h1>
-<p class="soft">请检查网址，或<a href="/">回到首页</a>。</p>
+<h1>{{ "页面不存在"|t }}</h1>
+<p class="soft">{{ "请检查网址，或"|t }}<a href="/">{{ "回到首页"|t }}</a>{{ "。"|t }}</p>
 {% endblock %}

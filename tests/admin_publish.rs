@@ -383,7 +383,7 @@ async fn the_mark_color_preference_is_saved_and_applied() {
     assert_eq!(post_form(&app, "/admin/prefs", Some(&s), &[("nav", "collapsed")]).await.0, StatusCode::SEE_OTHER);
     assert_eq!(login(&app, "editor@test", "secret-pass").await, StatusCode::SEE_OTHER);
     let token: String = app.conn().query_row("SELECT prefs FROM admins WHERE email = 'editor@test'", [], |r| r.get(0)).unwrap();
-    assert_eq!(serde_json::from_str::<Value>(&token).unwrap(), json!({ "mark": "blue" }));
+    assert_eq!(serde_json::from_str::<Value>(&token).unwrap(), json!({ "mark": "blue", "lang": "zh" }), "the first login also keeps the browser's language");
     let u = user_of(&app, &s.0);
     assert_eq!((u.prefs["mark"].as_str(), u.prefs["nav"].as_str()), (Some("blue"), Some("collapsed")));
 

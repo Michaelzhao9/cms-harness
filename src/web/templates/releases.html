@@ -1,30 +1,30 @@
 {% extends "base.html" %}
-{% block title %}发布记录{% endblock %}
+{% block title %}{{ "发布记录"|t }}{% endblock %}
 {% block main %}
 <div class="page">
 <section class="history" aria-labelledby="rel-h">
-<h1 id="rel-h">发布记录</h1>
-<p class="lede">每次发布上线了什么。点“恢复这一版”会把那一版放回草稿，发布后才会上线。</p>
-{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
-{% if restored %}<p class="note good" role="status">已放回草稿，发布后才会上线。</p>{% endif %}
+<h1 id="rel-h">{{ "发布记录"|t }}</h1>
+<p class="lede">{{ "每次发布上线了什么。点“恢复这一版”会把那一版放回草稿，发布后才会上线。"|t }}</p>
+{% if error %}<p class="note bad" role="alert">{{ error|t }}</p>{% endif %}
+{% if restored %}<p class="note good" role="status">{{ "已放回草稿，发布后才会上线。"|t }}</p>{% endif %}
 {% for r in releases -%}
-<section class="release" aria-label="第 {{ r.id }} 次发布">
-<h2>第 {{ r.id }} 次发布</h2>
-<p class="by">{{ r.actor }}，{{ r.at }}（UTC）：{{ r.note }}</p>
+<section class="release" aria-label="{{ '第'|t }} {{ r.id }} {{ '次发布'|t }}">
+<h2>{{ "第"|t }} {{ r.id }} {{ "次发布"|t }}</h2>
+<p class="by">{{ r.actor|t }}{{ "，"|t }}{{ r.at }}{{ "（UTC）："|t }}{{ r.note|t }}</p>
 <ul class="went">
 {% for v in r.versions -%}
-<li><span class="kind">{{ v.kind_label }}</span>
-<span class="grow"><span>{{ v.title }}</span>{% if v.note and v.note != r.note %}<span class="by">{{ v.actor }}：{{ v.note }}</span>{% endif %}</span>
+<li><span class="kind">{{ v.kind_label|t }}</span>
+<span class="grow"><span>{{ v.title|t }}</span>{% if v.note and v.note != r.note %}<span class="by">{{ v.actor|t }}{{ "："|t }}{{ v.note|t }}</span>{% endif %}</span>
 <code>{{ v.target }}</code>
 {%- if v.can_restore %}
-<form method="post" action="/admin/restore"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="target" value="{{ v.target }}"><input type="hidden" name="version_id" value="{{ v.id }}"><input type="hidden" name="note" value="{{ restore_note }}"><button type="submit" class="txt">恢复这一版</button></form>
+<form method="post" action="/admin/restore"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="target" value="{{ v.target }}"><input type="hidden" name="version_id" value="{{ v.id }}"><input type="hidden" name="note" value="{{ restore_note|t }}"><button type="submit" class="txt">{{ "恢复这一版"|t }}</button></form>
 {%- endif %}</li>
 {% endfor -%}
-{% if r.more %}<li class="by">另有 {{ r.more }} 项</li>{% endif %}
+{% if r.more %}<li class="by">{{ "另有"|t }} {{ r.more|t }} {{ "项"|t }}</li>{% endif %}
 </ul>
 </section>
 {% else -%}
-<p class="empty">还没有发布过。</p>
+<p class="empty">{{ "还没有发布过。"|t }}</p>
 {% endfor -%}
 </section>
 </div>

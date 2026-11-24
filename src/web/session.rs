@@ -89,13 +89,16 @@ pub fn dummy_hash() -> &'static str {
 
 /// Records the outcome and opens a session when the password matched. Returns the cookie token; only its hash is
 /// stored. The error is `BAD_LOGIN` for both unknown emails and wrong passwords.
-pub fn login_finish(conn: &Connection, email: &str, attempt: Attempt, ok: bool) -> Result<String, String> {
+/// `lang` becomes the admin's language when they have not chosen one (the browser's language at first login).
+pub fn login_finish(conn: &Connection, email: &str, attempt: Attempt, ok: bool, lang: &str) -> Result<String, String> {
     let db = |e: rusqlite::Error| format!("读取数据库失败：{e}");
     let email = auth::normalize_email(email);
     // A failure was already counted by `login_begin`.
     let Some((admin_id, _)) = attempt.found.filter(|_| ok) else { return Err(BAD_LOGIN.into()) };
     conn.execute("DELETE FROM login_attempts WHERE key = ?1 OR rowid IN (?2, ?3)", params![format!("email:{email}"), attempt.rows[0], attempt.rows[1]]).map_err(db)?;
     conn.execute("DELETE FROM admin_sessions WHERE expires_at <= datetime('now')", []).map_err(db)?;
+    conn.execute("UPDATE admins SET prefs = json_set(prefs, '$.lang', ?2) WHERE id = ?1 AND json_extract(prefs, '$.lang') IS NULL", params![admin_id, lang])
+        .map_err(db)?;
     let token = random_hex();
     conn.execute(
         "INSERT INTO admin_sessions(token_hash, admin_id, csrf, expires_at) VALUES(?1, ?2, ?3, datetime('now', '+30 days'))",
@@ -109,7 +112,7 @@ pub fn login_finish(conn: &Connection, email: &str, attempt: Attempt, ok: bool) 
 pub fn login(conn: &Connection, email: &str, password: &str, client_key: &str) -> Result<String, String> {
     let attempt = login_begin(conn, email, client_key)?;
     let ok = auth::verify_password(attempt.found.as_ref().map_or(dummy_hash(), |f| f.1.as_str()), password);
-    login_finish(conn, email, attempt, ok)
+    login_finish(conn, email, attempt, ok, "zh")
 }
 
 pub fn logout(conn: &Connection, token_hash: &str) {

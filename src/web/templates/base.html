@@ -1,12 +1,12 @@
 {% import "icons.html" as i -%}
 <!doctype html>
-<html lang="zh-CN">
+<html lang="{{ html_lang or 'zh-CN' }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {% if workbench and chat.running %}<noscript><meta http-equiv="refresh" content="2"></noscript>
 {% endif -%}
-<title>{% block title %}后台{% endblock %} · {{ site_name }}</title>
+<title>{% block title %}{{ "后台"|t }}{% endblock %} · {{ site_name }}</title>
 <link rel="icon" href="/admin/static/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/admin/static/admin.css?v={{ css_v }}">
 <script type="module" src="/admin/static/admin.js?v={{ js_v }}"></script>

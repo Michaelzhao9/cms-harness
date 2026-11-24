@@ -61,6 +61,9 @@ pub(super) fn shell(app: &App, user: &AdminUser, current: &str, mut ctx: Value) 
     ctx["site_name"] = json!(app.site_name);
     ctx["csrf"] = json!(user.csrf);
     ctx["nav"] = nav;
+    let lang = crate::i18n::Lang::of_prefs(&user.prefs);
+    ctx["lang"] = json!(lang.code());
+    ctx["html_lang"] = json!(lang.html());
     ctx
 }
 

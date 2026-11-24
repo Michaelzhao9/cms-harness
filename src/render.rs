@@ -33,6 +33,7 @@ static ADMIN: LazyLock<Environment<'static>> = LazyLock::new(|| {
     ] {
         env.add_template(name, source).expect("embedded admin template parses");
     }
+    env.add_filter("t", crate::i18n::filter);
     env.add_global("css_v", CSS_VERSION.as_str());
     env.add_global("js_v", JS_VERSION.as_str());
     env

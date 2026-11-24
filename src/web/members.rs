@@ -110,7 +110,8 @@ pub async fn form(
             let a = app.clone();
             let form = json!({ "error": e, "email": f.email, "name": f.name, "next": site::safe_next(&f.next) });
             let status = status_of(&e);
-            tokio::task::spawn_blocking(move || site::account_page(&a, &a.conn(), &which, form, status)).await.unwrap_or_else(|e| e.to_string().into_response())
+            let lang = crate::i18n::from_headers(&headers);
+            tokio::task::spawn_blocking(move || site::account_page(&a, &a.conn(), &which, form, status, lang)).await.unwrap_or_else(|e| e.to_string().into_response())
         }
     }
 }
@@ -217,7 +218,9 @@ pub async fn submit_form(
         Err(e) => {
             let status = if e.contains("太频繁") { StatusCode::TOO_MANY_REQUESTS } else if e.contains("登录") { StatusCode::UNAUTHORIZED } else if e.contains("不接受") || e.starts_with("没有可以提交") { StatusCode::FORBIDDEN } else { StatusCode::BAD_REQUEST };
             let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
-            let html = format!("<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>没有提交成功</title><body style=\"font:16px/1.6 -apple-system,'PingFang SC',sans-serif;max-width:36rem;margin:15vh auto;padding:0 24px\"><h1 style=\"font-size:22px\">没有提交成功</h1><p>{}</p><p><a href=\"javascript:history.back()\">返回修改</a></p>", esc(&e));
+            let lang = crate::i18n::from_headers(&headers);
+            let t = |s: &str| crate::i18n::tr(lang, s).into_owned();
+            let html = format!("<!doctype html><html lang=\"{}\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title><body style=\"font:16px/1.6 -apple-system,'PingFang SC',sans-serif;max-width:36rem;margin:15vh auto;padding:0 24px\"><h1 style=\"font-size:22px\">{title}</h1><p>{}</p><p><a href=\"javascript:history.back()\">{}</a></p>", lang.html(), esc(&t(&e)), t("返回修改"), title = t("没有提交成功"));
             (status, [(header::CONTENT_TYPE, "text/html; charset=utf-8"), (header::CONTENT_SECURITY_POLICY, "default-src 'none'; style-src 'unsafe-inline'")], html).into_response()
         }
     }

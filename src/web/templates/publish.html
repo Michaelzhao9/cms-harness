@@ -1,24 +1,24 @@
 {% extends "base.html" %}
-{% block title %}发布{% endblock %}
+{% block title %}{{ "发布"|t }}{% endblock %}
 {% block main %}
 {%- import "icons.html" as i %}
 <div class="page">
 {% if done -%}
 <section class="review" aria-labelledby="pub-h">
-<h1 id="pub-h">已发布</h1>
-<p class="by">第 {{ done.id }} 次发布，{{ done.actor }}，{{ done.at }}（UTC）：{{ done.note }}</p>
+<h1 id="pub-h">{{ "已发布"|t }}</h1>
+<p class="by">{{ "第"|t }} {{ done.id }} {{ "次发布，"|t }}{{ done.actor|t }}{{ "，"|t }}{{ done.at }}{{ "（UTC）："|t }}{{ done.note|t }}</p>
 <ul class="went">
-{% for v in done.versions %}<li><span class="kind">{{ v.kind_label }}</span><span class="grow">{{ v.title }}</span><code>{{ v.target }}</code></li>
+{% for v in done.versions %}<li><span class="kind">{{ v.kind_label|t }}</span><span class="grow">{{ v.title|t }}</span><code>{{ v.target }}</code></li>
 {% endfor -%}
-{% if done.more %}<li class="by">另有 {{ done.more }} 项</li>{% endif %}
+{% if done.more %}<li class="by">{{ "另有"|t }} {{ done.more|t }} {{ "项"|t }}</li>{% endif %}
 </ul>
-<div class="actions"><a class="btn2" href="/admin/releases">看发布记录</a><a class="txt" href="/admin?published=1">回到网页</a></div>
+<div class="actions"><a class="btn2" href="/admin/releases">{{ "看发布记录"|t }}</a><a class="txt" href="/admin?published=1">{{ "回到网页"|t }}</a></div>
 </section>
 {%- else -%}
 <form class="review" method="post" action="/admin/publish" aria-labelledby="pub-h">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<h1 id="pub-h">发布前看一遍</h1>
-{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+<h1 id="pub-h">{{ "发布前看一遍"|t }}</h1>
+{% if error %}<p class="note bad" role="alert">{{ error|t }}</p>{% endif %}
 {% for it in items -%}
 <div class="change">
 {%- if it.can %}<input type="checkbox" id="t{{ loop.index }}" name="target" value="{{ it.target }}"{% if it.checked %} checked{% endif %}>
@@ -26,28 +26,28 @@
 {%- else %}<span class="nobox" aria-hidden="true"></span>
 <div class="what">
 {%- endif %}
-<span class="crumb"><span class="mk" aria-hidden="true"></span>{% for c in it.crumb %}<span>{{ c }}</span>{% endfor %}<span class="kind">{{ it.kind_label }}</span></span>
-{% for p in it.pairs %}<span class="pair"><span class="field">{{ p.field }}</span>{% if p.old %}<s>{{ p.old }}</s>{% endif %}<b>{{ p.new }}</b></span>
+<span class="crumb"><span class="mk" aria-hidden="true"></span>{% for c in it.crumb %}<span>{{ c|t }}</span>{% endfor %}<span class="kind">{{ it.kind_label|t }}</span></span>
+{% for p in it.pairs %}<span class="pair"><span class="field">{{ p.field|t }}</span>{% if p.old %}<s>{{ p.old|t }}</s>{% endif %}<b>{{ p.new|t }}</b></span>
 {% endfor -%}
-{% if it.summary %}<span class="pair">{{ it.summary }}</span>{% endif %}
-<span class="by">{{ it.actor }}{% if it.note %}：{{ it.note }}{% endif %} <code>{{ it.target }}</code></span>
-{% if not it.can %}<span class="by">需要 {{ it.need }} 权限才能发布这一项，请找搭建者。</span>{% endif %}
+{% if it.summary %}<span class="pair">{{ it.summary|t }}</span>{% endif %}
+<span class="by">{{ it.actor|t }}{% if it.note %}{{ "："|t }}{{ it.note|t }}{% endif %} <code>{{ it.target }}</code></span>
+{% if not it.can %}<span class="by">{{ "需要"|t }} {{ it.need|t }} {{ "权限才能发布这一项，请找搭建者。"|t }}</span>{% endif %}
 {%- if it.can %}</label>{% else %}</div>{% endif %}
 </div>
 {% else -%}
-<p class="empty">没有待发布的改动。改了内容或结构之后，会在这里一起过目。</p>
+<p class="empty">{{ "没有待发布的改动。改了内容或结构之后，会在这里一起过目。"|t }}</p>
 {% endfor -%}
 {% if check -%}
 <ul class="checks">
-{% if check.ok %}<li>{{ i.icon("check", 15) }}检查通过：这些改动可以一起上线。</li>
-{% else %}<li class="bad">{{ i.icon("x", 15) }}检查没通过，现在发布会被拦下：</li>
-{% for p in check.problems %}<li class="problem">{{ p }}</li>
+{% if check.ok %}<li>{{ i.icon("check", 15) }}{{ "检查通过：这些改动可以一起上线。"|t }}</li>
+{% else %}<li class="bad">{{ i.icon("x", 15) }}{{ "检查没通过，现在发布会被拦下："|t }}</li>
+{% for p in check.problems %}<li class="problem">{{ p|t }}</li>
 {% endfor %}{% endif -%}
 </ul>
 {%- endif %}
 {% if publishable -%}
-<div class="fd"><label class="lb" for="p-note">发布说明</label><input class="in" id="p-note" type="text" name="note" value="{{ note }}"></div>
-<button type="submit" class="btn wide">发布勾选的改动</button>
+<div class="fd"><label class="lb" for="p-note">{{ "发布说明"|t }}</label><input class="in" id="p-note" type="text" name="note" value="{{ note|t }}"></div>
+<button type="submit" class="btn wide">{{ "发布勾选的改动"|t }}</button>
 {%- endif %}
 </form>
 {%- endif %}

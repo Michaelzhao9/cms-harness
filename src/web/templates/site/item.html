@@ -6,7 +6,7 @@
 <dl>
 {% for f in def.fields %}{% if item[f.name] is not none and item[f.name] != "" and item[f.name] != [] %}
 <dt>{{ f.title }}</dt>
-<dd>{% set v = item[f.name] %}{% if f.type == "richtext" %}{{ v }}{% elif f.type == "boolean" %}{{ "是" if v else "否" }}{% elif f.type == "media" %}{% for m in (v if f.multiple else [v]) %}{% if m is endingwith(".pdf") %}<a href="{{ m }}">{{ m }}</a>{% else %}<img src="{{ m }}" alt="">{% endif %}{% endfor %}{% elif f.multiple %}{{ v | join("、") }}{% else %}{{ v }}{% endif %}</dd>
+<dd>{% set v = item[f.name] %}{% if f.type == "richtext" %}{{ v }}{% elif f.type == "boolean" %}{{ ("是"|t) if v else ("否"|t) }}{% elif f.type == "media" %}{% for m in (v if f.multiple else [v]) %}{% if m is endingwith(".pdf") %}<a href="{{ m }}">{{ m }}</a>{% else %}<img src="{{ m }}" alt="">{% endif %}{% endfor %}{% elif f.multiple %}{{ v | join(("、"|t)) }}{% else %}{{ v }}{% endif %}</dd>
 {% endif %}{% endfor %}
 </dl>
 {% endblock %}

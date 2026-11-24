@@ -1,16 +1,16 @@
 {%- import "icons.html" as i -%}
 {%- macro label(f) -%}
-{{ f.title }}{% if f.required %}<span class="req">必填</span>{% endif %}
+{{ f.title }}{% if f.required %}<span class="req">{{ "必填"|t }}</span>{% endif %}
 {%- endmacro -%}
-<section class="editor" aria-label="{{ '编辑记录' if form.id else '新建记录' }}">
+<section class="editor" aria-label="{{ ('编辑记录'|t) if form.id else ('新建记录'|t) }}">
 <div class="editor-head">
 <h2>{{ form.title }}</h2>
-{% if form.status %}<span class="{{ 'flag' if form.status in ['changed', 'deleting'] else 'muted' }}">{{ form.status_label }}</span>{% endif %}
-<a class="ib" href="{{ base }}" aria-label="关闭">{{ i.icon("x", 16) }}</a>
+{% if form.status %}<span class="{{ 'flag' if form.status in ['changed', 'deleting'] else 'muted' }}">{{ form.status_label|t }}</span>{% endif %}
+<a class="ib" href="{{ base }}" aria-label="{{ '关闭'|t }}">{{ i.icon("x", 16) }}</a>
 </div>
-{% if form.error %}<p class="note bad" role="alert">{{ form.error }}</p>{% endif %}
-{% if form.saved %}<p class="note good" role="status">已存为草稿，发布后才会上线。</p>{% endif %}
-{% if form.status == "deleting" %}<p class="note pending">这条记录正在等待删除，发布后才会真正删除。</p>{% endif %}
+{% if form.error %}<p class="note bad" role="alert">{{ form.error|t }}</p>{% endif %}
+{% if form.saved %}<p class="note good" role="status">{{ "已存为草稿，发布后才会上线。"|t }}</p>{% endif %}
+{% if form.status == "deleting" %}<p class="note pending">{{ "这条记录正在等待删除，发布后才会真正删除。"|t }}</p>{% endif %}
 <form class="fields" data-dirty method="post" action="{% if form.id %}/admin/r/{{ form.id }}{% else %}/admin/c/{{ collection }}/new{% endif %}" enctype="multipart/form-data">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 {% if form.id %}<input type="hidden" name="seen" value="{{ form.seen }}">{% endif %}
@@ -20,7 +20,7 @@
 <label class="check"><input type="hidden" name="{{ f.name }}" value="false"><input type="checkbox" id="f-{{ f.name }}" name="{{ f.name }}" value="true"{% if f.checked %} checked{% endif %}>{{ label(f) }}</label>
 {%- elif f.kind == "checks" %}
 <fieldset><legend class="lb">{{ label(f) }}</legend><input type="hidden" name="{{ f.name }}" value="">
-{% for o in f.options %}<label class="check"><input type="checkbox" name="{{ f.name }}" value="{{ o.value }}"{% if o.value in f.selected %} checked{% endif %}>{{ o.label }}</label>{% endfor %}</fieldset>
+{% for o in f.options %}<label class="check"><input type="checkbox" name="{{ f.name }}" value="{{ o.value }}"{% if o.value in f.selected %} checked{% endif %}>{{ o.label|t }}</label>{% endfor %}</fieldset>
 {%- else %}
 <label class="lb" for="f-{{ f.name }}">{{ label(f) }}</label>
 {%- if f.kind == "text" %}
@@ -31,8 +31,8 @@
 {%- elif f.kind == "richtext" %}
 <textarea class="in code" id="f-{{ f.name }}" name="{{ f.name }}" rows="8">
 {{ f.value }}</textarea>
-<span class="hint">这里是 HTML 源码，保存时会清理掉脚本和不安全的标签。</span>
-{% if f.value %}<iframe class="rt" sandbox srcdoc="{{ f.value }}" title="{{ f.title }}预览"></iframe>{% endif %}
+<span class="hint">{{ "这里是 HTML 源码，保存时会清理掉脚本和不安全的标签。"|t }}</span>
+{% if f.value %}<iframe class="rt" sandbox srcdoc="{{ f.value }}" title="{{ f.title }}{{ '预览'|t }}"></iframe>{% endif %}
 {%- elif f.kind == "number" %}
 <input class="in" id="f-{{ f.name }}" type="number" step="any" name="{{ f.name }}" value="{{ f.value }}"{% if f.required %} required{% endif %}>
 {%- elif f.kind == "date" %}
@@ -43,34 +43,34 @@
 {% if f.thumbs %}<div class="thumbs">{% for t in f.thumbs %}<img class="thumb" src="/uploads/{{ t }}" alt="{{ f.title }}">{% endfor %}</div>{% endif %}
 {% if f.multiple %}<input type="hidden" name="{{ f.name }}" value="">{% endif -%}
 <select class="in" id="f-{{ f.name }}" name="{{ f.name }}"{% if f.multiple %} multiple{% endif %}>
-{% if not f.multiple %}<option value="">不用文件</option>{% endif %}
-{% for o in f.options %}<option value="{{ o.value }}"{% if o.value in f.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
+{% if not f.multiple %}<option value="">{{ "不用文件"|t }}</option>{% endif %}
+{% for o in f.options %}<option value="{{ o.value }}"{% if o.value in f.selected %} selected{% endif %}>{{ o.label|t }}</option>{% endfor %}
 </select>
-<label class="hint" for="u-{{ f.name }}">或者上传新文件：</label>
+<label class="hint" for="u-{{ f.name }}">{{ "或者上传新文件："|t }}</label>
 <input id="u-{{ f.name }}" type="file" name="upload:{{ f.name }}" accept="image/jpeg,image/png,image/gif,image/webp,application/pdf">
 {%- else %}
 {% if f.multiple %}<input type="hidden" name="{{ f.name }}" value="">{% endif -%}
 <select class="in" id="f-{{ f.name }}" name="{{ f.name }}"{% if f.multiple %} multiple{% endif %}>
-{% if not f.multiple %}<option value="">未选</option>{% endif %}
-{% for o in f.options %}<option value="{{ o.value }}"{% if o.value in f.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
+{% if not f.multiple %}<option value="">{{ "未选"|t }}</option>{% endif %}
+{% for o in f.options %}<option value="{{ o.value }}"{% if o.value in f.selected %} selected{% endif %}>{{ o.label|t }}</option>{% endfor %}
 </select>
 {%- endif %}
 {%- endif %}
-{% if f.mark %}<span class="was">线上是 <s>{{ f.mark.old }}</s>，草稿是 <b>{{ f.mark.new }}</b>，发布后才会更新。</span>{% endif %}
+{% if f.mark %}<span class="was">{{ "线上是"|t }} <s>{{ f.mark.old }}</s>{{ "，草稿是"|t }} <b>{{ f.mark.new }}</b>{{ "，发布后才会更新。"|t }}</span>{% endif %}
 </div>
 {% endfor -%}
-<div class="fd"><label class="lb" for="f-note">修改说明</label><input class="in" id="f-note" type="text" name="note" value="{{ form.note }}"></div>
+<div class="fd"><label class="lb" for="f-note">{{ "修改说明"|t }}</label><input class="in" id="f-note" type="text" name="note" value="{{ form.note|t }}"></div>
 <div class="actions">
-<button type="submit" class="btn" data-dirty-only>存为草稿</button>
-<button type="reset" class="txt" data-dirty-only>取消</button>
+<button type="submit" class="btn" data-dirty-only>{{ "存为草稿"|t }}</button>
+<button type="reset" class="txt" data-dirty-only>{{ "取消"|t }}</button>
 <span class="dirty" data-dirty-count hidden></span>
-{% if form.id %}<a class="txt" href="/admin?ctx=record:{{ form.id }}">交给对话来改</a>{% endif %}
+{% if form.id %}<a class="txt" href="/admin?ctx=record:{{ form.id }}">{{ "交给对话来改"|t }}</a>{% endif %}
 </div>
 </form>
 {% if form.id -%}
 <div class="more">
-{% if form.status != "published" %}<form method="post" action="/admin/r/{{ form.id }}/discard"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">{{ "放弃删除" if form.status == "deleting" else ("丢弃这条草稿" if form.status == "draft" else "放弃改动") }}</button></form>{% endif %}
-{% if form.status != "deleting" %}<form method="post" action="/admin/r/{{ form.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt bad">删除这条记录</button></form>{% endif %}
+{% if form.status != "published" %}<form method="post" action="/admin/r/{{ form.id }}/discard"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">{{ ("放弃删除"|t) if form.status == "deleting" else (("丢弃这条草稿"|t) if form.status == "draft" else ("放弃改动"|t)) }}</button></form>{% endif %}
+{% if form.status != "deleting" %}<form method="post" action="/admin/r/{{ form.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt bad">{{ "删除这条记录"|t }}</button></form>{% endif %}
 </div>
 {%- endif %}
 </section>

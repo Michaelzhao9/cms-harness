@@ -1,55 +1,55 @@
 {% extends "base.html" %}
-{% block title %}网页{% endblock %}
+{% block title %}{{ "网页"|t }}{% endblock %}
 {% block main %}
 {%- import "icons.html" as i %}
 {%- set icons = {"desktop": "monitor", "tablet": "tablet", "mobile": "phone"} %}
-{%- set names = {"desktop": "电脑", "tablet": "平板", "mobile": "手机"} %}
+{%- set names = {"desktop": ("电脑"|t), "tablet": ("平板"|t), "mobile": ("手机"|t)} %}
 <header class="bar tools">
 <form class="navtoggle only-undocked" method="post" action="/admin/prefs">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <input type="hidden" name="nav" value="{{ 'open' if nav.collapsed else 'collapsed' }}">
-<button type="submit" class="ib" aria-label="{{ '展开导航' if nav.collapsed else '收起导航' }}">{{ i.icon("sidebar-simple", 20) }}</button>
+<button type="submit" class="ib" aria-label="{{ ('展开导航'|t) if nav.collapsed else ('收起导航'|t) }}">{{ i.icon("sidebar-simple", 20) }}</button>
 </form>
-<div class="hist js-only" role="group" aria-label="预览前进后退">
-<button type="button" class="ib sm" aria-label="后退" disabled data-back>{{ i.icon("caret-left", 15) }}</button>
-<button type="button" class="ib sm" aria-label="前进" disabled data-forward>{{ i.icon("caret-right", 15) }}</button>
+<div class="hist js-only" role="group" aria-label="{{ '预览前进后退'|t }}">
+<button type="button" class="ib sm" aria-label="{{ '后退'|t }}" disabled data-back>{{ i.icon("caret-left", 15) }}</button>
+<button type="button" class="ib sm" aria-label="{{ '前进'|t }}" disabled data-forward>{{ i.icon("caret-right", 15) }}</button>
 </div>
 <form class="address" method="get" action="/admin" data-address>
 <span class="dot" aria-hidden="true" data-page-dot hidden></span>
-{% if home %}<strong>首页</strong>{% endif %}
-<label class="sr" for="addr">预览的页面</label>
+{% if home %}<strong>{{ "首页"|t }}</strong>{% endif %}
+<label class="sr" for="addr">{{ "预览的页面"|t }}</label>
 <input id="addr" class="url" name="p" value="{{ path|safe }}" list="routes" autocomplete="off" spellcheck="false" data-addr>
 <input type="hidden" name="w" value="{{ width }}"><input type="hidden" name="v" value="{{ version }}"><input type="hidden" name="marks" value="{{ q.marks }}">
 <datalist id="routes">{% for r in routes %}<option value="{{ r|safe }}">{% endfor %}</datalist>
-<a class="ib xs" href="{{ links.reload|safe }}" aria-label="刷新预览" data-reload>{{ i.icon("arrow-clockwise", 14) }}</a>
-<a class="ib xs" href="{{ (draft_src if version != 'live' else live_src)|safe }}" target="_blank" rel="noopener" aria-label="在新标签页打开" data-open>{{ i.icon("arrow-square-out", 14) }}</a>
+<a class="ib xs" href="{{ links.reload|safe }}" aria-label="{{ '刷新预览'|t }}" data-reload>{{ i.icon("arrow-clockwise", 14) }}</a>
+<a class="ib xs" href="{{ (draft_src if version != 'live' else live_src)|safe }}" target="_blank" rel="noopener" aria-label="{{ '在新标签页打开'|t }}" data-open>{{ i.icon("arrow-square-out", 14) }}</a>
 </form>
 <details class="menu" data-menu>
-<summary class="ib wide" aria-label="预览宽度：{{ names[width] }}">{{ i.icon(icons[width], 17) }}{{ i.icon("caret-down", 10) }}</summary>
+<summary class="ib wide" aria-label="{{ '预览宽度：'|t }}{{ names[width] }}">{{ i.icon(icons[width], 17) }}{{ i.icon("caret-down", 10) }}</summary>
 <div class="pop" role="menu">
-{% for w in ["desktop", "tablet", "mobile"] %}<a role="menuitemradio" href="{{ links[w]|safe }}" aria-checked="{{ 'true' if width == w else 'false' }}">{{ i.icon(icons[w], 17) }}{{ names[w] }}宽度</a>
+{% for w in ["desktop", "tablet", "mobile"] %}<a role="menuitemradio" href="{{ links[w]|safe }}" aria-checked="{{ 'true' if width == w else 'false' }}">{{ i.icon(icons[w], 17) }}{{ names[w] }}{{ "宽度"|t }}</a>
 {% endfor -%}
 </div>
 </details>
-<div class="versions" role="group" aria-label="预览版本">
-<a href="{{ links.draft|safe }}" aria-pressed="{{ 'true' if version == 'draft' else 'false' }}">草稿</a><a href="{{ links.live|safe }}" aria-pressed="{{ 'true' if version == 'live' else 'false' }}">线上</a><a class="ib sm" href="{{ links.split|safe }}" aria-label="草稿和线上并排对比" aria-pressed="{{ 'true' if version == 'split' else 'false' }}">{{ i.icon("columns", 17) }}</a>
+<div class="versions" role="group" aria-label="{{ '预览版本'|t }}">
+<a href="{{ links.draft|safe }}" aria-pressed="{{ 'true' if version == 'draft' else 'false' }}">{{ "草稿"|t }}</a><a href="{{ links.live|safe }}" aria-pressed="{{ 'true' if version == 'live' else 'false' }}">{{ "线上"|t }}</a><a class="ib sm" href="{{ links.split|safe }}" aria-label="{{ '草稿和线上并排对比'|t }}" aria-pressed="{{ 'true' if version == 'split' else 'false' }}">{{ i.icon("columns", 17) }}</a>
 </div>
-<a class="ib sm marks" href="{{ links.marks|safe }}" aria-label="在草稿上标出改动" aria-pressed="{{ 'true' if marks else 'false' }}" data-marks>{{ i.icon("highlighter", 17) }}</a>
-<a class="btn publish" href="/admin/publish" data-publish{% if not chat.pending %} hidden{% endif %}>发布<span class="count">{{ chat.pending }}</span></a>
+<a class="ib sm marks" href="{{ links.marks|safe }}" aria-label="{{ '在草稿上标出改动'|t }}" aria-pressed="{{ 'true' if marks else 'false' }}" data-marks>{{ i.icon("highlighter", 17) }}</a>
+<a class="btn publish" href="/admin/publish" data-publish{% if not chat.pending %} hidden{% endif %}>{{ "发布"|t }}<span class="count">{{ chat.pending }}</span></a>
 </header>
 <div class="stage w-{{ width }} v-{{ version }}{% if not marks %} nomarks{% endif %}" data-stage data-preview="{{ preview_base|safe }}" data-live="{{ live_base|safe }}" data-path="{{ path|safe }}">
 <div class="frames">
 {% if version != "live" -%}
-<div class="frame">{% if version == "split" %}<span class="tag">草稿</span>{% endif %}<iframe class="preview" sandbox="allow-scripts allow-forms allow-popups" src="{{ draft_src|safe }}" title="网站预览：草稿" data-frame="draft"></iframe></div>
+<div class="frame">{% if version == "split" %}<span class="tag">{{ "草稿"|t }}</span>{% endif %}<iframe class="preview" sandbox="allow-scripts allow-forms allow-popups" src="{{ draft_src|safe }}" title="{{ '网站预览：草稿'|t }}" data-frame="draft"></iframe></div>
 {%- endif %}
 {% if version != "draft" -%}
-<div class="frame">{% if version == "split" %}<span class="tag">线上</span>{% endif %}<iframe class="preview" sandbox="allow-scripts allow-forms allow-popups" src="{{ live_src|safe }}" title="网站预览：线上" data-frame="live"></iframe></div>
+<div class="frame">{% if version == "split" %}<span class="tag">{{ "线上"|t }}</span>{% endif %}<iframe class="preview" sandbox="allow-scripts allow-forms allow-popups" src="{{ live_src|safe }}" title="{{ '网站预览：线上'|t }}" data-frame="live"></iframe></div>
 {%- endif %}
 </div>
-<div class="navigator" role="toolbar" aria-label="在改动之间跳转" data-navigator hidden>
+<div class="navigator" role="toolbar" aria-label="{{ '在改动之间跳转'|t }}" data-navigator hidden>
 <span class="nmk" aria-hidden="true"></span><span data-nav-text></span><span class="sep" aria-hidden="true"></span>
-<button type="button" aria-label="上一处" data-nav-prev>{{ i.icon("caret-left", 13) }}</button><span class="pos" data-nav-pos></span><button type="button" aria-label="下一处" data-nav-next>{{ i.icon("caret-right", 13) }}</button>
+<button type="button" aria-label="{{ '上一处'|t }}" data-nav-prev>{{ i.icon("caret-left", 13) }}</button><span class="pos" data-nav-pos></span><button type="button" aria-label="{{ '下一处'|t }}" data-nav-next>{{ i.icon("caret-right", 13) }}</button>
 </div>
-{% if published %}<div class="pubbed" role="status" data-published>{{ i.icon("check", 14) }}已发布，线上已经是最新的<a href="{{ links.live|safe }}">看线上</a></div>{% endif %}
+{% if published %}<div class="pubbed" role="status" data-published>{{ i.icon("check", 14) }}{{ "已发布，线上已经是最新的"|t }}<a href="{{ links.live|safe }}">{{ "看线上"|t }}</a></div>{% endif %}
 </div>
 {% endblock %}

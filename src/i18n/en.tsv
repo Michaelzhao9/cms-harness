@@ -1,0 +1,784 @@
+# Chinese (the message id) <TAB> English. {} is a placeholder filled by the code. An empty English drops the text.
+后台	Admin
+对话	Chat
+展开导航	Expand navigation
+收起导航	Collapse navigation
+缩小到底部	Shrink to the bottom
+新对话	New chat
+收起对话记录	Collapse the conversation
+第	Step
+步	
+收成小按钮	Shrink to a button
+停下	Stop
+要改什么	What to change
+正在处理…	Working…
+想改什么，直接说。图片可以附上。	Say what to change. You can attach images.
+添加图片	Add images
+在预览里点选元素	Pick elements in the preview
+展开成左侧聊天栏	Expand into the side panel
+发送	Send
+打开对话	Open chat
+还没有配置对话用的模型	No chat model is set up yet
+到	Go to
+设置 → 对话用的模型	Settings → Chat model
+选一家服务、填上密钥；也可以在服务器上设置环境变量 LLM_API_KEY 后重启。	to pick a service and paste a key, or set LLM_API_KEY on the server and restart.
+请搭建者到	Ask a builder to set it up in
+里配置，或者在服务器上设置环境变量 LLM_API_KEY。	, or to set LLM_API_KEY on the server.
+不用对话时，后台的其他功能照常可用。	Everything else in the admin works without the chat.
+想改哪里，直接说	Just say what to change
+看看网站现在有哪些内容	Show me what is on the site now
+检查一下有哪些改动还没发布	Check which changes are not published yet
+把首页的介绍改得更简短一些	Make the home page introduction shorter
+附了	attached
+张图	image(s)
+过程	Steps
+没做成：	Did not finish:
+改动	Changes
+处	
+去发布	Go to publish
+已上线或已放弃	Published or discarded
+已停下。说一声“继续”可以接着做。	Stopped. Say “continue” to pick up where it left off.
+这一轮做完了	Done
+，改动都是草稿，发布后访客才看得到	. Changes are drafts; visitors see them once you publish
+新建	New
+按状态筛选	Filter by status
+筛选	Filter
+没有这种状态的记录。	No records with this status.
+这里还没有记录。	No records yet.
+状态	Status
+操作	Actions
+未填	Empty
+删除	Delete
+分页	Pages
+上一页	Previous
+页	
+下一页	Next
+取消	Cancel
+网页	Website
+电脑	Desktop
+平板	Tablet
+手机	Phone
+预览前进后退	Preview history
+后退	Back
+前进	Forward
+首页	Home
+预览的页面	Previewed page
+刷新预览	Reload preview
+在新标签页打开	Open in a new tab
+预览宽度：	Preview width:
+宽度	Width
+预览版本	Version shown
+草稿	Draft
+线上	Live
+草稿和线上并排对比	Draft and live side by side
+在草稿上标出改动	Mark changes on the draft
+发布	Publish
+网站预览：草稿	Site preview: draft
+网站预览：线上	Site preview: live
+在改动之间跳转	Jump between changes
+上一处	Previous change
+下一处	Next change
+已发布，线上已经是最新的	Published. The live site is up to date
+看线上	View live
+登录 ·	Sign in ·
+登录后台	Sign in
+进去之后，想改什么直接说。	Once you are in, just say what to change.
+邮箱	Email
+密码	Password
+登录	Sign in
+忘记密码时，请站点的搭建者在服务器上用	Forgot your password? Ask the site's builder to reset it on the server with
+cms-harness admin 邮箱	cms-harness admin your-email
+重置。后台不提供自助找回。	. There is no self-service reset.
+由 CMS Harness 驱动	Powered by CMS Harness
+素材库	Media
+个文件	files
+上传图片或 PDF，最大	Upload an image or PDF, up to
+上传	Upload
+还没有上传过文件。	Nothing uploaded yet.
+会员登录还是草稿：发布之后，访客才能在网站上注册和登录。	Member login is still a draft: visitors can sign up and sign in once it is published.
+邮箱或名字	Email or name
+恢复	Restore
+停用	Disable
+没有符合条件的用户。	No members match.
+还没有人注册。	Nobody has signed up yet.
+导航	Navigation
+内容与表单	Content and forms
+有改动	Changed
+条新	new
+用户管理	Members
+发布记录	Releases
+设置	Settings
+已发布	Published
+次发布，	release,
+另有	plus
+项	more
+看发布记录	View releases
+回到网页	Back to the website
+发布前看一遍	Review before publishing
+需要	Needs the
+权限才能发布这一项，请找搭建者。	permission to publish this; ask a builder.
+没有待发布的改动。改了内容或结构之后，会在这里一起过目。	Nothing to publish. Changes to content or structure show up here for review.
+检查通过：这些改动可以一起上线。	Checks passed: these changes can go live together.
+检查没通过，现在发布会被拦下：	Checks failed; publishing now would be stopped:
+发布说明	Release note
+发布勾选的改动	Publish the selected changes
+必填	Required
+编辑记录	Edit record
+新建记录	New record
+关闭	Close
+已存为草稿，发布后才会上线。	Saved as a draft. It goes live when published.
+这条记录正在等待删除，发布后才会真正删除。	This record is waiting to be deleted; it is removed when published.
+这里是 HTML 源码，保存时会清理掉脚本和不安全的标签。	This is HTML source. Scripts and unsafe tags are removed when saved.
+预览	Preview
+不用文件	No file
+或者上传新文件：	Or upload a new file:
+未选	None
+线上是	Live:
+，草稿是	; draft:
+，发布后才会更新。	. It updates when published.
+修改说明	Note about the change
+存为草稿	Save as draft
+交给对话来改	Ask the chat to change it
+放弃删除	Keep it
+丢弃这条草稿	Discard this draft
+放弃改动	Discard changes
+删除这条记录	Delete this record
+每次发布上线了什么。点“恢复这一版”会把那一版放回草稿，发布后才会上线。	What each release put live. “Restore this version” puts that version back as a draft; it goes live when published.
+已放回草稿，发布后才会上线。	Restored as a draft. It goes live when published.
+次发布	release
+恢复这一版	Restore this version
+还没有发布过。	Nothing has been published yet.
+接入	Connect
+把下面的地址和一把密钥交给你自己的 agent，它就能读写这个站的内容，规则和左边的对话完全一样。	Give these addresses and a key to your own agent and it can read and write this site, under the same rules as the chat.
+MCP 地址	MCP address
+内容接口	Content API
+<集合名>	<collection>
+新密钥“	New key “
+它只显示这一次，请马上复制保存。离开这个页面后就再也看不到了。	It is shown only this once. Copy it now; it cannot be shown again after you leave this page.
+密钥	Key
+能做什么	Can
+创建于	Created
+已吊销	Revoked
+吊销	Revoke
+还没有密钥。	No keys yet.
+新密钥的名字	Name of the new key
+除了读，还能	Besides reading, it can
+写内容	write content
+改结构	change structure
+新建密钥	New key
+只有搭建者可以新建或吊销密钥。	Only builders can create or revoke keys.
+网址	Address
+已切换到分开网址。后台现在在	Switched to separate addresses. The admin is now at
+，请到那里重新登录。这个旧地址 10 分钟内还会把你带过去，之后只剩网站。	; sign in there. This old address forwards you for 10 minutes, then serves only the site.
+已切回同一个网址。后台现在在	Switched back to one address. The admin is now at
+，请到那里重新登录。	; sign in there.
+网站	Site
+安全提示	Security note
+：现在网站和后台用的是同一个网址。网站上的脚本（不管是对话写的、你写的还是从别处拿来的）在你登录了后台的浏览器里运行时，可以冒充你操作后台：改内容、发布、建密钥。	: the site and the admin share one address. A script on the site (written by the chat, by you, or copied from elsewhere) that runs in a browser where you are signed in to the admin can act as you: edit content, publish, create keys.
+只在网站上放你信得过的脚本。更稳妥的做法是选下面的“分开网址”，把后台放到单独的网址上。	Only put scripts you trust on the site. Safer still: choose “separate addresses” below to give the admin its own address.
+网址由服务器的环境变量 HC_ADMIN_ORIGIN 设置，这里只能看。要换，请改环境变量后重启。	The address is set by HC_ADMIN_ORIGIN on the server and is read-only here. Change the variable and restart to change it.
+网站和后台的网址	Site and admin addresses
+同一个网址：网站和后台都在	One address: site and admin both at
+分开网址：后台放到自己的网址上，网站留在	Separate addresses: the admin gets its own, the site stays at
+后台的网址	Admin address
+选“分开网址”时填	Fill in when choosing separate addresses
+切换前先做好这一步：	Before switching, do this:
+保存时会先检查这个网址确实能访问到这台服务器，检查不过就不切换。	Saving first checks that this address reaches this server; nothing switches if it does not.
+检查并保存	Check and save
+进不去后台时，在服务器上运行 cms-harness admin-origin off 就能切回同一个网址。	Locked out? Run cms-harness admin-origin off on the server to go back to one address.
+只有搭建者可以改网址。	Only builders can change the address.
+对话用的模型	Chat model
+已保存，左边的对话马上就用它。	Saved. The chat uses it right away.
+接口	API
+地址	Address
+模型	Model
+已设置	Set
+未设置	Not set
+这台服务器用环境变量（LLM_PROVIDER、LLM_MODEL、LLM_API_KEY、LLM_BASE_URL）设置了模型，这里只能看。要换，请改环境变量后重启。	This server sets the model with environment variables (LLM_PROVIDER, LLM_MODEL, LLM_API_KEY, LLM_BASE_URL), so it is read-only here. Change them and restart to switch.
+选一家模型服务，填上密钥，点「检测」就能看到这把密钥能用的所有型号。本机的 Ollama、LM Studio 不用密钥。	Pick a model service, paste a key and press “Detect” to list every model that key can use. Local Ollama and LM Studio need no key.
+模型服务	Model service
+已保存，不显示。要换就重新填	Saved and hidden. Type a new one to replace it
+这家服务给你的 API 密钥	The API key from this service
+检测	Detect
+接口地址	API address
+不填就用这家服务的默认地址	Leave empty for the service's default
+型号	Model
+检测到	Found
+个	
+现在用的是	Now using
+。点「检测」可以从列表里换一个。	. Press “Detect” to pick another from the list.
+点「检测」列出可用的型号，或者在下面直接填型号名。	Press “Detect” to list the available models, or type a model name below.
+列表里没有？直接填型号名	Not listed? Type the model name
+型号名	Model name
+比如 claude-opus-5-5	e.g. claude-opus-5-5
+保存	Save
+只用接口、不用对话时，可以不配置模型。	If you only use the API and not the chat, no model is needed.
+还没有配置对话用的模型。	No chat model is set up yet.
+只有搭建者可以配置对话用的模型。	Only builders can set up the chat model.
+技能	Skills
+技能是一份写给对话的做事方法，比如品牌语气、做表格的规矩。装好后，对话遇到相关的事会自己去读。技能里的脚本只当参考，不会被运行。	A skill is a how-to written for the chat, such as a brand voice or rules for tables. Once installed, the chat reads it when the work calls for it. Scripts in a skill are reference only and never run.
+技能装好了。	Skill installed.
+启用中	On
+已停用	Off
+从	From
+安装	Install
+启用	Turn on
+还没有装技能。	No skills installed.
+安装新技能	Install a skill
+GitHub 文件夹、zip 或 SKILL.md 的链接	Link to a GitHub folder, a zip or a SKILL.md
+或者上传一个压缩包	Or upload a zip
+只有搭建者可以安装和管理技能。	Only builders can install and manage skills.
+站点说明	Site notes
+给对话模型看的一段话：这是什么网站、写给谁、有什么规矩。和内容一样，改完要发布才生效。	A note for the chat model: what this site is, who it is for, and its rules. Like content, it takes effect when published.
+已存为草稿，发布后才会生效。	Saved as a draft. It takes effect when published.
+说明	Notes
+有未发布的改动	Has unpublished changes
+还没有写站点说明。	No site notes yet.
+只有搭建者可以修改站点说明。	Only builders can edit the site notes.
+外观	Appearance
+改动标记的颜色	Change marker colour
+对话改过、还没发布的地方用这个颜色标出来。	Unpublished changes are marked in this colour.
+对话默认的样子	Chat layout
+随时可以在对话里切换，这里只决定登录后先看到哪种。	You can switch any time in the chat; this only sets what you see after signing in.
+左侧聊天栏	Side panel
+底部小窗	Bottom bar
+账号	Account
+密码已修改，其他地方的登录都已退出。	Password changed. You were signed out everywhere else.
+退出登录	Sign out
+原密码	Current password
+新密码	New password
+修改密码	Change password
+的新密码：	's new password:
+它只显示这一次，请马上交给对方，并请他登录后自己改掉。	It is shown only this once. Pass it on now and ask them to change it after signing in.
+管理员	Admins
+角色	Role
+（你）	(you)
+重设密码	Reset password
+新管理员的邮箱	New admin's email
+编辑：改内容和发布	Editor: edits content and publishes
+搭建者：还能改结构、管理密钥和管理员	Builder: also changes structure and manages keys and admins
+添加管理员	Add admin
+页面不存在 ·	Page not found ·
+页面不存在	Page not found
+请检查网址，或	Check the address, or
+回到首页	go to the home page
+注册	Sign up
+你已经登录	You are signed in
+名字（选填）	Name (optional)
+密码（至少 10 个字符）	Password (at least 10 characters)
+已有账号？	Have an account?
+还没有账号？	No account yet?
+网站还没有内容。	The site has no content yet.
+是	Yes
+否	No
+记录	Record
+这里还没有内容。	Nothing here yet.
+读取数据库失败：{}	Could not read the database: {}
+没有可以提交的“{}”。	There is no “{}” to submit to.
+请先登录再提交。	Please sign in before submitting.
+“{}”不接受提交。	“{}” does not accept submissions.
+提交的内容太长了。	The submission is too long.
+访客	Visitor
+提交太频繁，请过一会儿再试。	Too many submissions. Please try again later.
+填写的内容	The value
+“{}”这个值已经有人用过了。	“{}”: this value is already taken.
+“{}”选的内容不存在。	“{}”: the selected item does not exist.
+记录“{}”不存在：记录编号是整数。	Record “{}” does not exist: record ids are integers.
+只有登录的会员能看	is for signed-in members only
+不是公开的	is not public
+集合“{}”{}：请登录，或在 Authorization 头里带上有效的 Bearer 密钥。	Collection “{}” {}: sign in, or send a valid Bearer key in the Authorization header.
+集合“{}”里没有已发布的记录 {}。	Collection “{}” has no published record {}.
+单例集合“{}”还没有已发布的记录。	Single collection “{}” has no published record yet.
+文件不存在：请检查 /uploads/ 后面的文件名。	File not found: check the name after /uploads/.
+上传需要密钥：请在 Authorization 头里带上有效的 Bearer 密钥。	Uploads need a key: send a valid Bearer key in the Authorization header.
+“{}”没有权限上传：需要 write 权限。	“{}” may not upload: the write permission is needed.
+读取上传内容失败：{}。	Could not read the upload: {}.
+一次只能上传一个文件：请只带一个名为 file 的字段。	One file at a time: send a single field named file.
+没有收到文件：请用 multipart 表单，把文件放在名为 file 的字段里。	No file received: use a multipart form with the file in a field named file.
+保存文件失败：{}	Could not save the file: {}
+缺少或无效的密钥：请在 Authorization 头里带上 Bearer 密钥。	Missing or invalid key: send a Bearer key in the Authorization header.
+服务器内部错误：{}	Internal server error: {}
+请求体不是合法的 JSON：{}。请发送一个 JSON 对象作为工具参数。	The request body is not valid JSON: {}. Send a JSON object as the tool's arguments.
+请求不是合法的 JSON：{}	The request is not valid JSON: {}
+不支持 JSON-RPC 批量请求：请一次发送一个请求。	JSON-RPC batches are not supported: send one request at a time.
+邮箱不能为空，请提供管理员邮箱。	The email cannot be empty: give the admin's email.
+未知角色「{}」，角色只能是 builder 或 editor。	Unknown role “{}”: the role must be builder or editor.
+保存管理员「{}」失败：{}	Could not save admin “{}”: {}
+创建密钥「{}」失败：{}	Could not create key “{}”: {}
+密钥 {} 不存在，请检查密钥编号。	Key {} does not exist; check the key number.
+吊销密钥 {} 失败：{}	Could not revoke key {}: {}
+会员登录	Member login
+网站的 import map	Site import map
+网站允许的脚本来源	Site script origins
+对象标识“{}”不合法：请使用 collection:<名字>、record:<编号>、view:<名字>、file:<路径>、setting:<名字> 或 notes。	Invalid object id “{}”: use collection:<name>, record:<id>, view:<name>, file:<path>, setting:<name> or notes.
+读写“{}”失败：{}	Could not read or write “{}”: {}
+“{}”不存在，请检查名字或编号。	“{}” does not exist; check the name or id.
+说明不能删除，请直接修改它的内容。	The notes cannot be deleted; edit them instead.
+删除集合	delete the collection
+集合“{}”从未发布，放弃它会连同 {} 条记录一起清除、无法恢复：确认要这样做，请改用 delete_collection 并加上 confirm: {}。	Collection “{}” was never published; discarding it would erase its {} records for good. To do that, use delete_collection with confirm: {}.
+放弃集合的草稿	discard the collection's draft
+读取集合“{}”失败：{}	Could not read collection “{}”: {}
+集合“{}”不存在，请检查名字。	Collection “{}” does not exist; check the name.
+集合“{}”的定义已损坏：{}	Collection “{}” has a damaged definition: {}
+集合“{}”已被删除。	Collection “{}” was deleted.
+集合“{}”正等待删除：请先放弃草稿再修改。	Collection “{}” is waiting to be deleted: discard the draft before changing it.
+集合“{}”没有定义。	Collection “{}” has no definition.
+删除索引“{}”失败：{}	Could not drop index “{}”: {}
+创建索引“{}”失败：{}	Could not create index “{}”: {}
+集合“{}”尚未发布或已删除，线上没有它。	Collection “{}” is not published or was deleted, so it is not live.
+新建集合“{}”的记录失败：{}	Could not create a record in collection “{}”: {}
+集合名“{}”不合法，无法检查唯一性。	Collection name “{}” is invalid; uniqueness cannot be checked.
+字段名“{}”不合法，无法检查唯一性。	Field name “{}” is invalid; uniqueness cannot be checked.
+检查字段“{}”是否唯一失败：{}	Could not check that field “{}” is unique: {}
+字段“{}”必须唯一：值 {} 已被记录 {} 使用，请换一个值。	Field “{}” must be unique: value {} is used by record {}. Pick another value.
+无法{}：有 {} 条记录的草稿是按尚未发布的定义写的，退不回线上的定义（例如 {}）。请先把这些记录改成线上定义也接受的值（例如把新定义去掉的必填字段加回来、填好），或者先把集合的定义和这些记录一起发布；实在不要这些改动，再用 discard_draft 放弃这些记录的草稿。	Cannot {}: {} record drafts follow the unpublished definition and do not fit the live one (for example {}). Change them to values the live definition accepts (for example fill in required fields the new definition dropped), or publish the definition together with these records; if you do not want the changes, discard the record drafts with discard_draft.
+改写集合“{}”的记录草稿失败：{}	Could not rewrite record drafts of collection “{}”: {}
+记录 {} 的内容已损坏：{}	Record {} is damaged: {}
+记录 {} 的草稿跟不上新的定义，改动没有保存：请先修改这条记录。	Record {}'s draft does not fit the new definition, so the change was not saved: edit this record first.
+检查集合“{}”的记录失败：{}	Could not check the records of collection “{}”: {}
+记录 {}：{}	Record {}: {}
+字段“{}”的值 {} 在记录 {} 和记录 {} 里重复	Field “{}” has value {} in both record {} and record {}
+；如果是新增的必填字段，可以给它一个默认值，或者先不设为必填	; for a new required field, give it a default value or leave it optional for now
+有 {} 条记录不符合新的定义，改动没有保存。例如：{}。请先修改这些记录，或调整这次改动{}。	{} records do not fit the new definition, so the change was not saved. For example: {}. Edit these records first, or adjust the change{}.
+字段名“{}”不合法。	Field name “{}” is invalid.
+统计集合“{}”受影响的记录失败：{}	Could not count the affected records of collection “{}”: {}
+读取待发布清单失败：{}	Could not read the pending list: {}
+统计集合“{}”的记录数失败：{}	Could not count the records of collection “{}”: {}
+记录 {}	Record {}
+改写集合“{}”的记录失败：{}	Could not rewrite the records of collection “{}”: {}
+record:{} 所属的 collection:{} 已删除，这条记录的草稿上不了线：请用 discard_draft 放弃它，或先把集合恢复。	record:{} belongs to collection:{}, which was deleted, so its draft cannot go live: discard it with discard_draft, or restore the collection first.
+record:{} 所属的集合还没有上线：请把 collection:{} 一起发布。	record:{} belongs to a collection that is not live yet: publish collection:{} with it.
+（这条记录的草稿是按 collection:{} 尚未发布的定义写的，请把 collection:{} 一起发布）	(this record's draft follows the unpublished definition of collection:{}; publish collection:{} with it)
+读取线上的集合失败：{}	Could not read the live collections: {}
+collection:{} 的关联字段“{}”指向 collection:{}，它不在线上：请把它一起发布，或先去掉这个字段。	The relation field “{}” of collection:{} points to collection:{}, which is not live: publish it too, or remove the field first.
+检查集合“{}”的关联失败：{}	Could not check the relations of collection “{}”: {}
+record:{} 的字段“{}”指向 record:{}，而它不是集合“{}”里一条线上的记录（还没发布、正在被删除，或属于别的集合）：请把两者一起发布，或先改掉这个引用。	Field “{}” of record:{} points to record:{}, which is not a live record of collection “{}” (not published, being deleted, or in another collection): publish both together, or change the reference first.
+检查界面失败：{}	Could not check the screens: {}
+界面“{}”的定义已损坏：{}	Screen “{}” has a damaged definition: {}
+view:{} 引用的 collection:{} 不在线上：请把集合一起发布，或先删除这个界面。	view:{} uses collection:{}, which is not live: publish the collection too, or delete the screen first.
+record:{}：{}（这条记录的草稿是按 collection:{} 尚未发布的定义写的，请把 collection:{} 一起发布）	record:{}: {} (this record's draft follows the unpublished definition of collection:{}; publish collection:{} with it)
+试运行	Dry run
+没有待发布的改动：先修改内容或结构，再来发布。	Nothing to publish: change some content or structure first.
+targets 是空的：请列出要发布的对象，或去掉 targets 来发布全部。	targets is empty: list what to publish, or leave targets out to publish everything.
+“{}”没有待发布的改动：请先用 list_pending 查看有哪些。	“{}” has nothing to publish; see list_pending for what does.
+“{}”没有权限发布“{}”：需要 {} 和 publish 权限。	“{}” may not publish “{}”: the {} and publish permissions are needed.
+“{}”所属的集合还没有上线：请把 collection:{} 一起发布。	“{}” belongs to a collection that is not live yet: publish collection:{} with it.
+“{}”所属的 collection:{} 已删除，或正在这次发布里被删除，它的草稿上不了线：请用 discard_draft 放弃它，或先把集合恢复。	“{}” belongs to collection:{}, which is deleted or being deleted in this release, so its draft cannot go live: discard it with discard_draft, or restore the collection first.
+“{}”没有权限发布 {}（发布内容需要 write 和 publish，发布结构需要 structure 和 publish）	“{}” may not publish {} (content needs write and publish; structure needs structure and publish)
+{} 要等所属集合的定义上线后才能发布（集合已删除、还没发布，或它们按尚未发布的新定义写成）	{} can be published only after their collection's definition is live (the collection is deleted, unpublished, or they follow an unpublished definition)
+没有可以发布的改动：{}。	Nothing that can be published: {}.
+发布失败：{}	Publishing failed: {}
+（另有 {} 个问题未列出）	({} more problems not shown)
+发布被拦下，什么都没有上线。{}{}	Publishing was stopped and nothing went live. {}{}
+随集合“{}”的结构改动自动转换	Converted with the structure change of collection “{}”
+“{}”没有编号为 {} 的历史版本：请先用 list_versions 查看。	“{}” has no version {}; see list_versions.
+版本 {} 是一次删除，没有内容可以恢复：请选更早的版本。	Version {} is a deletion, with nothing to restore: pick an earlier version.
+版本 {} 的内容已损坏：{}	Version {} is damaged: {}
+记录 {} 所属的集合“{}”没有定义，无法恢复。	Record {} belongs to collection “{}”, which has no definition, so it cannot be restored.
+版本 {} 不符合集合“{}”现在的定义，没有恢复：{}	Version {} does not fit the current definition of collection “{}”, so it was not restored: {}
+站点最多 {} 个文件，这次写入后会有 {} 个：请先删掉不用的文件。	A site can have at most {} files and this would make {}: delete files you no longer need first.
+还没有配置对话用的模型：请在服务器上设置 LLM_API_KEY 后重启。	No chat model is set up: set LLM_API_KEY on the server and restart, or set one in Settings.
+请先写下想改什么。	Write what you want to change first.
+“{}”不是图片：对话里只能附 PNG、JPG、GIF 或 WebP 图片。	“{}” is not an image: the chat takes PNG, JPG, GIF or WebP images.
+上一条还在处理，请等它结束再发。	The last message is still being worked on; wait for it to finish.
+查看所有集合	List collections
+查看集合 {}	Read collection {}
+新建集合 {}	Create collection {}
+修改集合 {}	Change collection {}
+删除集合 {}	Delete collection {}
+读取记录 #{}	Read record #{}
+查询 {} 的记录	Query records of {}
+在 {} 里新建记录	Create a record in {}
+修改记录 #{}	Change record #{}
+删除记录 #{}	Delete record #{}
+检查待发布的改动	Check pending changes
+读取页面文件 {}	Read site file {}
+修改页面文件 {}	Change site file {}
+删除页面文件 {}	Delete site file {}
+修改界面 {}	Change screen {}
+修改站点说明	Change site notes
+使用技能 {}	Use skill {}
+查看技能 {} 的 {}	Read skill {}: {}
+向你提问	Ask you
+对话里不能发布：所有修改都是草稿，请管理员自己点「发布」。	The chat cannot publish: every change is a draft. Press Publish yourself.
+工具“{}”在对话里不可用。	Tool “{}” is not available in the chat.
+管理员让这一轮停下了，这一步没有做。	Stopped by the admin; this step was not run.
+管理员让这一轮停下了。	Stopped by the admin.
+回复太长被截断了。可以让我分几步来做。	The reply was too long and was cut off. Ask for it in smaller steps.
+这个请求模型没有处理。请换个说法，或者把要求拆小一点再试。	The model declined this request. Rephrase it, or split it into smaller asks.
+这一轮已经调用了 {} 次模型，先停在这里。可以说“继续”接着做。	This turn used {} model calls, so it stopped here. Say “continue” to keep going.
+模型接口返回 {}：{}	The model API returned {}: {}
+连不上模型接口：{}	Could not reach the model API: {}
+模型流里出现了未开始的内容块	The model stream sent a block that was never started
+模型流里有不认识的增量类型：{}	The model stream had an unknown delta type: {}
+模型给的工具参数不是合法 JSON：{}	The model's tool arguments are not valid JSON: {}
+模型接口出错：{}	The model API failed: {}
+未知错误	unknown error
+共 {} 人	{} people
+{} 条新	{} new
+模型接口的回复读不懂：{}	Could not read the model API reply: {}
+模型流中断了：{}	The model stream broke off: {}
+模型流里有读不懂的事件：{}	The model stream had an unreadable event: {}
+模型接口的回复里没有内容：{}	The model API reply was empty: {}
+DeepSeek 深度求索	DeepSeek
+通义千问（阿里云百炼）	Qwen (Alibaba Cloud Model Studio)
+Kimi（月之暗面）	Kimi (Moonshot AI)
+智谱 GLM	Zhipu GLM
+豆包（火山方舟）	Doubao (Volcengine Ark)
+硅基流动	SiliconFlow
+OpenRouter（几百个模型）	OpenRouter (hundreds of models)
+Ollama（本机）	Ollama (this machine)
+LM Studio（本机）	LM Studio (this machine)
+其他兼容 OpenAI 的接口	Other OpenAI-compatible API
+请先填接口地址。	Fill in the API address first.
+模型列表读不懂：{}	Could not read the model list: {}
+接口没有返回可用的模型：请检查密钥，或者直接填模型名。	The API returned no usable models: check the key, or type a model name.
+准备模型设置表失败：{}	Could not prepare the model settings table: {}
+读取模型设置失败：{}	Could not read the model settings: {}
+不认识这个模型服务。	Unknown model service.
+接口地址要以 https:// 或 http:// 开头。	The API address must start with https:// or http://.
+请选一个模型，或者直接填模型名。	Pick a model, or type a model name.
+{} 需要密钥。	{} needs a key.
+保存模型设置失败：{}	Could not save the model settings: {}
+图片太大：{}×{} 共 {} 像素，最多 {} 像素，请先缩小再上传。	The image is too big: {}×{} is {} pixels, the limit is {}. Shrink it first.
+“{}”是空文件：请上传有内容的文件。	“{}” is empty: upload a file with content.
+“{}”太大：最大 {} MB。	“{}” is too big: the limit is {} MB.
+“{}”的文件格式不支持：只接受 {}（按文件内容判断，不看扩展名）。	“{}” has an unsupported format: only {} are accepted (judged by content, not extension).
+无法读取图片“{}”：{}。	Could not read image “{}”: {}.
+无法读取图片“{}”的尺寸，文件可能已损坏：{}。	Could not read the size of image “{}”; the file may be damaged: {}.
+保存文件“{}”失败：{}。	Could not save file “{}”: {}.
+邮箱或密码不正确。	Wrong email or password.
+尝试次数太多，请 15 分钟后再试。	Too many attempts. Try again in 15 minutes.
+用户	Users
+名字	Name
+注册时间	Joined
+最近登录	Last sign-in
+邮箱格式不对。	That email address is not valid.
+注册太频繁，请过一会儿再试。	Too many sign-ups. Please try again later.
+密码至少 {} 个字符。	The password needs at least {} characters.
+这个邮箱已经注册过了，请直接登录。	This email is already registered. Sign in instead.
+这个账号已被停用。	This account is disabled.
+status 只能是 active 或 disabled。	status must be active or disabled.
+没有编号为 {} 的用户。	There is no user {}.
+集合“{}”没有字段“{}”：请检查字段名。	Collection “{}” has no field “{}”: check the field name.
+字段“{}”没有设置 index 或 unique，不能用于筛选或排序：请先在集合定义里给它加上 index。	Field “{}” has no index or unique, so it cannot filter or sort: add index to it in the collection definition first.
+布尔值	a boolean
+数字	a number
+字符串	a string
+数组	an array
+对象	an object
+整数	an integer
+筛选字段“{}”的值 {} 类型不对：它需要{}，收到的是{}。	Filter field “{}” value {} has the wrong type: it needs {}, got {}.
+筛选字段“{}”的值不合法：{}	Filter field “{}” has an invalid value: {}
+字段“{}”不能用 contains：它只能用于 text 字段，且值必须是字符串。	Field “{}” cannot use contains: it works only on text fields, with a string value.
+筛选字段“{}”用了未知的运算符“{}”：可用的有 eq、ne、gt、gte、lt、lte、contains。	Filter field “{}” uses unknown operator “{}”: use eq, ne, gt, gte, lt, lte or contains.
+字段名“{}”不合法，不能用于查询。	Field name “{}” is invalid for a query.
+集合名“{}”不合法，不能用于查询。	Collection name “{}” is invalid for a query.
+查询集合“{}”失败：{}	Could not query collection “{}”: {}
+limit 必须在 1 到 100 之间，收到 {}：请调整后重试。	limit must be between 1 and 100, got {}.
+offset 不能小于 0，收到 {}：请传 0 或更大的数。	offset cannot be below 0, got {}: send 0 or more.
+参数“{}”必须是整数，收到“{}”：请改成数字。	Parameter “{}” must be an integer, got “{}”.
+expand 的字段“{}”不是集合“{}”的 relation 字段：只能展开关系字段。	expand field “{}” is not a relation field of collection “{}”: only relation fields expand.
+参数“{}”的运算符“{}”未知：可用的有 ne、gt、gte、lt、lte、contains。	Parameter “{}” uses unknown operator “{}”: use ne, gt, gte, lt, lte or contains.
+参数“{}”必须是数字，收到“{}”：请改成数字。	Parameter “{}” must be a number, got “{}”.
+参数“{}”必须是 true 或 false，收到“{}”。	Parameter “{}” must be true or false, got “{}”.
+渲染后台页面“{}”失败：{}	Could not render admin page “{}”: {}
+集合名“{}”不合法：只能用小写字母开头，后接小写字母、数字或下划线，最长 40 个字符，且不能是保留字（id、sort、limit、offset、expand）。	Collection name “{}” is invalid: start with a lowercase letter, then lowercase letters, digits or underscores, at most 40 characters, and not a reserved word (id, sort, limit, offset, expand).
+字段名“{}”不合法：只能用小写字母开头，后接小写字母、数字或下划线，最长 40 个字符，且不能是保留字（id、sort、limit、offset、expand）。	Field name “{}” is invalid: start with a lowercase letter, then lowercase letters, digits or underscores, at most 40 characters, and not a reserved word (id, sort, limit, offset, expand).
+字段名“{}”重复：同一个集合里每个字段名只能出现一次，请改名或删除多余的字段。	Field name “{}” is repeated: each name appears once per collection. Rename or remove the extra field.
+字段“{}”的标题为空：请给它填一个人能看懂的标题。	Field “{}” has no label: give it a readable label.
+字段“{}”的选项设置不对：只有 select 类型的字段能且必须填写 options（非空列表）。	Field “{}” has wrong options: only select fields take options, and they must (a non-empty list).
+字段“{}”的选项“{}”重复：请删除重复的选项。	Field “{}” repeats option “{}”: remove the duplicate.
+字段“{}”的 target“{}”不是合法的集合名：请填写目标集合的名字。	Field “{}” target “{}” is not a valid collection name.
+关联字段“{}”缺少 target：请填写要关联的集合名。	Relation field “{}” has no target: name the collection it points to.
+字段“{}”不是 relation 类型，不能设置 target：请删除 target。	Field “{}” is not a relation, so it cannot have a target: remove target.
+字段“{}”不能设置 multiple：只有 select、media、relation 类型支持多值。	Field “{}” cannot be multiple: only select, media and relation fields can.
+字段“{}”不能设置 unique：只有单值的 text、number、date 字段可以要求唯一。	Field “{}” cannot be unique: only single text, number and date fields can.
+字段“{}”不能同时设置 unique 和默认值：每条记录都会拿到同一个默认值，必然重复。请去掉其中一个。	Field “{}” cannot have both unique and a default: every record would get the same value. Remove one.
+字段“{}”不能设置 index：只有单值的 text、number、boolean、date、select、relation 字段可以建索引。	Field “{}” cannot have an index: only single text, number, boolean, date, select and relation fields can.
+默认值不合法，{}	The default is invalid: {}
+字段“{}”的值 {} 不合法：{}	Field “{}” value {} is invalid: {}
+文本有 {} 个字符，超过上限 {}，请缩短。	The text has {} characters, over the limit of {}. Shorten it.
+必须是字符串。	Must be a string.
+富文本有 {} 个字符，超过上限 {}，请缩短。	The rich text has {} characters, over the limit of {}. Shorten it.
+必须是有限的数字。	Must be a finite number.
+必须是 true 或 false。	Must be true or false.
+必须是真实存在的 YYYY-MM-DD 或 YYYY-MM-DDTHH:MM:SSZ 日期。	Must be a real YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ date.
+必须是这些选项之一：{}。	Must be one of: {}.
+必须是 /uploads/ 开头的上传路径（不含 ..）或 http(s) 地址。	Must be an upload path starting with /uploads/ (no ..) or an http(s) address.
+必须是正整数 id。	Must be a positive integer id.
+多值字段必须是数组。	A multiple field must be an array.
+数组有 {} 个元素，超过上限 {}。	The array has {} items, over the limit of {}.
+数组里有重复的元素 {}。	The array repeats {}.
+要写入的内容必须是 JSON 对象：请传入形如 {"字段名": 值} 的对象。	The data must be a JSON object such as {"field": value}.
+集合“{}”没有字段“{}”：请检查字段名，或先修改集合定义。	Collection “{}” has no field “{}”: check the name, or change the collection definition first.
+字段“{}”是必填的：请提供一个非空的值。	Field “{}” is required: give it a value.
+字段“{}”的现有值 {} 无法转换成新的类型或选项：请先修改或清空这个值，再改字段定义。	Field “{}” current value {} does not convert to the new type or options: change or clear it before changing the field.
+要恢复的内容不是 JSON 对象，无法恢复。	The content to restore is not a JSON object.
+界面名“{}”不合法：只能用小写字母开头，后接小写字母、数字或下划线，最长 40 个字符，且不能是保留字（id、sort、limit、offset、expand）。	Screen name “{}” is invalid: start with a lowercase letter, then lowercase letters, digits or underscores, at most 40 characters, and not a reserved word (id, sort, limit, offset, expand).
+界面“{}”的 title 不能为空：请写一个给人看的标题。	Screen “{}” needs a title.
+界面“{}”的 collection 是“{}”，却在按集合“{}”检查：请检查集合名。	Screen “{}” names collection “{}” but is checked against “{}”: check the collection name.
+界面“{}”的 columns 不能为空：请至少列出一列（id 或集合的字段名）。	Screen “{}” needs at least one column (id or a field name).
+界面“{}”的 {} 里“{}”重复了：请去掉重复的一项。	Screen “{}”: {} repeats “{}”. Remove the duplicate.
+界面“{}”的 columns 里的“{}”不是集合“{}”的字段：请用 id 或已声明的字段名。	Screen “{}”: column “{}” is not a field of collection “{}”. Use id or a declared field.
+界面“{}”的 {}“{}”不是集合“{}”的字段。	Screen “{}” {} “{}” is not a field of collection “{}”.
+界面“{}”的 image_field“{}”要是集合“{}”里的 media（图片）字段。	Screen “{}” image_field “{}” must be a media field of collection “{}”.
+界面“{}”的 group_by“{}”要是一个设置了 index 的单选（select）字段。	Screen “{}” group_by “{}” must be a single select field with an index.
+不能为空	cannot be empty
+最长 {} 个字符，现在有 {} 个	is at most {} characters, now {}
+必须是相对路径，不能以 / 开头	must be relative, not starting with /
+只能用字母、数字和 . _ / - 这几个符号（区分大小写）	may use only letters, digits and . _ / - (case-sensitive)
+不能包含 ..	cannot contain ..
+不能有空的路径段或只有 . 的路径段，也不能以 / 结尾	cannot have empty or "." segments, or end with /
+admin/、api/、uploads/、_hc/ 开头的路径和 mcp 留给系统自己的页面和接口	paths under admin/, api/, uploads/, _hc/ and mcp belong to the system
+扩展名必须是 {} 之一（文本），或 {} 之一（二进制，内容用 base64）	the extension must be one of {} (text) or {} (binary, base64 content)
+站点文件路径“{}”不合法：{}。	Site file path “{}” is invalid: {}.
+站点文件“{}”是二进制文件，内容必须是标准 base64 编码。	Site file “{}” is binary; its content must be standard base64.
+站点文件“{}”是空文件：请上传有内容的文件。	Site file “{}” is empty: upload a file with content.
+站点文件“{}”太大：二进制文件最多 5 MB（{} 字节），现在有 {} 字节。	Site file “{}” is too big: binary files are at most 5 MB ({} bytes), it has {}.
+站点文件“{}”太大：每个文件最多 1 MB（{} 字节），现在有 {} 字节。	Site file “{}” is too big: files are at most 1 MB ({} bytes), it has {}.
+站点文件“{}”的模板写错了：{}	Site file “{}” has a template error: {}
+站点文件“{}”不是有效的 JSON：第 {} 行第 {} 列，{}。	Site file “{}” is not valid JSON: line {}, column {}, {}.
+第 {} 行第 {} 列，	line {}, column {}, 
+（另有 {} 处错误）	({} more errors)
+站点文件“{}”的脚本写错了：{}{}{}。	Site file “{}” has a script error: {}{}{}.
+“{}”不是脚本文件。	“{}” is not a script file.
+页面渲染超过了步骤上限（{} 步）：可能有死循环，或循环套得太深。	The page went over the step limit ({} steps): there may be an endless or too-deep loop.
+{} 第 {} 行，	{} line {}, 
+第 {} 行，	line {}, 
+读取站点文件“{}”失败：{}	Could not read site file “{}”: {}
+站点文件“{}”已损坏：{}	Site file “{}” is damaged: {}
+一个页面最多读取 {} 次内容或文件，请减少循环里的 collection()、record() 调用。	A page can read content at most {} times: use fewer collection() and record() calls in loops.
+集合“{}”不存在、没有上线或不公开，网站读不到它。	Collection “{}” does not exist, is not live or is not public, so the site cannot read it.
+读取记录 {} 失败：{}	Could not read record {}: {}
+渲染已中止。	Rendering stopped.
+渲染页面时出现内部错误。	An internal error occurred while rendering the page.
+读取站点文件失败：{}	Could not read the site files: {}
+file:{} 上线后会出错：{}	file:{} would fail once live: {}
+压缩包读不出来：{}。请上传 zip 格式的压缩包。	Could not read the archive: {}. Upload a zip file.
+压缩包里有 {} 个文件，站点最多 {} 个文件。	The archive has {} files; a site can have at most {}.
+压缩包解压后有 {} MB，一次最多 50 MB。	The archive unpacks to {} MB; the limit is 50 MB.
+二进制文件最多 5 MB	binary files are at most 5 MB
+文本文件最多 1 MB	text files are at most 1 MB
+“{}”太大：{}。	“{}” is too big: {}.
+“{}”读不出来：{}。	Could not read “{}”: {}.
+压缩包解压后超过 50 MB，一次最多 50 MB。	The archive unpacks to more than 50 MB, the limit.
+“{}”不是 UTF-8 文本：二进制文件请用 {} 之一作扩展名。	“{}” is not UTF-8 text: binary files need one of these extensions: {}.
+“{}”在压缩包里出现了不止一次。	“{}” appears more than once in the archive.
+压缩包里有 {} 个问题，什么都没有写入：{}{}	The archive has {} problems, so nothing was written: {}{}
+准备技能表失败：{}	Could not prepare the skills table: {}
+SKILL.md 开头要有 --- 包起来的说明（name 和 description）。	SKILL.md must start with front matter between --- lines (name and description).
+SKILL.md 开头的说明没有用 --- 结束。	The front matter of SKILL.md does not end with ---.
+SKILL.md 的说明里缺少 name。	The SKILL.md front matter has no name.
+技能名“{}”不合规：只能用小写字母、数字和 -，最多 64 个字符。	Skill name “{}” is invalid: use lowercase letters, digits and -, at most 64 characters.
+SKILL.md 的说明里缺少 description。	The SKILL.md front matter has no description.
+压缩包打不开：{}	Could not open the archive: {}
+压缩包里没有找到 SKILL.md。	No SKILL.md in the archive.
+压缩包损坏：{}	The archive is damaged: {}
+技能里的“{}”超过 1 MB。	“{}” in the skill is over 1 MB.
+读取“{}”失败：{}	Could not read “{}”: {}
+技能太大：解压后最多 10 MB。	The skill is too big: at most 10 MB unpacked.
+技能里的文件太多：最多 {} 个。	The skill has too many files: at most {}.
+技能里没有 SKILL.md。	The skill has no SKILL.md.
+保存技能失败：{}	Could not save the skill: {}
+技能保存后没找到。	The skill was not found after saving.
+读取技能失败：{}	Could not read the skill: {}
+没有名为“{}”的技能。	There is no skill named “{}”.
+没有启用名为“{}”的技能。	No enabled skill is named “{}”.
+技能“{}”里没有“{}”。	Skill “{}” has no “{}”.
+技能地址要以 https:// 开头。	The skill address must start with https://.
+请给出 GitHub 仓库或其中某个文件夹的地址（…/tree/分支/路径）。	Give a GitHub repository or folder address (…/tree/branch/path).
+技能地址不正确。	The skill address is not valid.
+技能地址没有主机名。	The skill address has no host name.
+找不到“{}”：{}	Could not find “{}”: {}
+不能从内网地址下载技能。	Skills cannot be downloaded from private network addresses.
+下载技能失败：{}	Could not download the skill: {}
+下载技能失败：对方返回 {}。	Could not download the skill: the server returned {}.
+下载中断：{}	The download broke off: {}
+技能太大：下载最多 20 MB。	The skill is too big: downloads are at most 20 MB.
+下载的内容既不是压缩包也不是 SKILL.md。	The download is neither an archive nor a SKILL.md.
+没有名为“{}”的工具，可用工具：{}。	There is no tool named “{}”. Tools: {}.
+“{}”没有权限调用“{}”：需要 {} 权限。	“{}” may not call “{}”: the {} permission is needed.
+尚未实现	is not implemented
+“{}”的参数必须是一个 JSON 对象，请用 {"参数名": 值} 的形式传参。	The arguments of “{}” must be a JSON object such as {"name": value}.
+“{}”没有参数“{}”：可用的参数是 {}。	“{}” has no parameter “{}”. Parameters: {}.
+“{}”缺少必填参数“{}”：请补上它。	“{}” is missing the required parameter “{}”.
+参数“{}”不正确，请按工具的参数说明修改（{}）。	Parameter “{}” is invalid; follow the tool's parameter notes ({}).
+“{}”的参数不正确，请按工具的参数说明修改（{}）。	The arguments of “{}” are invalid; follow the tool's parameter notes ({}).
+工具“{}”{}：它出现在工具列表里却没有处理逻辑，请联系开发者。	Tool “{}” {}: it is listed but has no handler. Contact the developers.
+note 不能为空：请用一句话写明这次修改的原因。	note cannot be empty: say in one sentence why you made this change.
+note 太长：最多 200 个字符，请缩短。	note is too long: at most 200 characters.
+读取集合失败：{}	Could not read the collections: {}
+集合“{}”不存在或已删除，请先用 list_collections 查看现有集合。	Collection “{}” does not exist or was deleted; see list_collections.
+检查目标集合“{}”失败：{}	Could not check target collection “{}”: {}
+关联字段“{}”的目标集合“{}”不存在：请先创建它，或改成已有集合的名字。	Relation field “{}” points to collection “{}”, which does not exist: create it first, or use an existing collection.
+检查集合名“{}”失败：{}	Could not check collection name “{}”: {}
+名字“{}”属于一个已删除的集合，它的记录还保留着：要用回它，请对 collection:{} 调用 list_versions 和 restore_version 把它恢复；否则换一个名字。	The name “{}” belongs to a deleted collection whose records are kept: to use it again, restore collection:{} with list_versions and restore_version; otherwise pick another name.
+它正等待删除；对 collection:{} 调用 discard_draft 可以取消删除。	It is waiting to be deleted; discard_draft on collection:{} cancels the deletion.
+要修改它请用 update_collection。	Use update_collection to change it.
+集合“{}”已存在，请换一个名字。{}	Collection “{}” already exists; pick another name. {}
+字段“{}”已存在：不能重复添加，要修改请用 change_fields。	Field “{}” already exists: use change_fields to change it.
+字段“{}”不存在：无法修改，请检查字段名。	Field “{}” does not exist, so it cannot be changed; check the name.
+字段“{}”不存在：无法删除，请检查字段名。	Field “{}” does not exist, so it cannot be removed; check the name.
+删除字段 {} 会让 {} 条记录里已有的内容不再显示：确认要删，请加上参数 confirm: {}。内容不会被清除，把字段加回来就能恢复。	Removing field {} hides existing content in {} records: to go ahead, add confirm: {}. The content is kept and comes back if you add the field again.
+这个集合从未发布，它和这些记录会被直接清除、无法恢复	the collection was never published, so it and these records are erased for good
+发布删除后记录会保留，恢复集合就能找回	after the deletion is published the records are kept and come back if the collection is restored
+集合“{}”里有 {} 条记录（{}）：确认要删除，请加上参数 confirm: {}。	Collection “{}” has {} records ({}): to delete it, add confirm: {}.
+记录 {} 不存在或已被删除：请检查编号。	Record {} does not exist or was deleted; check the id.
+关联字段“{}”指向的记录 {} 不存在：它必须是集合“{}”里现有的记录，请检查编号。	Relation field “{}” points to record {}, which does not exist: it must be a record of collection “{}”.
+集合“{}”是单例集合，已经有一条记录：请用 update_record 修改它。	Collection “{}” is single and already has its record: use update_record.
+记录 {} 正等待删除，不能修改：如要保留它，请先用 discard_draft 放弃删除。	Record {} is waiting to be deleted and cannot be changed: to keep it, cancel with discard_draft first.
+“{}”没有权限改动“{}”：它属于结构，需要 structure 权限。	“{}” may not change “{}”: it is structure, so the structure permission is needed.
+import_map 要形如 {"imports": {"react": "https://esm.sh/react@19"}。	import_map must look like {"imports": {"react": "https://esm.sh/react@19"}}.
+script_origins 里的 {} 不是来源网址：要形如 https://esm.sh，不带路径。	{} in script_origins is not an origin: it must look like https://esm.sh, with no path.
+script_origins 要是一组网址，比如 ["https://esm.sh"]。	script_origins must be a list of addresses, such as ["https://esm.sh"].
+读取界面失败：{}	Could not read the screens: {}
+界面“{}”正等待删除，不能修改：如要保留它，请先对 view:{} 调用 discard_draft 放弃删除。	Screen “{}” is waiting to be deleted and cannot be changed: to keep it, call discard_draft on view:{} first.
+界面“{}”不存在或已删除，请先用 list_views 查看现有界面。	Screen “{}” does not exist or was deleted; see list_views.
+读取站点说明失败：{}	Could not read the site notes: {}
+站点说明已损坏：{}	The site notes are damaged: {}
+站点说明太长：最多 {} 个字符，现在有 {} 个，请缩短。	The site notes are too long: at most {} characters, now {}.
+“{}”太大：通过工具上传最大 {} MB，更大的文件请用 POST /api/v1/media。	“{}” is too big: tool uploads are at most {} MB; use POST /api/v1/media for bigger files.
+“{}”的 data_base64 不是有效的 base64：{}。	The data_base64 of “{}” is not valid base64: {}.
+站点文件“{}”不存在或已删除，请先用 list_site_files 查看现有文件。	Site file “{}” does not exist or was deleted; see list_site_files.
+压缩包太大：最多 50 MB。	The archive is too big: at most 50 MB.
+zip_base64 不是有效的 base64：{}。	zip_base64 is not valid base64: {}.
+压缩包里没有文件。	The archive has no files.
+写入站点文件失败：{}	Could not write the site files: {}
+保存网址设置失败：{}	Could not save the address settings: {}
+后台已经搬到 {}：请在新网址重新打开后台再提交。	The admin moved to {}: open it there and submit again.
+找不到这个页面。	Page not found.
+在域名解析里加一条，让 {} 指向这台服务器（和 {} 一样）；在反向代理里把 {} 也转给 CMS Harness（和网站同一个端口），并原样带上 Host 头。	Add a DNS record so {} points to this server (like {}); in the reverse proxy, send {} to CMS Harness too (same port as the site) and pass the Host header unchanged.
+“{}”是编辑：只有搭建者（builder）可以改网址。	“{}” is an editor: only builders can change the addresses.
+请选“同一个网址”或“分开网址”。	Choose “One address” or “Separate addresses”.
+“{}”不是一个网址：要形如 https://admin.example.com，不带路径。	“{}” is not an address: it must look like https://admin.example.com, with no path.
+后台的网址不能和网站一样（{}）：要分开就换一个，比如 admin. 开头的子域名。	The admin address cannot be the site's ({}): pick another, such as an admin. subdomain.
+网址由服务器的环境变量 HC_ADMIN_ORIGIN 设置，这里不能改：请改环境变量后重启。	The address comes from the server's HC_ADMIN_ORIGIN variable and cannot be changed here: change it and restart.
+黄	Yellow
+蓝	Blue
+绿	Green
+珊瑚	Coral
+紫	Purple
+表单已失效，请刷新页面后再试。	The form expired. Reload the page and try again.
+导航只能收起（collapsed）或展开（open）；对话只能是 docked、floating 或 mini。	The nav is collapsed or open; the chat is docked, floating or mini.
+后台发布	Published in admin
+后台恢复历史版本	Restored a version in admin
+修改	Change
+标题	Title
+字段	Fields
+谁能看	Who can read
+谁能提交	Who can submit
+单条	Single
+列	Columns
+排序	Sort
+集合	Collection
+内容	Content
+界面	Screen
+改了{}	changed {}
+开	on
+关	off
+二进制文件	binary file
+共 {} 行	{} lines
+原有 {} 行	was {} lines
+{} 行，行数不变	{} lines, same count
+{} 行 → {} 行（{}）	{} lines → {} lines ({})
+站点文件	Site file
+ 和 	 and 
+这些改动你都没有权限发布。	You may not publish any of these changes.
+发布被拦下，什么都没有上线。	Publishing was stopped and nothing went live.
+读取发布记录失败：{}	Could not read the releases: {}
+没有编号为 {} 的发布记录。	There is no release {}.
+版本编号“{}”不对：请从发布记录里选一个版本。	Version “{}” is not valid: pick one from the releases.
+（去掉）	(removed)
+允许加载脚本	allow scripts
+不再允许	no longer allowed
+脚本来源	Script origins
+恢复默认（https://esm.sh）	back to the default (https://esm.sh)
+{}（只在 {} 下）	{} (only under {})
+记录 #{}	Record #{}
+页面文件	Site file
+正在回复	Replying
+正在{}	{}
+正在想…	Thinking…
+后台手动修改	Edited in admin
+后台手动新建	Created in admin
+后台手动删除	Deleted in admin
+这条记录在你打开之后被改过：请刷新页面看到最新内容后再改。你填的内容还在下面。	This record changed after you opened it: reload to see the latest before editing. What you typed is still below.
+集合“{}”不存在或已删除。	Collection “{}” does not exist or was deleted.
+待删除	To be deleted
+全部	All
+编号	ID
+{} 条有改动	{} changed
+{} 条草稿	{} drafts
+{} 条	{} items
+{} 条，其中 {}	{} items, {}
+未分组	Ungrouped
+界面“{}”不存在或已删除。	Screen “{}” does not exist or was deleted.
+读取表单失败：{}。	Could not read the form: {}.
+删除这条草稿？	Delete this draft?
+“{}”从没发布过，删除后不会留下历史版本，也不能找回。	“{}” was never published; once deleted it leaves no version and cannot be recovered.
+确认删除	Delete
+没有收到文件：请先选择要上传的图片或 PDF。	No file received: choose an image or PDF first.
+网站没有打开会员登录，所以没有用户管理。	Member login is off, so there is no user management.
+正常	Active
+后台停用会员	Member disabled in admin
+后台恢复会员	Member enabled in admin
+这个网站没有开放会员登录。	This site does not have member login.
+已经注册	already registered
+读取数据库	read the database
+登录后没找到这个会员。	The member was not found after sign-in.
+没有提交成功	Not submitted
+返回修改	Go back and fix it
+“{}”要填数字。	“{}” must be a number.
+“{}”的选项不对。	“{}” has an invalid option.
+这里是后台里隔离的预览框，不能提交表单：请在新标签页打开网站再提交。	This is the admin's sealed preview frame and cannot submit forms: open the site in a new tab to submit.
+请求来源与这个网址（{}）不一致，已拒绝。请在这个网址的页面上提交。	The request did not come from this address ({}), so it was refused. Submit from a page on this address.
+没有登录或登录已过期，请重新登录后再提交。	You are not signed in, or the session expired. Sign in again and resubmit.
+邮箱或密码不正确，请检查后重试。	Wrong email or password. Check them and try again.
+登录失败次数过多，请等 15 分钟后再试。	Too many failed sign-ins. Wait 15 minutes and try again.
+保存预览链接失败：{}	Could not save the preview link: {}
+保存偏好失败：{}	Could not save the preference: {}
+这个管理员账号已不存在，请重新登录。	This admin account no longer exists. Sign in again.
+原密码不正确，请重新输入。	The current password is wrong.
+新密码至少要 8 个字符，请换一个更长的密码。	The new password needs at least 8 characters.
+后台修改站点说明	Site notes edited in admin
+对话用的模型由服务器的环境变量（LLM_PROVIDER、LLM_MODEL、LLM_API_KEY）设置，这里不能改：请改环境变量后重启。	The chat model comes from server variables (LLM_PROVIDER, LLM_MODEL, LLM_API_KEY) and cannot be changed here: change them and restart.
+换了接口地址：请重新填一次密钥。保存过的密钥只会发给原来的地址。	The API address changed: enter the key again. A saved key is only sent to its original address.
+至少要留一位搭建者（builder）：请先添加另一位搭建者，再删除这个账号。	At least one builder must stay: add another builder before deleting this account.
+兼容 OpenAI 的接口	OpenAI-compatible API
+读	Read
+写	Write
+搭建者，可以改结构和发布	Builder: can change structure and publish
+编辑，可以改内容和发布	Editor: can change content and publish
+搭建者	Builder
+编辑	Editor
+“{}”是编辑：只有搭建者（builder）可以改这项设置。	“{}” is an editor: only builders can change this setting.
+密钥名字不能为空：写一个能认出用途的名字，比如“我的 Claude Code”。	The key needs a name that says what it is for, such as “My Claude Code”.
+密钥名字太长：最多 60 个字符。	The key name is too long: at most 60 characters.
+不认识的权限“{}”：可选 write、structure、publish（read 总是包含）。	Unknown permission “{}”: choose write, structure or publish (read is always included).
+密钥 {}	Key {}
+吊销密钥“{}”？	Revoke key “{}”?
+吊销后，用这把密钥的 agent 和程序立刻失去访问，不能恢复；要再接入，得新建一把。	Agents and programs using this key lose access at once, for good; to connect again, create a new key.
+确认吊销	Revoke
+“{}”已经是管理员了：要给他新密码，请用列表里的“重设密码”。	“{}” is already an admin: use “Reset password” in the list to give a new password.
+要改自己的密码，请用上面的“修改密码”，它需要原密码。	To change your own password, use “Change password” above; it needs the current one.
+管理员 {} 不存在：请刷新页面。	Admin {} does not exist: reload the page.
+管理员 {}	Admin {}
+这是你自己的账号，删除后你会立刻退出，	This is your own account; deleting it signs you out at once, and 
+删除管理员 {}？	Delete admin {}?
+{}删除后这个账号不能再登录后台，它的登录也会马上失效。要恢复只能重新添加。	{}the account can no longer sign in and its sessions end now. To bring it back, add it again.
+只能选列出的标记颜色（yellow、blue、green、coral、purple）、对话样子（docked、floating）或语言（zh、en）。	Choose a listed marker colour (yellow, blue, green, coral, purple), chat style (docked, floating) or language (zh, en).
+“{}”是编辑：只有搭建者（builder）可以安装技能。	“{}” is an editor: only builders can install skills.
+上传的压缩包 {}	uploaded archive {}
+请填技能的链接，或者选一个压缩包上传。	Give a skill link, or choose an archive to upload.
+删除技能“{}”？	Delete skill “{}”?
+删除后对话就不再用它。要再用，得重新安装。	The chat stops using it. To use it again, install it again.
+没有这个操作。	Unknown action.
+网站页面只接受 GET 请求。	Site pages accept only GET requests.
+预览链接已失效：刷新后台页面就会拿到新的。	The preview link expired: reload the admin to get a new one.
+读取记录失败：{}	Could not read the records: {}
+站点文件“{}”已损坏：不是有效的 base64。	Site file “{}” is damaged: not valid base64.
+网站页面 {} 出错：{}	Site page {} failed: {}
+页面出错了	Something went wrong
+请稍后再试。	Please try again later.
+后台和对话用的语言。	The language of the admin and the chat.

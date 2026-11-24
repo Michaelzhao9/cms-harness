@@ -1,210 +1,217 @@
 {% extends "base.html" %}
-{% block title %}设置{% endblock %}
+{% block title %}{{ "设置"|t }}{% endblock %}
 {% block main %}
 {%- import "icons.html" as i %}
 <div class="page">
-<h1>设置</h1>
+<h1>{{ "设置"|t }}</h1>
 <div class="settings">
-{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+{% if error %}<p class="note bad" role="alert">{{ error|t }}</p>{% endif %}
 
 <section aria-labelledby="s-access">
-<h2 id="s-access">接入</h2>
-<p class="lede">把下面的地址和一把密钥交给你自己的 agent，它就能读写这个站的内容，规则和左边的对话完全一样。</p>
-<div class="fd"><label class="lb" for="s-mcp">MCP 地址</label><input id="s-mcp" class="in mono" type="text" readonly value="{{ mcp_url }}"></div>
-<div class="fd"><label class="lb" for="s-api">内容接口</label><input id="s-api" class="in mono" type="text" readonly value="{{ api_url }}&lt;集合名&gt;"></div>
+<h2 id="s-access">{{ "接入"|t }}</h2>
+<p class="lede">{{ "把下面的地址和一把密钥交给你自己的 agent，它就能读写这个站的内容，规则和左边的对话完全一样。"|t }}</p>
+<div class="fd"><label class="lb" for="s-mcp">{{ "MCP 地址"|t }}</label><input id="s-mcp" class="in mono" type="text" readonly value="{{ mcp_url }}"></div>
+<div class="fd"><label class="lb" for="s-api">{{ "内容接口"|t }}</label><input id="s-api" class="in mono" type="text" readonly value="{{ api_url }}{{ '<集合名>'|t }}"></div>
 {% if new_key -%}
-<div class="note good" role="status"><p>新密钥“{{ new_key.name }}”：<code class="secret">{{ new_key.key }}</code></p><p>它只显示这一次，请马上复制保存。离开这个页面后就再也看不到了。</p></div>
+<div class="note good" role="status"><p>{{ "新密钥“"|t }}{{ new_key.name }}{{ "”："|t }}<code class="secret">{{ new_key.key }}</code></p><p>{{ "它只显示这一次，请马上复制保存。离开这个页面后就再也看不到了。"|t }}</p></div>
 {%- endif %}
 {% if keys -%}
 <div class="wide"><table class="table flush">
-<thead><tr><th scope="col">密钥</th><th scope="col">能做什么</th><th scope="col">创建于</th><th scope="col"><span class="sr">操作</span></th></tr></thead>
+<thead><tr><th scope="col">{{ "密钥"|t }}</th><th scope="col">{{ "能做什么"|t }}</th><th scope="col">{{ "创建于"|t }}</th><th scope="col"><span class="sr">{{ "操作"|t }}</span></th></tr></thead>
 <tbody>
 {% for k in keys -%}
-<tr><td class="lead">{{ k.name }}</td><td>{{ k.scopes }}</td><td class="muted">{{ k.created }}</td>
-<td class="end">{% if k.revoked %}<span class="muted">已吊销</span>{% elif builder %}<form method="post" action="/admin/settings/keys/{{ k.id }}/revoke"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">吊销</button></form>{% endif %}</td></tr>
+<tr><td class="lead">{{ k.name }}</td><td>{{ k.scopes|t }}</td><td class="muted">{{ k.created }}</td>
+<td class="end">{% if k.revoked %}<span class="muted">{{ "已吊销"|t }}</span>{% elif builder %}<form method="post" action="/admin/settings/keys/{{ k.id }}/revoke"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">{{ "吊销"|t }}</button></form>{% endif %}</td></tr>
 {% endfor -%}
 </tbody>
 </table></div>
-{%- else %}<p class="small">还没有密钥。</p>{% endif %}
+{%- else %}<p class="small">{{ "还没有密钥。"|t }}</p>{% endif %}
 {% if builder -%}
 <form class="inline" method="post" action="/admin/settings/keys">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<div class="fd"><label class="lb" for="k-name">新密钥的名字</label><input class="in" id="k-name" type="text" name="name" required maxlength="60"></div>
-<fieldset><legend class="lb">除了读，还能</legend>
-<label class="check"><input type="checkbox" name="scope" value="write">写内容</label>
-<label class="check"><input type="checkbox" name="scope" value="structure">改结构</label>
-<label class="check"><input type="checkbox" name="scope" value="publish">发布</label>
+<div class="fd"><label class="lb" for="k-name">{{ "新密钥的名字"|t }}</label><input class="in" id="k-name" type="text" name="name" required maxlength="60"></div>
+<fieldset><legend class="lb">{{ "除了读，还能"|t }}</legend>
+<label class="check"><input type="checkbox" name="scope" value="write">{{ "写内容"|t }}</label>
+<label class="check"><input type="checkbox" name="scope" value="structure">{{ "改结构"|t }}</label>
+<label class="check"><input type="checkbox" name="scope" value="publish">{{ "发布"|t }}</label>
 </fieldset>
-<button type="submit" class="btn2">{{ i.icon("plus", 16) }}新建密钥</button>
+<button type="submit" class="btn2">{{ i.icon("plus", 16) }}{{ "新建密钥"|t }}</button>
 </form>
-{%- else %}<p class="small">只有搭建者可以新建或吊销密钥。</p>{% endif %}
+{%- else %}<p class="small">{{ "只有搭建者可以新建或吊销密钥。"|t }}</p>{% endif %}
 </section>
 
 <section aria-labelledby="s-address-h" id="s-address">
-<h2 id="s-address-h">网址</h2>
+<h2 id="s-address-h">{{ "网址"|t }}</h2>
 {% if saved == "address" -%}
-{% if address.admin %}<p class="note good" role="status">已切换到分开网址。后台现在在 <a href="{{ address.admin }}/admin/login">{{ address.admin }}</a>，请到那里重新登录。这个旧地址 10 分钟内还会把你带过去，之后只剩网站。</p>
-{%- else %}<p class="note good" role="status">已切回同一个网址。后台现在在 <a href="{{ address.site }}/admin/login">{{ address.site }}/admin</a>，请到那里重新登录。</p>{% endif %}
+{% if address.admin %}<p class="note good" role="status">{{ "已切换到分开网址。后台现在在"|t }} <a href="{{ address.admin }}/admin/login">{{ address.admin }}</a>{{ "，请到那里重新登录。这个旧地址 10 分钟内还会把你带过去，之后只剩网站。"|t }}</p>
+{%- else %}<p class="note good" role="status">{{ "已切回同一个网址。后台现在在"|t }} <a href="{{ address.site }}/admin/login">{{ address.site }}/admin</a>{{ "，请到那里重新登录。"|t }}</p>{% endif %}
 {%- endif %}
 <dl class="facts">
-<div><dt>网站</dt><dd>{{ address.site }}</dd></div>
-<div><dt>后台</dt><dd>{{ address.admin or address.site }}/admin</dd></div>
+<div><dt>{{ "网站"|t }}</dt><dd>{{ address.site }}</dd></div>
+<div><dt>{{ "后台"|t }}</dt><dd>{{ address.admin or address.site }}/admin</dd></div>
 </dl>
 {% if not address.admin -%}
-<div class="note warn" role="note"><p><strong>安全提示</strong>：现在网站和后台用的是同一个网址。网站上的脚本（不管是对话写的、你写的还是从别处拿来的）在你登录了后台的浏览器里运行时，可以冒充你操作后台：改内容、发布、建密钥。</p><p>只在网站上放你信得过的脚本。更稳妥的做法是选下面的“分开网址”，把后台放到单独的网址上。</p></div>
+<div class="note warn" role="note"><p><strong>{{ "安全提示"|t }}</strong>{{ "：现在网站和后台用的是同一个网址。网站上的脚本（不管是对话写的、你写的还是从别处拿来的）在你登录了后台的浏览器里运行时，可以冒充你操作后台：改内容、发布、建密钥。"|t }}</p><p>{{ "只在网站上放你信得过的脚本。更稳妥的做法是选下面的“分开网址”，把后台放到单独的网址上。"|t }}</p></div>
 {%- endif %}
 {% if address.env -%}
-<p class="small">网址由服务器的环境变量 HC_ADMIN_ORIGIN 设置，这里只能看。要换，请改环境变量后重启。</p>
+<p class="small">{{ "网址由服务器的环境变量 HC_ADMIN_ORIGIN 设置，这里只能看。要换，请改环境变量后重启。"|t }}</p>
 {%- elif builder -%}
 <form class="fields" method="post" action="/admin/settings/address">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<div class="radios" role="radiogroup" aria-label="网站和后台的网址">
-<label class="radio"><input type="radio" name="mode" value="same"{% if not address.admin %} checked{% endif %}><span class="grow">同一个网址：网站和后台都在 {{ address.site }}</span></label>
-<label class="radio"><input type="radio" name="mode" value="separate"{% if address.admin %} checked{% endif %}><span class="grow">分开网址：后台放到自己的网址上，网站留在 {{ address.site }}</span></label>
+<div class="radios" role="radiogroup" aria-label="{{ '网站和后台的网址'|t }}">
+<label class="radio"><input type="radio" name="mode" value="same"{% if not address.admin %} checked{% endif %}><span class="grow">{{ "同一个网址：网站和后台都在"|t }} {{ address.site }}</span></label>
+<label class="radio"><input type="radio" name="mode" value="separate"{% if address.admin %} checked{% endif %}><span class="grow">{{ "分开网址：后台放到自己的网址上，网站留在"|t }} {{ address.site }}</span></label>
 </div>
-<div class="fd"><label class="lb" for="ad-url">后台的网址<span class="req">选“分开网址”时填</span></label><input class="in mono" id="ad-url" type="url" name="admin_origin" value="{{ address.typed or address.admin or '' }}" placeholder="https://admin.example.com"></div>
-<p class="small">切换前先做好这一步：{{ address.setup }} 保存时会先检查这个网址确实能访问到这台服务器，检查不过就不切换。</p>
-<div class="actions"><button type="submit" class="btn">检查并保存</button><span class="small">进不去后台时，在服务器上运行 cms-harness admin-origin off 就能切回同一个网址。</span></div>
+<div class="fd"><label class="lb" for="ad-url">{{ "后台的网址"|t }}<span class="req">{{ "选“分开网址”时填"|t }}</span></label><input class="in mono" id="ad-url" type="url" name="admin_origin" value="{{ address.typed or address.admin or '' }}" placeholder="https://admin.example.com"></div>
+<p class="small">{{ "切换前先做好这一步："|t }}{{ address.setup|t }} {{ "保存时会先检查这个网址确实能访问到这台服务器，检查不过就不切换。"|t }}</p>
+<div class="actions"><button type="submit" class="btn">{{ "检查并保存"|t }}</button><span class="small">{{ "进不去后台时，在服务器上运行 cms-harness admin-origin off 就能切回同一个网址。"|t }}</span></div>
 </form>
-{%- else %}<p class="small">只有搭建者可以改网址。</p>{% endif %}
+{%- else %}<p class="small">{{ "只有搭建者可以改网址。"|t }}</p>{% endif %}
 </section>
 
 <section aria-labelledby="s-model-h" id="s-model">
-<h2 id="s-model-h">对话用的模型</h2>
-{% if saved == "model" %}<p class="note good" role="status">已保存，左边的对话马上就用它。</p>{% endif %}
+<h2 id="s-model-h">{{ "对话用的模型"|t }}</h2>
+{% if saved == "model" %}<p class="note good" role="status">{{ "已保存，左边的对话马上就用它。"|t }}</p>{% endif %}
 {% if model.env -%}
 <dl class="facts">
-<div><dt>接口</dt><dd>{{ model.env.provider }}</dd></div>
-<div><dt>地址</dt><dd>{{ model.env.base_url }}</dd></div>
-<div><dt>模型</dt><dd>{{ model.env.model }}</dd></div>
-<div><dt>密钥</dt><dd>{{ "已设置" if model.env.key_set else "未设置" }}</dd></div>
+<div><dt>{{ "接口"|t }}</dt><dd>{{ model.env.provider|t }}</dd></div>
+<div><dt>{{ "地址"|t }}</dt><dd>{{ model.env.base_url }}</dd></div>
+<div><dt>{{ "模型"|t }}</dt><dd>{{ model.env.model }}</dd></div>
+<div><dt>{{ "密钥"|t }}</dt><dd>{{ ("已设置"|t) if model.env.key_set else ("未设置"|t) }}</dd></div>
 </dl>
-<p class="small">这台服务器用环境变量（LLM_PROVIDER、LLM_MODEL、LLM_API_KEY、LLM_BASE_URL）设置了模型，这里只能看。要换，请改环境变量后重启。</p>
+<p class="small">{{ "这台服务器用环境变量（LLM_PROVIDER、LLM_MODEL、LLM_API_KEY、LLM_BASE_URL）设置了模型，这里只能看。要换，请改环境变量后重启。"|t }}</p>
 {%- elif builder -%}
-<p class="lede">选一家模型服务，填上密钥，点「检测」就能看到这把密钥能用的所有型号。本机的 Ollama、LM Studio 不用密钥。</p>
+<p class="lede">{{ "选一家模型服务，填上密钥，点「检测」就能看到这把密钥能用的所有型号。本机的 Ollama、LM Studio 不用密钥。"|t }}</p>
 <form class="fields" method="post" action="/admin/settings/model" data-model-form>
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <div class="pair2">
-<div class="fd"><label class="lb" for="m-svc">模型服务</label><select class="in" id="m-svc" name="preset">
-{% for p in model.presets %}<option value="{{ p.id }}" data-url="{{ p.base_url }}"{% if p.on %} selected{% endif %}>{{ p.name }}</option>
+<div class="fd"><label class="lb" for="m-svc">{{ "模型服务"|t }}</label><select class="in" id="m-svc" name="preset">
+{% for p in model.presets %}<option value="{{ p.id }}" data-url="{{ p.base_url }}"{% if p.on %} selected{% endif %}>{{ p.name|t }}</option>
 {% endfor %}</select></div>
-<div class="fd"><label class="lb" for="m-key">密钥</label><div class="field-row"><input class="in" id="m-key" type="password" name="key" autocomplete="off" placeholder="{{ '已保存，不显示。要换就重新填' if model.key_set else '这家服务给你的 API 密钥' }}"><button type="submit" class="btn2" formaction="/admin/settings/model/detect" formnovalidate>检测</button></div></div>
+<div class="fd"><label class="lb" for="m-key">{{ "密钥"|t }}</label><div class="field-row"><input class="in" id="m-key" type="password" name="key" autocomplete="off" placeholder="{{ ('已保存，不显示。要换就重新填'|t) if model.key_set else ('这家服务给你的 API 密钥'|t) }}"><button type="submit" class="btn2" formaction="/admin/settings/model/detect" formnovalidate>{{ "检测"|t }}</button></div></div>
 </div>
-<div class="fd"><label class="lb" for="m-url">接口地址<span class="req">不填就用这家服务的默认地址</span></label><input class="in mono" id="m-url" type="url" name="base_url" value="{{ model.base_url }}" placeholder="https://…"></div>
-<div class="fd"><span class="lb">型号{% if model.models %}<span class="req">检测到 {{ model.models|length }} 个</span>{% endif %}</span>
+<div class="fd"><label class="lb" for="m-url">{{ "接口地址"|t }}<span class="req">{{ "不填就用这家服务的默认地址"|t }}</span></label><input class="in mono" id="m-url" type="url" name="base_url" value="{{ model.base_url }}" placeholder="{{ 'https://…'|t }}"></div>
+<div class="fd"><span class="lb">{{ "型号"|t }}{% if model.models %}<span class="req">{{ "检测到"|t }} {{ model.models|length }} {{ "个"|t }}</span>{% endif %}</span>
 {% if model.models -%}
-<div class="radios" role="radiogroup" aria-label="型号">
+<div class="radios" role="radiogroup" aria-label="{{ '型号'|t }}">
 {% for m in model.models %}<label class="radio"><input type="radio" name="model" value="{{ m.id }}"{% if m.on %} checked{% endif %}><span class="grow">{{ m.name }}</span><code>{{ m.id }}</code></label>
 {% endfor %}</div>
-{%- elif model.model %}<p class="small">现在用的是 <code>{{ model.model }}</code>。点「检测」可以从列表里换一个。</p><input type="hidden" name="model" value="{{ model.model }}">
-{%- else %}<p class="small">点「检测」列出可用的型号，或者在下面直接填型号名。</p>{% endif %}
-<details class="byname"{% if not model.models and not model.model %} open{% endif %}><summary class="txt">列表里没有？直接填型号名</summary>
-<label class="sr" for="m-name">型号名</label><input class="in mono" id="m-name" type="text" name="model_name" placeholder="比如 claude-opus-5-5"></details>
+{%- elif model.model %}<p class="small">{{ "现在用的是"|t }} <code>{{ model.model }}</code>{{ "。点「检测」可以从列表里换一个。"|t }}</p><input type="hidden" name="model" value="{{ model.model }}">
+{%- else %}<p class="small">{{ "点「检测」列出可用的型号，或者在下面直接填型号名。"|t }}</p>{% endif %}
+<details class="byname"{% if not model.models and not model.model %} open{% endif %}><summary class="txt">{{ "列表里没有？直接填型号名"|t }}</summary>
+<label class="sr" for="m-name">{{ "型号名"|t }}</label><input class="in mono" id="m-name" type="text" name="model_name" placeholder="{{ '比如 claude-opus-5-5'|t }}"></details>
 </div>
-<div class="actions"><button type="submit" class="btn">保存</button><span class="small">只用接口、不用对话时，可以不配置模型。</span></div>
+<div class="actions"><button type="submit" class="btn">{{ "保存"|t }}</button><span class="small">{{ "只用接口、不用对话时，可以不配置模型。"|t }}</span></div>
 </form>
 {%- else -%}
-{% if model.saved %}<dl class="facts"><div><dt>模型</dt><dd>{{ model.model }}</dd></div><div><dt>密钥</dt><dd>{{ "已设置" if model.key_set else "未设置" }}</dd></div></dl>{% else %}<p class="small">还没有配置对话用的模型。</p>{% endif %}
-<p class="small">只有搭建者可以配置对话用的模型。</p>
+{% if model.saved %}<dl class="facts"><div><dt>{{ "模型"|t }}</dt><dd>{{ model.model }}</dd></div><div><dt>{{ "密钥"|t }}</dt><dd>{{ ("已设置"|t) if model.key_set else ("未设置"|t) }}</dd></div></dl>{% else %}<p class="small">{{ "还没有配置对话用的模型。"|t }}</p>{% endif %}
+<p class="small">{{ "只有搭建者可以配置对话用的模型。"|t }}</p>
 {%- endif %}
 </section>
 
 <section aria-labelledby="s-skills-h" id="s-skills">
-<h2 id="s-skills-h">技能</h2>
-<p class="lede">技能是一份写给对话的做事方法，比如品牌语气、做表格的规矩。装好后，对话遇到相关的事会自己去读。技能里的脚本只当参考，不会被运行。</p>
-{% if saved == "skill" %}<p class="note good" role="status">技能装好了。</p>{% endif %}
+<h2 id="s-skills-h">{{ "技能"|t }}</h2>
+<p class="lede">{{ "技能是一份写给对话的做事方法，比如品牌语气、做表格的规矩。装好后，对话遇到相关的事会自己去读。技能里的脚本只当参考，不会被运行。"|t }}</p>
+{% if saved == "skill" %}<p class="note good" role="status">{{ "技能装好了。"|t }}</p>{% endif %}
 {% if skills -%}
 <ul class="skills">
 {% for k in skills -%}
-<li>{{ i.icon("puzzle", 18) }}<span class="grow"><span class="name"><strong>{{ k.name }}</strong>{% if k.enabled %}<span class="on">启用中</span>{% else %}<span class="muted">已停用</span>{% endif %}</span>
-<span class="desc">{{ k.description }}</span><span class="by">{{ "从 " ~ k.source ~ " 安装" if k.source is startingwith("https://") else k.source }} · {{ k.installed }} · {{ k.files }} 个文件</span></span>
+<li>{{ i.icon("puzzle", 18) }}<span class="grow"><span class="name"><strong>{{ k.name }}</strong>{% if k.enabled %}<span class="on">{{ "启用中"|t }}</span>{% else %}<span class="muted">{{ "已停用"|t }}</span>{% endif %}</span>
+<span class="desc">{{ k.description }}</span><span class="by">{{ ("从 "|t) ~ k.source ~ (" 安装"|t) if k.source is startingwith("https://") else k.source }} · {{ k.installed }} · {{ k.files }} {{ "个文件"|t }}</span></span>
 {% if builder -%}
-<form method="post" action="/admin/settings/skills/{{ k.name }}/{{ 'disable' if k.enabled else 'enable' }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">{{ "停用" if k.enabled else "启用" }}</button></form>
-<form method="post" action="/admin/settings/skills/{{ k.name }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt bad">删除</button></form>
+<form method="post" action="/admin/settings/skills/{{ k.name }}/{{ 'disable' if k.enabled else 'enable' }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">{{ ("停用"|t) if k.enabled else ("启用"|t) }}</button></form>
+<form method="post" action="/admin/settings/skills/{{ k.name }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt bad">{{ "删除"|t }}</button></form>
 {%- endif %}</li>
 {% endfor -%}
 </ul>
-{%- else %}<p class="small">还没有装技能。</p>{% endif %}
+{%- else %}<p class="small">{{ "还没有装技能。"|t }}</p>{% endif %}
 {% if builder -%}
 <form class="fields" method="post" action="/admin/settings/skills/install" enctype="multipart/form-data">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<div class="fd"><label class="lb" for="sk-url">安装新技能</label><div class="field-row"><input class="in" id="sk-url" type="url" name="url" placeholder="GitHub 文件夹、zip 或 SKILL.md 的链接"><button type="submit" class="btn2">{{ i.icon("download", 16) }}安装</button></div></div>
-<div class="fd"><label class="lb" for="sk-zip">或者上传一个压缩包</label><input id="sk-zip" type="file" name="zip" accept=".zip,application/zip"></div>
+<div class="fd"><label class="lb" for="sk-url">{{ "安装新技能"|t }}</label><div class="field-row"><input class="in" id="sk-url" type="url" name="url" placeholder="{{ 'GitHub 文件夹、zip 或 SKILL.md 的链接'|t }}"><button type="submit" class="btn2">{{ i.icon("download", 16) }}{{ "安装"|t }}</button></div></div>
+<div class="fd"><label class="lb" for="sk-zip">{{ "或者上传一个压缩包"|t }}</label><input id="sk-zip" type="file" name="zip" accept=".zip,application/zip"></div>
 </form>
-{%- else %}<p class="small">只有搭建者可以安装和管理技能。</p>{% endif %}
+{%- else %}<p class="small">{{ "只有搭建者可以安装和管理技能。"|t }}</p>{% endif %}
 </section>
 
 <section aria-labelledby="s-notes">
-<h2 id="s-notes">站点说明</h2>
-<p class="lede">给对话模型看的一段话：这是什么网站、写给谁、有什么规矩。和内容一样，改完要发布才生效。</p>
-{% if saved == "notes" %}<p class="note good" role="status">已存为草稿，发布后才会生效。</p>{% endif %}
+<h2 id="s-notes">{{ "站点说明"|t }}</h2>
+<p class="lede">{{ "给对话模型看的一段话：这是什么网站、写给谁、有什么规矩。和内容一样，改完要发布才生效。"|t }}</p>
+{% if saved == "notes" %}<p class="note good" role="status">{{ "已存为草稿，发布后才会生效。"|t }}</p>{% endif %}
 {% if can_notes -%}
 <form class="fields" method="post" action="/admin/settings/notes">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<div class="fd"><label class="lb" for="n-text">说明{% if notes_status != "published" %}<span class="req">有未发布的改动</span>{% endif %}</label><textarea class="in" id="n-text" name="text" rows="6" maxlength="20000">
+<div class="fd"><label class="lb" for="n-text">{{ "说明"|t }}{% if notes_status != "published" %}<span class="req">{{ "有未发布的改动"|t }}</span>{% endif %}</label><textarea class="in" id="n-text" name="text" rows="6" maxlength="20000">
 {{ notes }}</textarea></div>
-<div class="fd"><label class="lb" for="n-note">修改说明</label><input class="in" id="n-note" type="text" name="note" value="{{ notes_note }}"></div>
-<div class="actions"><button type="submit" class="btn">存为草稿</button></div>
+<div class="fd"><label class="lb" for="n-note">{{ "修改说明"|t }}</label><input class="in" id="n-note" type="text" name="note" value="{{ notes_note|t }}"></div>
+<div class="actions"><button type="submit" class="btn">{{ "存为草稿"|t }}</button></div>
 </form>
 {%- else %}
-{% if notes %}<p class="quote">{{ notes }}</p>{% else %}<p class="small">还没有写站点说明。</p>{% endif %}
-<p class="small">只有搭建者可以修改站点说明。</p>
+{% if notes %}<p class="quote">{{ notes }}</p>{% else %}<p class="small">{{ "还没有写站点说明。"|t }}</p>{% endif %}
+<p class="small">{{ "只有搭建者可以修改站点说明。"|t }}</p>
 {%- endif %}
 </section>
 
 <section aria-labelledby="s-look">
-<h2 id="s-look">外观</h2>
+<h2 id="s-look">{{ "外观"|t }}</h2>
 <form class="pref" method="post" action="/admin/settings/appearance">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<span class="what"><span class="lb">改动标记的颜色</span><span class="small">对话改过、还没发布的地方用这个颜色标出来。</span></span>
-<div class="swatches" role="group" aria-label="改动标记的颜色">
-{% for m in marks %}<button type="submit" class="swatch" name="mark" value="{{ m.key }}" aria-pressed="{{ 'true' if m.on else 'false' }}"><span class="sw sw-{{ m.key }}" aria-hidden="true"></span>{{ m.label }}</button>{% endfor %}
+<span class="what"><span class="lb">{{ "改动标记的颜色"|t }}</span><span class="small">{{ "对话改过、还没发布的地方用这个颜色标出来。"|t }}</span></span>
+<div class="swatches" role="group" aria-label="{{ '改动标记的颜色'|t }}">
+{% for m in marks %}<button type="submit" class="swatch" name="mark" value="{{ m.key }}" aria-pressed="{{ 'true' if m.on else 'false' }}"><span class="sw sw-{{ m.key }}" aria-hidden="true"></span>{{ m.label|t }}</button>{% endfor %}
 </div>
 </form>
 <form class="pref" method="post" action="/admin/settings/appearance">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<span class="what"><span class="lb">对话默认的样子</span><span class="small">随时可以在对话里切换，这里只决定登录后先看到哪种。</span></span>
-<div class="seg" role="group" aria-label="对话默认的样子">
-<button type="submit" name="chat" value="docked" aria-pressed="{{ 'true' if chat_default == 'docked' else 'false' }}">左侧聊天栏</button><button type="submit" name="chat" value="floating" aria-pressed="{{ 'true' if chat_default == 'floating' else 'false' }}">底部小窗</button>
+<span class="what"><span class="lb">{{ "对话默认的样子"|t }}</span><span class="small">{{ "随时可以在对话里切换，这里只决定登录后先看到哪种。"|t }}</span></span>
+<div class="seg" role="group" aria-label="{{ '对话默认的样子'|t }}">
+<button type="submit" name="chat" value="docked" aria-pressed="{{ 'true' if chat_default == 'docked' else 'false' }}">{{ "左侧聊天栏"|t }}</button><button type="submit" name="chat" value="floating" aria-pressed="{{ 'true' if chat_default == 'floating' else 'false' }}">{{ "底部小窗"|t }}</button>
+</div>
+</form>
+<form class="pref" method="post" action="/admin/settings/appearance">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<span class="what"><span class="lb">语言 / Language</span><span class="small">{{ "后台和对话用的语言。"|t }}</span></span>
+<div class="seg" role="group" aria-label="语言 / Language">
+<button type="submit" name="lang" value="zh" lang="zh-CN" aria-pressed="{{ 'true' if lang == 'zh' else 'false' }}">中文</button><button type="submit" name="lang" value="en" lang="en" aria-pressed="{{ 'true' if lang == 'en' else 'false' }}">English</button>
 </div>
 </form>
 </section>
 
 <section aria-labelledby="s-account">
-<h2 id="s-account">账号</h2>
-{% if saved == "password" %}<p class="note good" role="status">密码已修改，其他地方的登录都已退出。</p>{% endif %}
+<h2 id="s-account">{{ "账号"|t }}</h2>
+{% if saved == "password" %}<p class="note good" role="status">{{ "密码已修改，其他地方的登录都已退出。"|t }}</p>{% endif %}
 <div class="line">
-<span class="grow"><span class="who-me">{{ email }}</span><span class="small">{{ role }}</span></span>
-<form method="post" action="/admin/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">退出登录</button></form>
+<span class="grow"><span class="who-me">{{ email }}</span><span class="small">{{ role|t }}</span></span>
+<form method="post" action="/admin/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">{{ "退出登录"|t }}</button></form>
 </div>
 <form class="inline" method="post" action="/admin/settings/password">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <input type="text" name="username" value="{{ email }}" autocomplete="username" hidden>
-<div class="fd"><label class="lb" for="pw-old">原密码</label><input class="in" id="pw-old" type="password" name="old" autocomplete="current-password" required></div>
-<div class="fd"><label class="lb" for="pw-new">新密码</label><input class="in" id="pw-new" type="password" name="new" autocomplete="new-password" minlength="8" required></div>
-<button type="submit" class="btn2">修改密码</button>
+<div class="fd"><label class="lb" for="pw-old">{{ "原密码"|t }}</label><input class="in" id="pw-old" type="password" name="old" autocomplete="current-password" required></div>
+<div class="fd"><label class="lb" for="pw-new">{{ "新密码"|t }}</label><input class="in" id="pw-new" type="password" name="new" autocomplete="new-password" minlength="8" required></div>
+<button type="submit" class="btn2">{{ "修改密码"|t }}</button>
 </form>
 {% if revealed -%}
-<div class="note good" role="status"><p>{{ revealed.email }} 的新密码：<code class="secret">{{ revealed.password }}</code></p><p>它只显示这一次，请马上交给对方，并请他登录后自己改掉。</p></div>
+<div class="note good" role="status"><p>{{ revealed.email }} {{ "的新密码："|t }}<code class="secret">{{ revealed.password }}</code></p><p>{{ "它只显示这一次，请马上交给对方，并请他登录后自己改掉。"|t }}</p></div>
 {%- endif %}
 {% if admins -%}
 <div class="wide"><table class="table flush">
-<thead><tr><th scope="col">管理员</th><th scope="col">角色</th><th scope="col"><span class="sr">操作</span></th></tr></thead>
+<thead><tr><th scope="col">{{ "管理员"|t }}</th><th scope="col">{{ "角色"|t }}</th><th scope="col"><span class="sr">{{ "操作"|t }}</span></th></tr></thead>
 <tbody>
 {% for a in admins -%}
-<tr><td class="lead">{{ a.email }}{% if a.me %} <span class="muted">（你）</span>{% endif %}</td><td>{{ a.role }}</td>
+<tr><td class="lead">{{ a.email }}{% if a.me %} <span class="muted">{{ "（你）"|t }}</span>{% endif %}</td><td>{{ a.role|t }}</td>
 <td class="end"><span class="row-actions">
-{%- if not a.me %}<form method="post" action="/admin/settings/admins/{{ a.id }}/reset"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">重设密码</button></form>{% endif -%}
-<form method="post" action="/admin/settings/admins/{{ a.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt bad">删除</button></form>
+{%- if not a.me %}<form method="post" action="/admin/settings/admins/{{ a.id }}/reset"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">{{ "重设密码"|t }}</button></form>{% endif -%}
+<form method="post" action="/admin/settings/admins/{{ a.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt bad">{{ "删除"|t }}</button></form>
 </span></td></tr>
 {% endfor -%}
 </tbody>
 </table></div>
 <form class="inline" method="post" action="/admin/settings/admins">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<div class="fd"><label class="lb" for="a-email">新管理员的邮箱</label><input class="in" id="a-email" type="email" name="email" required></div>
-<div class="fd"><label class="lb" for="a-role">角色</label><select class="in" id="a-role" name="role"><option value="editor">编辑：改内容和发布</option><option value="builder">搭建者：还能改结构、管理密钥和管理员</option></select></div>
-<button type="submit" class="btn2">{{ i.icon("plus", 16) }}添加管理员</button>
+<div class="fd"><label class="lb" for="a-email">{{ "新管理员的邮箱"|t }}</label><input class="in" id="a-email" type="email" name="email" required></div>
+<div class="fd"><label class="lb" for="a-role">{{ "角色"|t }}</label><select class="in" id="a-role" name="role"><option value="editor">{{ "编辑：改内容和发布"|t }}</option><option value="builder">{{ "搭建者：还能改结构、管理密钥和管理员"|t }}</option></select></div>
+<button type="submit" class="btn2">{{ i.icon("plus", 16) }}{{ "添加管理员"|t }}</button>
 </form>
 {%- endif %}
 </section>

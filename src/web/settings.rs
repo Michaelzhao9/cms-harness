@@ -120,7 +120,10 @@ fn settings_page(app: &App, user: &AdminUser, extra: Extra) -> Result<Out, Out> 
                 // Read is always included.
                 let mut labels = vec![scope_label(Scope::Read)];
                 labels.extend(scopes.into_iter().filter(|s| *s != Scope::Read).map(scope_label));
-                Ok(json!({ "id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?, "scopes": labels.join("、"),
+                let lang = crate::i18n::Lang::of_prefs(&user.prefs);
+                let labels: Vec<_> = labels.into_iter().map(|l| crate::i18n::tr(lang, l)).collect();
+                let sep = if lang == crate::i18n::Lang::En { ", " } else { "、" };
+                Ok(json!({ "id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?, "scopes": labels.join(sep),
                     "created": r.get::<_, String>(3)?.chars().take(10).collect::<String>(), "revoked": r.get::<_, bool>(4)? }))
             })
             .map_err(db)?
@@ -364,10 +367,11 @@ pub async fn appearance(State(app): State<Shared>, Extension(user): Extension<Ad
         Ok(p) => p,
         Err(o) => return o.into_response(),
     };
-    let (key, value) = match (posted.one("mark"), posted.one("chat")) {
-        (m, "") if MARKS.iter().any(|(k, _)| *k == m) => ("mark", m.to_string()),
-        ("", c @ ("docked" | "floating")) => ("chat", c.to_string()),
-        _ => return (StatusCode::BAD_REQUEST, "只能选列出的标记颜色（yellow、blue、green、coral、purple）或对话样子（docked、floating）。").into_response(),
+    let (key, value) = match (posted.one("mark"), posted.one("chat"), posted.one("lang")) {
+        (m, "", "") if MARKS.iter().any(|(k, _)| *k == m) => ("mark", m.to_string()),
+        ("", c @ ("docked" | "floating"), "") => ("chat", c.to_string()),
+        ("", "", l @ ("zh" | "en")) => ("lang", l.to_string()),
+        _ => return (StatusCode::BAD_REQUEST, "只能选列出的标记颜色（yellow、blue、green、coral、purple）、对话样子（docked、floating）或语言（zh、en）。").into_response(),
     };
     // The chat size also applies to this session at once; the next login starts with it.
     let saved = tokio::task::spawn_blocking(move || {

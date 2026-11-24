@@ -82,7 +82,26 @@ pub fn router(app: Shared) -> Router {
 /// Every browser POST must come from our own origin when it says where it comes from.
 /// Every `/admin` path except the login page and static files needs a session; the user lands in the request extensions.
 /// Mounted in `api::router` around everything, so routes merged by later tasks are covered too.
-pub async fn guard(State(app): State<Shared>, mut req: Request, next: Next) -> Response {
+pub async fn guard(State(app): State<Shared>, req: Request, next: Next) -> Response {
+    let browser = crate::i18n::from_headers(req.headers());
+    let (lang, resp) = guarded(app, req, next, browser).await;
+    plain_in(lang, resp).await
+}
+
+/// A plain-text reply (the errors handlers send) in `lang`. HTML pages translate themselves.
+async fn plain_in(lang: crate::i18n::Lang, resp: Response) -> Response {
+    let plain = resp.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(|v| v.starts_with("text/plain"));
+    if lang == crate::i18n::Lang::Zh || !plain {
+        return resp;
+    }
+    let (mut parts, body) = resp.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, 64 * 1024).await else { return Response::from_parts(parts, axum::body::Body::empty()) };
+    let text = crate::i18n::tr(lang, &String::from_utf8_lossy(&bytes)).into_owned();
+    parts.headers.remove(header::CONTENT_LENGTH);
+    Response::from_parts(parts, axum::body::Body::from(text))
+}
+
+async fn guarded(app: Shared, mut req: Request, next: Next, browser: crate::i18n::Lang) -> (crate::i18n::Lang, Response) {
     let path = req.uri().path();
     // Every browser POST (admin, member forms, site submissions) must come from the address it was sent to when the
     // browser says where it comes from. Only the bearer-key API is exempt: keys, not cookies, authorise it.
@@ -92,29 +111,30 @@ pub async fn guard(State(app): State<Shared>, mut req: Request, next: Next) -> R
         if let Some(origin) = req.headers().get(header::ORIGIN) {
             let same_site_fetch = req.headers().get("sec-fetch-site").is_some_and(|v| v == "same-origin");
             if origin.as_bytes() == b"null" && !same_site_fetch {
-                return (StatusCode::FORBIDDEN, "这里是后台里隔离的预览框，不能提交表单：请在新标签页打开网站再提交。").into_response();
+                return (browser, (StatusCode::FORBIDDEN, "这里是后台里隔离的预览框，不能提交表单：请在新标签页打开网站再提交。").into_response());
             }
             // `Origin: null` with Sec-Fetch-Site: same-origin is our own page with a no-referrer policy.
             if origin.as_bytes() != b"null" && origin.as_bytes() != here.as_bytes() {
-                return (StatusCode::FORBIDDEN, format!("请求来源与这个网址（{here}）不一致，已拒绝。请在这个网址的页面上提交。")).into_response();
+                return (browser, (StatusCode::FORBIDDEN, format!("请求来源与这个网址（{here}）不一致，已拒绝。请在这个网址的页面上提交。")).into_response());
             }
         }
     }
     if !(path == "/admin" || path.starts_with("/admin/")) {
-        return next.run(req).await;
+        return (browser, next.run(req).await);
     }
     if path == "/admin/login" || path.starts_with("/admin/static/") {
-        return next.run(req).await;
+        return (browser, next.run(req).await);
     }
     let headers = req.headers().clone();
     let a = app.clone();
     match tokio::task::spawn_blocking(move || session::from_cookie(&a.conn(), &headers)).await.ok().flatten() {
         Some(user) => {
+            let lang = crate::i18n::Lang::of_prefs(&user.prefs);
             req.extensions_mut().insert(user);
-            next.run(req).await
+            (lang, next.run(req).await)
         }
-        None if matches!(*req.method(), Method::GET | Method::HEAD) => Redirect::to("/admin/login").into_response(),
-        None => (StatusCode::UNAUTHORIZED, "没有登录或登录已过期，请重新登录后再提交。").into_response(),
+        None if matches!(*req.method(), Method::GET | Method::HEAD) => (browser, Redirect::to("/admin/login").into_response()),
+        None => (browser, (StatusCode::UNAUTHORIZED, "没有登录或登录已过期，请重新登录后再提交。").into_response()),
     }
 }
 
@@ -196,8 +216,9 @@ async fn logo() -> Response {
     ([(header::CONTENT_TYPE, "image/svg+xml"), (header::CACHE_CONTROL, "public, max-age=86400")], LOGO_SVG).into_response()
 }
 
-async fn login_page(State(app): State<Shared>) -> Response {
-    page(StatusCode::OK, "login.html", json!({ "site_name": app.site_name }))
+async fn login_page(State(app): State<Shared>, headers: HeaderMap) -> Response {
+    let lang = crate::i18n::from_headers(&headers);
+    page(StatusCode::OK, "login.html", json!({ "site_name": app.site_name, "lang": lang.code(), "html_lang": lang.html() }))
 }
 
 #[derive(Deserialize)]
@@ -211,6 +232,7 @@ struct LoginForm {
 async fn login(State(app): State<Shared>, Extension(addr): Extension<Address>, peer: Option<Extension<ConnectInfo<SocketAddr>>>, headers: HeaderMap, Form(f): Form<LoginForm>) -> Response {
     let trust = std::env::var("HC_TRUST_PROXY").is_ok_and(|v| v == "1");
     let client = client_key(&headers, peer.map(|Extension(ConnectInfo(a))| a), trust);
+    let lang = crate::i18n::from_headers(&headers);
     let a = app.clone();
     // Argon2 runs between the two short database steps, never under the lock, and only a few at a time.
     let permit = crate::auth::HASHING.clone().acquire_owned().await;
@@ -218,7 +240,7 @@ async fn login(State(app): State<Shared>, Extension(addr): Extension<Address>, p
         let _permit = permit;
         let attempt = session::login_begin(&a.conn(), &f.email, &client)?;
         let ok = crate::auth::verify_password(attempt.found.as_ref().map_or(session::dummy_hash(), |x| x.1.as_str()), &f.password);
-        session::login_finish(&a.conn(), &f.email, attempt, ok)
+        session::login_finish(&a.conn(), &f.email, attempt, ok, lang.code())
     })
         .await
         .unwrap_or_else(|e| Err(format!("服务器内部错误：{e}")));
@@ -234,7 +256,7 @@ async fn login(State(app): State<Shared>, Extension(addr): Extension<Address>, p
                 session::BAD_LOGIN => StatusCode::UNAUTHORIZED,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             };
-            page(status, "login.html", json!({ "site_name": app.site_name, "error": e }))
+            page(status, "login.html", json!({ "site_name": app.site_name, "error": e, "lang": lang.code(), "html_lang": lang.html() }))
         }
     }
 }

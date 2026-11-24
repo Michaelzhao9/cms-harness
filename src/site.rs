@@ -455,6 +455,7 @@ fn render_thread(asker: Asker, mode: Mode, page: &str, ctx: Value) -> Result<Str
     env.set_fuel(Some(FUEL));
     // Output is HTML whatever the template's own extension: an included `.svg` or `.txt` escapes values too.
     env.set_auto_escape_callback(|_| minijinja::AutoEscape::Html);
+    env.add_filter("t", crate::i18n::filter);
     let a = asker.clone();
     env.set_loader(move |name| {
         if let Some((_, source)) = FALLBACKS.iter().find(|(n, _)| *n == name) {

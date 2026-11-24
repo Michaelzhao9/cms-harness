@@ -1,6 +1,8 @@
 // cms-harness admin: the one script the admin loads. Every page works without it; this only enhances:
 // the chat (sending without a reload, the event stream, sizes, toasts), the site preview (history, change
 // numbers, pick mode) and forms that show their buttons once something changed. Plain ES2020, no build step.
+// The page's language (settings → 语言 / Language): Chinese text, or the English beside it.
+const tr = (zh, en) => (document.documentElement.lang === 'en' ? en : zh);
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -13,7 +15,7 @@ const csrf = $('input[name=csrf]')?.value || '';
 /** Posts a form body from the script: 204 or a plain-text error. */
 async function send(url, body) {
   const res = await fetch(url, { method: 'POST', body, headers: { 'x-hc-fetch': '1' }, credentials: 'same-origin' });
-  if (!res.ok) throw new Error((await res.text()) || `出错了（${res.status}）`);
+  if (!res.ok) throw new Error((await res.text()) || tr(`出错了（${res.status}）`, `Something went wrong (${res.status})`));
 }
 
 function form(fields) {
@@ -81,7 +83,7 @@ function renderChips() {
       label.textContent = p.text ? p.text.slice(0, 24) : p.selector;
       const x = document.createElement('button');
       x.type = 'button';
-      x.setAttribute('aria-label', '去掉这个元素');
+      x.setAttribute('aria-label', tr('去掉这个元素', 'Remove this element'));
       x.textContent = '×';
       x.addEventListener('click', () => {
         picked.splice(i, 1);
@@ -113,7 +115,7 @@ function setRunning(on) {
   shell?.classList.toggle('busy', on);
   if (ask) {
     ask.disabled = on;
-    ask.placeholder = on ? '正在处理…' : '想改什么，直接说。图片可以附上。';
+    ask.placeholder = on ? tr('正在处理…', 'Working…') : tr('想改什么，直接说。图片可以附上。', 'Say what to change. You can attach images.');
   }
   const sendBtn = $('.send', composer || document);
   if (sendBtn) sendBtn.disabled = on;
@@ -212,7 +214,7 @@ function apply(view) {
   if (!view.model && ask) ask.disabled = true;
   for (const el of $$('[data-status-label]')) el.textContent = view.status.label;
   const step = $('[data-status-step]');
-  if (step) step.textContent = view.status.step ? `第 ${view.status.step} 步` : '';
+  if (step) step.textContent = view.status.step ? tr(`第 ${view.status.step} 步`, `Step ${view.status.step}`) : '';
   const miniStep = $('[data-mini-step]');
   if (miniStep) miniStep.textContent = view.status.step || '';
   setPending(view.pending);
@@ -242,13 +244,13 @@ function ended(view) {
   if (view.stopped) return;
   const failed = !!view.error;
   const n = view.summary.changes;
-  const text = failed ? view.error : n ? `${view.summary.places}，${n} 处改动，都是草稿。` : '这一轮做完了。';
-  if (mode() !== 'docked' || document.hidden) toast(failed ? '没做成' : '改好了', text, failed, n > 0);
+  const text = failed ? view.error : n ? tr(`${view.summary.places}，${n} 处改动，都是草稿。`, `${view.summary.places}: ${n} changes, all drafts.`) : tr('这一轮做完了。', 'This turn is done.');
+  if (mode() !== 'docked' || document.hidden) toast(failed ? tr('没做成', 'Not done') : tr('改好了', 'Done'), text, failed, n > 0);
   if (document.hidden) {
     document.title = `${failed ? '! ' : '✓ '}${baseTitle}`;
     if ('Notification' in window && Notification.permission === 'granted') {
       try {
-        new Notification(failed ? '对话没做成' : '改好了', { body: text, tag: 'hc-chat' });
+        new Notification(failed ? tr('对话没做成', 'The chat could not finish') : tr('改好了', 'Done'), { body: text, tag: 'hc-chat' });
       } catch (_) {}
     }
   }
@@ -274,7 +276,7 @@ function toast(title, text, failed, withChanges) {
   const close = document.createElement('button');
   close.type = 'button';
   close.className = 'ib sm';
-  close.setAttribute('aria-label', '关闭');
+  close.setAttribute('aria-label', tr('关闭', 'Close'));
   close.textContent = '×';
   close.addEventListener('click', () => t.remove());
   top.append(badge, strong, close);
@@ -286,7 +288,7 @@ function toast(title, text, failed, withChanges) {
     const look = document.createElement('button');
     look.type = 'button';
     look.className = 'btn';
-    look.textContent = '看看改了哪里';
+    look.textContent = tr('看看改了哪里', 'See what changed');
     look.addEventListener('click', () => {
       t.remove();
       const first = $$('.turn', log).pop()?.querySelector('.chg');
@@ -297,7 +299,7 @@ function toast(title, text, failed, withChanges) {
   const openChat = document.createElement('button');
   openChat.type = 'button';
   openChat.className = 'btn2';
-  openChat.textContent = '打开对话';
+  openChat.textContent = tr('打开对话', 'Open chat');
   openChat.addEventListener('click', () => {
     t.remove();
     if (mode() === 'mini') setMode('floating', true);
@@ -386,7 +388,7 @@ function updateNavigator() {
   if (!nav) return;
   const n = page.changes.length;
   nav.hidden = n === 0 || !marksOn;
-  $('[data-nav-text]', nav).textContent = `本页 ${n} 处改动，还没发布`;
+  $('[data-nav-text]', nav).textContent = tr(`本页 ${n} 处改动，还没发布`, `${n} unpublished changes on this page`);
   $('[data-nav-pos]', nav).textContent = `${Math.min(navIndex + 1, n)} / ${n}`;
 }
 
@@ -509,7 +511,7 @@ for (const f of $$('form[data-dirty]')) {
     f.classList.toggle('is-dirty', n > 0);
     if (count) {
       count.hidden = n === 0;
-      count.textContent = `改了 ${n} 处，还没保存`;
+      count.textContent = tr(`改了 ${n} 处，还没保存`, `${n} unsaved changes`);
     }
   };
   f.addEventListener('input', check);

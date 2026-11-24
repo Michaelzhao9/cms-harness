@@ -6,6 +6,6 @@
 {% for c in collections %}<li><a href="/{{ c.name }}">{{ c.title }}</a></li>
 {% endfor %}</ul>
 {% else %}
-<p class="empty">网站还没有内容。</p>
+<p class="empty">{{ "网站还没有内容。"|t }}</p>
 {% endif %}
 {% endblock %}

@@ -147,23 +147,27 @@ pub fn view(app: &App, user: &AdminUser) -> Value {
             places.push(place);
         }
     }
+    let lang = crate::i18n::Lang::of_prefs(&user.prefs);
+    let t = |s: &str| crate::i18n::tr(lang, s).into_owned();
+    let places: Vec<String> = places.iter().take(3).map(|p| t(p)).collect();
     json!({
         "id": format!("{}-{}", c.id, c.revision),
         "running": c.running,
         "stopped": c.stopped,
-        "error": c.error,
+        "error": c.error.as_deref().map(t),
         "model": app.model().is_some(),
         "builder": user.role == "builder",
+        "lang": lang.code(),
         "turns": turns,
-        "status": { "label": label, "step": steps_now },
+        "status": { "label": t(&label), "step": steps_now },
         "pending": order.len(),
-        "summary": { "changes": last_changes.len(), "places": places.into_iter().take(3).collect::<Vec<_>>().join("、") },
+        "summary": { "changes": last_changes.len(), "places": places.join(if lang == crate::i18n::Lang::En { ", " } else { "、" }) },
     })
 }
 
 /// The chat log as HTML, the part `admin.js` swaps in when the conversation moves.
 fn log_html(view: &Value) -> String {
-    crate::render::admin_page("chat_log.html", json!({ "chat": view })).unwrap_or_else(|e| e)
+    crate::render::admin_page("chat_log.html", json!({ "chat": view, "lang": view["lang"] })).unwrap_or_else(|e| e)
 }
 
 // ---- the workbench page ----

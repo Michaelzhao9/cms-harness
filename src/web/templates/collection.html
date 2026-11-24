@@ -1,16 +1,16 @@
 {% extends "base.html" %}
-{% block title %}{{ heading }}{% endblock %}
+{% block title %}{{ heading|t }}{% endblock %}
 {% block main %}
 {%- import "icons.html" as i %}
 <div class="content">
-<section class="records" aria-label="{{ heading }}">
+<section class="records" aria-label="{{ heading|t }}">
 <header class="head">
-<h1>{{ heading }}</h1>
-<span class="sum">{{ summary }}</span>
-{% if can_create %}<a class="btn" href="{{ new_href }}">{{ i.icon("plus", 16) }}新建</a>{% endif %}
+<h1>{{ heading|t }}</h1>
+<span class="sum">{{ summary|t }}</span>
+{% if can_create %}<a class="btn" href="{{ new_href }}">{{ i.icon("plus", 16) }}{{ "新建"|t }}</a>{% endif %}
 </header>
-<nav class="tabs" aria-label="按状态筛选">
-{% for t in tabs %}<a href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.label }}</a>
+<nav class="tabs" aria-label="{{ '按状态筛选'|t }}">
+{% for t in tabs %}<a href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.label|t }}</a>
 {% endfor -%}
 </nav>
 {% if filters -%}
@@ -18,15 +18,15 @@
 {% if tab %}<input type="hidden" name="status" value="{{ tab }}">{% endif %}
 {% for f in filters -%}
 <div class="fd"><label class="lb" for="q-{{ f.name }}">{{ f.title }}</label>
-{%- if f.options %}<select class="in" id="q-{{ f.name }}" name="{{ f.name }}">{% for o in f.options %}<option value="{{ o.value }}"{% if o.value == f.value %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select>
+{%- if f.options %}<select class="in" id="q-{{ f.name }}" name="{{ f.name }}">{% for o in f.options %}<option value="{{ o.value }}"{% if o.value == f.value %} selected{% endif %}>{{ o.label|t }}</option>{% endfor %}</select>
 {%- else %}<input class="in" id="q-{{ f.name }}" type="text" name="{{ f.name }}" value="{{ f.value }}">{% endif %}</div>
 {% endfor -%}
-<button type="submit" class="btn2">{{ i.icon("funnel", 16) }}筛选</button>
+<button type="submit" class="btn2">{{ i.icon("funnel", 16) }}{{ "筛选"|t }}</button>
 </form>
 {% endif -%}
-{% if list_error %}<p class="note bad" role="alert">{{ list_error }}</p>{% endif %}
+{% if list_error %}<p class="note bad" role="alert">{{ list_error|t }}</p>{% endif %}
 {% for sec in sections -%}
-{% if sec.title %}<h2 class="group">{{ sec.title }}<span class="num">{{ sec.rows|length }}</span></h2>{% endif %}
+{% if sec.title %}<h2 class="group">{{ sec.title|t }}<span class="num">{{ sec.rows|length }}</span></h2>{% endif %}
 {% if layout == "cards" -%}
 <ul class="cards{% if density == "compact" %} compact{% endif %}">
 {% for r in sec.rows -%}
@@ -37,11 +37,11 @@
 <div class="body">
 {% if r.link %}<a class="ttl" href="/admin/r/{{ r.id }}">{{ r.title }}</a>{% else %}<span class="ttl">{{ r.title }}</span>{% endif %}
 {% if r.subtitle %}<span class="sub">{{ r.subtitle }}</span>{% endif %}
-{% if r.status == "changed" or r.status == "deleting" %}<span class="flag"><span class="mk" aria-hidden="true"></span>{{ r.label }}</span>{% elif r.status == "draft" %}<span class="draft">{{ r.label }}</span>{% endif %}
+{% if r.status == "changed" or r.status == "deleting" %}<span class="flag"><span class="mk" aria-hidden="true"></span>{{ r.label|t }}</span>{% elif r.status == "draft" %}<span class="draft">{{ r.label|t }}</span>{% endif %}
 </div>
 </li>
 {% else -%}
-<li class="empty">{{ "没有这种状态的记录。" if tab else "这里还没有记录。" }}</li>
+<li class="empty">{{ ("没有这种状态的记录。"|t) if tab else ("这里还没有记录。"|t) }}</li>
 {% endfor -%}
 </ul>
 {% elif layout == "list" -%}
@@ -50,29 +50,29 @@
 <li{% if r.current %} class="on"{% endif %}>
 {% if r.link %}<a class="ttl" href="/admin/r/{{ r.id }}">{{ r.title }}</a>{% else %}<span class="ttl">{{ r.title }}</span>{% endif %}
 {% if r.subtitle %}<span class="sub">{{ r.subtitle }}</span>{% endif %}
-{% if r.status == "changed" or r.status == "deleting" %}<span class="flag"><span class="mk" aria-hidden="true"></span>{{ r.label }}</span>{% elif r.status == "draft" %}<span class="draft">{{ r.label }}</span>{% endif %}
+{% if r.status == "changed" or r.status == "deleting" %}<span class="flag"><span class="mk" aria-hidden="true"></span>{{ r.label|t }}</span>{% elif r.status == "draft" %}<span class="draft">{{ r.label|t }}</span>{% endif %}
 </li>
 {% else -%}
-<li class="empty">{{ "没有这种状态的记录。" if tab else "这里还没有记录。" }}</li>
+<li class="empty">{{ ("没有这种状态的记录。"|t) if tab else ("这里还没有记录。"|t) }}</li>
 {% endfor -%}
 </ul>
 {% else -%}
 <div class="scroll">
 <table class="table{% if density == "compact" %} compact{% endif %}">
-<thead><tr>{% for c in columns %}<th scope="col">{{ c }}</th>{% endfor %}<th scope="col">状态</th>{% if row_delete %}<th><span class="sr">操作</span></th>{% endif %}</tr></thead>
+<thead><tr>{% for c in columns %}<th scope="col">{{ c }}</th>{% endfor %}<th scope="col">{{ "状态"|t }}</th>{% if row_delete %}<th><span class="sr">{{ "操作"|t }}</span></th>{% endif %}</tr></thead>
 <tbody>
 {% for r in sec.rows -%}
 <tr class="row{% if r.current %} on{% endif %}">
 {%- for c in r.cells %}<td{% if loop.first %} class="lead"{% endif %}>
 {%- if loop.first and r.link %}<a href="/admin/r/{{ r.id }}">{% endif %}
 {%- if c.thumb %}<img class="thumb sm" src="/uploads/{{ c.thumb }}" alt="">{% endif %}
-{%- if c.text %}{{ c.text }}{% elif loop.first %}#{{ r.id }}{% else %}<span class="muted">未填</span>{% endif %}
+{%- if c.text %}{{ c.text }}{% elif loop.first %}#{{ r.id }}{% else %}<span class="muted">{{ "未填"|t }}</span>{% endif %}
 {%- if loop.first and r.link %}</a>{% endif %}</td>{% endfor %}
-<td>{% if r.status == "changed" or r.status == "deleting" %}<span class="flag"><span class="mk" aria-hidden="true"></span>{{ r.label }}</span>{% elif r.status == "draft" %}<span class="draft">{{ r.label }}</span>{% else %}<span class="muted">{{ r.label }}</span>{% endif %}</td>
-{%- if row_delete %}<td class="end"><form method="post" action="/admin/r/{{ r.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">删除</button></form></td>{% endif %}
+<td>{% if r.status == "changed" or r.status == "deleting" %}<span class="flag"><span class="mk" aria-hidden="true"></span>{{ r.label|t }}</span>{% elif r.status == "draft" %}<span class="draft">{{ r.label|t }}</span>{% else %}<span class="muted">{{ r.label|t }}</span>{% endif %}</td>
+{%- if row_delete %}<td class="end"><form method="post" action="/admin/r/{{ r.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">{{ "删除"|t }}</button></form></td>{% endif %}
 </tr>
 {% else -%}
-<tr><td class="empty" colspan="{{ columns|length + 1 }}">{{ "没有这种状态的记录。" if tab else "这里还没有记录。" }}</td></tr>
+<tr><td class="empty" colspan="{{ columns|length + 1 }}">{{ ("没有这种状态的记录。"|t) if tab else ("这里还没有记录。"|t) }}</td></tr>
 {% endfor -%}
 </tbody>
 </table>
@@ -80,10 +80,10 @@
 {% endif -%}
 {% endfor -%}
 {% if pager -%}
-<nav class="pager" aria-label="分页">
-{% if pager.prev %}<a href="{{ pager.prev }}">上一页</a>{% endif %}
-<span>第 {{ pager.page }} / {{ pager.pages }} 页</span>
-{% if pager.next %}<a href="{{ pager.next }}">下一页</a>{% endif %}
+<nav class="pager" aria-label="{{ '分页'|t }}">
+{% if pager.prev %}<a href="{{ pager.prev }}">{{ "上一页"|t }}</a>{% endif %}
+<span>{{ "第"|t }} {{ pager.page }} / {{ pager.pages }} {{ "页"|t }}</span>
+{% if pager.next %}<a href="{{ pager.next }}">{{ "下一页"|t }}</a>{% endif %}
 </nav>
 {% endif -%}
 </section>
