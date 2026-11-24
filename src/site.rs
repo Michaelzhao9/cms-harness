@@ -205,6 +205,78 @@ fn template_error(e: &minijinja::Error) -> String {
     format!("{at}{detail}。")
 }
 
+/// The live site's pages for `sitemap.xml`: every published `.html` file except the ones other files extend, include
+/// or import (layouts and fragments), names starting with `_`, `404.html` and the account pages. Each with the
+/// date of the release that last changed it. Built from the published state on every request, so it is current
+/// after each publish.
+pub fn sitemap(conn: &Connection, origin: &str) -> Result<String, String> {
+    let fail = |e: rusqlite::Error| format!("读取站点文件失败：{e}");
+    let mut stmt = conn.prepare("SELECT path, published FROM site_files WHERE published IS NOT NULL AND path LIKE '%.html' ORDER BY path").map_err(fail)?;
+    let files: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(fail)?
+        .filter_map(|r| r.ok())
+        .map(|(p, j)| (p, serde_json::from_str::<String>(&j).unwrap_or_default()))
+        .collect();
+    let used: std::collections::HashSet<String> = files.iter().flat_map(|(_, src)| referenced(src)).collect();
+    let mut urls: Vec<(String, Option<String>)> = vec![];
+    for (path, _) in &files {
+        let hidden = path.split('/').any(|seg| seg.starts_with('_')) || path == "404.html" || path.starts_with("account/");
+        if hidden || used.contains(path) {
+            continue;
+        }
+        let url = match path.strip_suffix("index.html") {
+            Some(dir) => format!("/{dir}"),
+            None => format!("/{}", path.trim_end_matches(".html")),
+        };
+        let lastmod: Option<String> = conn
+            .query_row(
+                "SELECT max(r.created_at) FROM versions v JOIN releases r ON r.id = v.release_id WHERE v.target = ?1",
+                [format!("file:{path}")],
+                |r| r.get(0),
+            )
+            .map_err(fail)?;
+        urls.push((url, lastmod.map(|d| d.chars().take(10).collect())));
+    }
+    // A site without its own home page still has the built-in welcome.
+    if !urls.iter().any(|(u, _)| u == "/") {
+        urls.insert(0, ("/".into(), None));
+    }
+    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
+    for (url, lastmod) in urls {
+        out.push_str(&format!("  <url><loc>{}{}</loc>", esc(origin), esc(&url)));
+        if let Some(d) = lastmod {
+            out.push_str(&format!("<lastmod>{d}</lastmod>"));
+        }
+        out.push_str("</url>\n");
+    }
+    out.push_str("</urlset>\n");
+    Ok(out)
+}
+
+/// Template names a source pulls in with `extends`, `include`, `import` or `from`.
+fn referenced(src: &str) -> Vec<String> {
+    let mut out = vec![];
+    for word in ["extends", "include", "import", "from"] {
+        let mut rest = src;
+        while let Some(at) = rest.find(word) {
+            rest = &rest[at + word.len()..];
+            let trimmed = rest.trim_start();
+            let Some(q) = trimmed.chars().next().filter(|c| *c == '"' || *c == '\'') else { continue };
+            if let Some(end) = trimmed[1..].find(q) {
+                out.push(trimmed[1..1 + end].to_string());
+            }
+        }
+    }
+    out
+}
+
+/// The default `robots.txt`: everything but the system's own paths, and where the sitemap is.
+pub fn robots(origin: &str) -> String {
+    format!("User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\nDisallow: /_hc/\nDisallow: /account/\nDisallow: /mcp\n\nSitemap: {origin}/sitemap.xml\n")
+}
+
 /// A site file's content as `mode` sees it; `None` when it does not exist there.
 pub fn file(conn: &Connection, mode: Mode, path: &str) -> Result<Option<String>, String> {
     let row: Option<(Option<String>, Option<String>, bool)> = conn

@@ -173,7 +173,18 @@ impl Visit<'_> {
                 return self.file(&name, content);
             }
         }
-        // No file: the one built-in page (the welcome on `/`) and, when member login is on, the account pages.
+        // No file: the sitemap and robots.txt, the one built-in page (the welcome on `/`) and, when member login is
+        // on, the account pages. A site file of the same name always wins.
+        match rel {
+            "sitemap.xml" => {
+                let xml = site::sitemap(self.conn, &self.app.origin)?;
+                return Ok(self.finish(([(header::CONTENT_TYPE, "application/xml; charset=utf-8")], xml).into_response(), None));
+            }
+            "robots.txt" => {
+                return Ok(self.finish(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], site::robots(&self.app.origin)).into_response(), None));
+            }
+            _ => {}
+        }
         let parts: Vec<&str> = rel.trim_end_matches('/').split('/').collect();
         if let ["account", which @ ("login" | "signup")] = parts.as_slice() {
             if !crate::members::login_enabled(self.conn, self.mode == Mode::Preview) {

@@ -115,6 +115,8 @@ A fresh site has one built-in page: a welcome with the site's name and a link to
 - Libraries from `https://esm.sh` through an import map (`set_site_settings`), so no bundler is needed. A site built elsewhere can be uploaded in one piece (`upload_site_bundle`).
 
 The live site always shows the published version, whatever cookies or headers a visitor sends. Drafts only appear in the admin's preview.
+
+`/sitemap.xml` lists the published pages (not layouts or fragments that other files extend or include, nor names starting with `_`), each with the date it last went live, and `/robots.txt` points to it. Both follow every publish. A site file with the same name replaces them.
 </details>
 
 <details>
