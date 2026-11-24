@@ -172,8 +172,10 @@ async fn a_record_can_be_edited_by_hand_and_lands_as_a_draft() {
     let (_, _, new_form) = get_with(&app, "/admin/c/news?new=1", Some(&s.0)).await;
     assert!(new_form.contains("action=\"/admin/c/news/new\""), "{new_form}");
 
-    // Delete a never-published record: it is gone, back to the list.
-    let (status, headers, _) = post_form(&app, &format!("/admin/r/{fresh}/delete"), Some(&s), &[]).await;
+    // Delete a never-published record: it asks first, then it is gone, back to the list.
+    let (status, _, _) = post_form(&app, &format!("/admin/r/{fresh}/delete"), Some(&s), &[]).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, headers, _) = post_form(&app, &format!("/admin/r/{fresh}/delete"), Some(&s), &[("confirm", "1")]).await;
     assert_eq!((status, location(&headers)), (StatusCode::SEE_OTHER, "/admin/c/news"));
     assert!(harness_cms::tools::call(&app, &builder(), "get_record", json!({ "id": fresh })).is_err());
     // Delete a published one: it waits for publish.

@@ -617,7 +617,7 @@ pub fn own_scope(target: &Target) -> crate::auth::Scope {
     if matches!(target, Target::Record(_)) { Scope::Write } else { Scope::Structure }
 }
 
-fn may_publish(actor: &Actor, target: &Target) -> bool {
+pub fn may_publish(actor: &Actor, target: &Target) -> bool {
     actor.can(crate::auth::Scope::Publish) && actor.can(own_scope(target))
 }
 
@@ -830,6 +830,16 @@ fn live_copy_of(conn: &Connection, id: i64, collection: &str, draft: Option<&str
 /// Publishes pending changes in one transaction: all of the actor's, or only the listed ones.
 /// Nothing goes live unless the whole release passes verification.
 pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: &str) -> Result<Release, String> {
+    run_publish(conn, actor, only, note, true)
+}
+
+/// Runs `publish` with all its checks inside a transaction that is always rolled back: what would go live,
+/// or the problems that would stop it. Nothing is written.
+pub fn dry_run_publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>) -> Result<Release, String> {
+    run_publish(conn, actor, only, "试运行", false)
+}
+
+fn run_publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: &str, commit: bool) -> Result<Release, String> {
     let all = pending_targets(conn)?;
     if all.is_empty() {
         return Err("没有待发布的改动：先修改内容或结构，再来发布。".into());
@@ -1020,7 +1030,10 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
         let why = format!("随集合“{collection}”的结构改动自动转换");
         tx.execute(version, params![release, target.to_string(), live_copy(&target)?, before, actor.name, why]).map_err(fail)?;
     }
-    tx.commit().map_err(fail)?;
+    if commit {
+        tx.commit().map_err(fail)?;
+    }
+    // Without a commit, dropping the transaction rolls everything back.
     Ok(Release { id: release, published, skipped })
 }
 

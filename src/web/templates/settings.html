@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}设置{% endblock %}
+{% block main %}
+{%- import "icons.html" as i %}
+<div class="page">
+<h1>设置</h1>
+<div class="settings">
+{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+
+<section aria-labelledby="s-access">
+<h2 id="s-access">接入</h2>
+<p class="lede">把下面的地址和一把密钥交给你自己的 agent，它就能读写这个站的内容，规则和左边的对话完全一样。</p>
+<div class="fd"><label class="lb" for="s-mcp">MCP 地址</label><input id="s-mcp" class="in mono" type="text" readonly value="{{ mcp_url }}"></div>
+<div class="fd"><label class="lb" for="s-api">内容接口</label><input id="s-api" class="in mono" type="text" readonly value="{{ api_url }}&lt;集合名&gt;"></div>
+{% if new_key -%}
+<div class="note good" role="status"><p>新密钥“{{ new_key.name }}”：<code class="secret">{{ new_key.key }}</code></p><p>它只显示这一次，请马上复制保存。离开这个页面后就再也看不到了。</p></div>
+{%- endif %}
+{% if keys -%}
+<div class="wide"><table class="table flush">
+<thead><tr><th scope="col">密钥</th><th scope="col">能做什么</th><th scope="col">创建于</th><th scope="col"><span class="sr">操作</span></th></tr></thead>
+<tbody>
+{% for k in keys -%}
+<tr><td class="lead">{{ k.name }}</td><td>{{ k.scopes }}</td><td class="muted">{{ k.created }}</td>
+<td class="end">{% if k.revoked %}<span class="muted">已吊销</span>{% elif builder %}<form method="post" action="/admin/settings/keys/{{ k.id }}/revoke"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">吊销</button></form>{% endif %}</td></tr>
+{% endfor -%}
+</tbody>
+</table></div>
+{%- else %}<p class="small">还没有密钥。</p>{% endif %}
+{% if builder -%}
+<form class="inline" method="post" action="/admin/settings/keys">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="fd"><label class="lb" for="k-name">新密钥的名字</label><input class="in" id="k-name" type="text" name="name" required maxlength="60"></div>
+<fieldset><legend class="lb">除了读，还能</legend>
+<label class="check"><input type="checkbox" name="scope" value="write">写内容</label>
+<label class="check"><input type="checkbox" name="scope" value="structure">改结构</label>
+<label class="check"><input type="checkbox" name="scope" value="publish">发布</label>
+</fieldset>
+<button type="submit" class="btn2">{{ i.icon("plus", 16) }}新建密钥</button>
+</form>
+{%- else %}<p class="small">只有搭建者可以新建或吊销密钥。</p>{% endif %}
+</section>
+
+<section aria-labelledby="s-model">
+<h2 id="s-model">对话用的模型</h2>
+<dl class="facts">
+<div><dt>接口</dt><dd>{{ model.provider }}</dd></div>
+<div><dt>模型</dt><dd>{{ model.model }}</dd></div>
+<div><dt>接口密钥</dt><dd>{{ "已设置" if model.key_set else "未设置" }}</dd></div>
+</dl>
+<p class="small">在服务器的环境变量 LLM_PROVIDER、LLM_MODEL、LLM_API_KEY 里配置。只用接口、不用左边的对话时，可以不配置模型。</p>
+</section>
+
+<section aria-labelledby="s-notes">
+<h2 id="s-notes">站点说明</h2>
+<p class="lede">给对话模型看的一段话：这是什么网站、写给谁、有什么规矩。和内容一样，改完要发布才生效。</p>
+{% if saved == "notes" %}<p class="note good" role="status">已存为草稿，发布后才会生效。</p>{% endif %}
+{% if can_notes -%}
+<form class="fields" method="post" action="/admin/settings/notes">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="fd"><label class="lb" for="n-text">说明{% if notes_status != "published" %}<span class="req">有未发布的改动</span>{% endif %}</label><textarea class="in" id="n-text" name="text" rows="6" maxlength="20000">
+{{ notes }}</textarea></div>
+<div class="fd"><label class="lb" for="n-note">修改说明</label><input class="in" id="n-note" type="text" name="note" value="{{ notes_note }}"></div>
+<div class="actions"><button type="submit" class="btn">存为草稿</button></div>
+</form>
+{%- else %}
+{% if notes %}<p class="quote">{{ notes }}</p>{% else %}<p class="small">还没有写站点说明。</p>{% endif %}
+<p class="small">只有搭建者可以修改站点说明。</p>
+{%- endif %}
+</section>
+
+<section aria-labelledby="s-look">
+<h2 id="s-look">外观</h2>
+<form class="pref" method="post" action="/admin/settings/appearance">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<span class="what"><span class="lb">改动标记的颜色</span><span class="small">对话改过、还没发布的地方用这个颜色标出来。</span></span>
+<div class="swatches" role="group" aria-label="改动标记的颜色">
+{% for m in marks %}<button type="submit" class="swatch" name="mark" value="{{ m.key }}" aria-pressed="{{ 'true' if m.on else 'false' }}"><span class="sw sw-{{ m.key }}" aria-hidden="true"></span>{{ m.label }}</button>{% endfor %}
+</div>
+</form>
+<form class="pref" method="post" action="/admin/settings/appearance">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<span class="what"><span class="lb">对话默认的样子</span><span class="small">随时可以在对话里切换，这里只决定登录后先看到哪种。</span></span>
+<div class="seg" role="group" aria-label="对话默认的样子">
+<button type="submit" name="chat" value="docked" aria-pressed="{{ 'true' if chat == 'docked' else 'false' }}">左侧聊天栏</button><button type="submit" name="chat" value="floating" aria-pressed="{{ 'true' if chat == 'floating' else 'false' }}">底部小窗</button>
+</div>
+</form>
+</section>
+
+<section aria-labelledby="s-account">
+<h2 id="s-account">账号</h2>
+{% if saved == "password" %}<p class="note good" role="status">密码已修改，其他地方的登录都已退出。</p>{% endif %}
+<div class="line">
+<span class="grow"><span class="who-me">{{ email }}</span><span class="small">{{ role }}</span></span>
+<form method="post" action="/admin/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">退出登录</button></form>
+</div>
+<form class="inline" method="post" action="/admin/settings/password">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="text" name="username" value="{{ email }}" autocomplete="username" hidden>
+<div class="fd"><label class="lb" for="pw-old">原密码</label><input class="in" id="pw-old" type="password" name="old" autocomplete="current-password" required></div>
+<div class="fd"><label class="lb" for="pw-new">新密码</label><input class="in" id="pw-new" type="password" name="new" autocomplete="new-password" minlength="8" required></div>
+<button type="submit" class="btn2">修改密码</button>
+</form>
+{% if revealed -%}
+<div class="note good" role="status"><p>{{ revealed.email }} 的新密码：<code class="secret">{{ revealed.password }}</code></p><p>它只显示这一次，请马上交给对方，并请他登录后自己改掉。</p></div>
+{%- endif %}
+{% if admins -%}
+<div class="wide"><table class="table flush">
+<thead><tr><th scope="col">管理员</th><th scope="col">角色</th><th scope="col"><span class="sr">操作</span></th></tr></thead>
+<tbody>
+{% for a in admins -%}
+<tr><td class="lead">{{ a.email }}{% if a.me %} <span class="muted">（你）</span>{% endif %}</td><td>{{ a.role }}</td>
+<td class="end"><span class="row-actions">
+{%- if not a.me %}<form method="post" action="/admin/settings/admins/{{ a.id }}/reset"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">重设密码</button></form>{% endif -%}
+<form method="post" action="/admin/settings/admins/{{ a.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt bad">删除</button></form>
+</span></td></tr>
+{% endfor -%}
+</tbody>
+</table></div>
+<form class="inline" method="post" action="/admin/settings/admins">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="fd"><label class="lb" for="a-email">新管理员的邮箱</label><input class="in" id="a-email" type="email" name="email" required></div>
+<div class="fd"><label class="lb" for="a-role">角色</label><select class="in" id="a-role" name="role"><option value="editor">编辑：改内容和发布</option><option value="builder">搭建者：还能改结构、管理密钥和管理员</option></select></div>
+<button type="submit" class="btn2">{{ i.icon("plus", 16) }}添加管理员</button>
+</form>
+{%- endif %}
+</section>
+</div>
+</div>
+{% endblock %}

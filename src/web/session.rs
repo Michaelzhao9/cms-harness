@@ -22,6 +22,7 @@ pub struct AdminUser {
     pub role: String,
     pub csrf: String,
     pub token_hash: String,
+    /// The admin's own preferences (`mark`, `chat`) with this session's (`nav`) laid over them.
     pub prefs: Value,
 }
 
@@ -102,7 +103,7 @@ pub fn from_cookie(conn: &Connection, headers: &HeaderMap) -> Option<AdminUser> 
     let token_hash = sha256_hex(&cookie_token(headers)?);
     let (user, live) = conn
         .query_row(
-            "SELECT a.id, a.email, a.role, s.csrf, s.prefs, s.expires_at > datetime('now')
+            "SELECT a.id, a.email, a.role, s.csrf, json_patch(a.prefs, s.prefs), s.expires_at > datetime('now')
              FROM admin_sessions s JOIN admins a ON a.id = s.admin_id WHERE s.token_hash = ?1",
             [&token_hash],
             |r| {
@@ -124,6 +125,13 @@ pub fn from_cookie(conn: &Connection, headers: &HeaderMap) -> Option<AdminUser> 
         return None;
     }
     Some(user)
+}
+
+/// Stores one string preference on the admin account, kept across sessions.
+pub fn set_admin_pref(conn: &Connection, admin_id: i64, key: &str, value: &str) -> Result<(), String> {
+    conn.execute("UPDATE admins SET prefs = json_set(prefs, ?1, ?2) WHERE id = ?3", params![format!("$.{key}"), value, admin_id])
+        .map(drop)
+        .map_err(|e| format!("保存偏好失败：{e}"))
 }
 
 /// Stores one string preference in the session's `prefs`.

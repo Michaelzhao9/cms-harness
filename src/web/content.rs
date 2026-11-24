@@ -19,13 +19,13 @@ const PER_PAGE: i64 = 20;
 const EDIT_NOTE: &str = "后台手动修改";
 const CREATE_NOTE: &str = "后台手动新建";
 const DELETE_NOTE: &str = "后台手动删除";
-const CSRF_FAIL: &str = "表单已失效，请刷新页面后再试。";
+pub(super) const CSRF_FAIL: &str = "表单已失效，请刷新页面后再试。";
 const STALE: &str = "这条记录在你打开之后被改过：请刷新页面看到最新内容后再改。你填的内容还在下面。";
 
 type Params = Vec<(String, String)>;
 
 /// How a handler ends.
-enum Out {
+pub(super) enum Out {
     Page(StatusCode, &'static str, Value),
     Go(String),
     Fail(StatusCode, String),
@@ -41,21 +41,21 @@ impl IntoResponse for Out {
     }
 }
 
-fn internal(e: String) -> Out {
+pub(super) fn internal(e: String) -> Out {
     Out::Fail(StatusCode::INTERNAL_SERVER_ERROR, e)
 }
 
-async fn blocking(f: impl FnOnce() -> Result<Out, Out> + Send + 'static) -> Response {
+pub(super) async fn blocking(f: impl FnOnce() -> Result<Out, Out> + Send + 'static) -> Response {
     let out = tokio::task::spawn_blocking(f).await.unwrap_or_else(|e| Err(internal(format!("服务器内部错误：{e}"))));
     out.unwrap_or_else(|o| o).into_response()
 }
 
-fn tool(app: &App, user: &AdminUser, name: &str, args: Value) -> Result<Value, String> {
+pub(super) fn tool(app: &App, user: &AdminUser, name: &str, args: Value) -> Result<Value, String> {
     tools::call(app, &user.actor(), name, args)
 }
 
 /// The context `base.html` needs around a page's own.
-fn shell(app: &App, user: &AdminUser, current: &str, mut ctx: Value) -> Value {
+pub(super) fn shell(app: &App, user: &AdminUser, current: &str, mut ctx: Value) -> Value {
     let nav = nav(&app.conn(), user, current);
     ctx["site_name"] = json!(app.site_name);
     ctx["csrf"] = json!(user.csrf);
@@ -74,7 +74,7 @@ fn query_string(pairs: &[(&str, &str)]) -> String {
     if parts.is_empty() { String::new() } else { format!("?{}", parts.join("&")) }
 }
 
-fn collection(app: &App, name: &str) -> Result<CollectionDef, Out> {
+pub(super) fn collection(app: &App, name: &str) -> Result<CollectionDef, Out> {
     match changes::collection_view(&app.conn(), name) {
         Ok(Some((def, _))) => Ok(def),
         Ok(None) => Err(Out::Fail(StatusCode::NOT_FOUND, format!("集合“{name}”不存在或已删除。"))),
@@ -144,7 +144,7 @@ fn from_raw(f: &FieldDef, raw: &[String]) -> Value {
 }
 
 /// A stored value as one short line for tables and change marks; empty for no value.
-fn show(f: &FieldDef, v: &Value) -> String {
+pub(super) fn show(f: &FieldDef, v: &Value) -> String {
     let one = |v: &Value| match (f.kind, v) {
         (_, Value::Null) => String::new(),
         (FieldType::Richtext, Value::String(s)) => strip_tags(s),
@@ -422,15 +422,15 @@ fn view_page(app: &App, user: &AdminUser, name: &str, params: &Params) -> Result
 }
 
 /// A record's row as stored. `seen` is `updated_at`, which every write refreshes.
-struct Row {
-    collection: String,
-    published: Option<Value>,
-    draft: Option<Value>,
+pub(super) struct Row {
+    pub(super) collection: String,
+    pub(super) published: Option<Value>,
+    pub(super) draft: Option<Value>,
     deleting: bool,
     seen: String,
 }
 
-fn load(app: &App, id: i64) -> Result<Row, Out> {
+pub(super) fn load(app: &App, id: i64) -> Result<Row, Out> {
     let found = app
         .conn()
         .query_row(
@@ -448,7 +448,7 @@ fn load(app: &App, id: i64) -> Result<Row, Out> {
 }
 
 /// (draft-else-live document, live document), both in the current definition's shape.
-fn docs(app: &App, def: &CollectionDef, row: &Row) -> Result<(Value, Option<Value>), Out> {
+pub(super) fn docs(app: &App, def: &CollectionDef, row: &Row) -> Result<(Value, Option<Value>), Out> {
     let live = match &row.published {
         Some(p) => Some(project(def, &changes::to_current(&app.conn(), &row.collection, p).map_err(internal)?)),
         None => None,
@@ -459,6 +459,15 @@ fn docs(app: &App, def: &CollectionDef, row: &Row) -> Result<(Value, Option<Valu
         (None, None) => json!({}),
     };
     Ok((current, live))
+}
+
+/// A record's name: its first non-empty text field, else its number.
+pub(super) fn record_title(def: &CollectionDef, doc: &Value, id: i64) -> String {
+    def.fields
+        .iter()
+        .filter(|f| f.kind == FieldType::Text)
+        .find_map(|f| doc[&f.name].as_str().filter(|s| !s.is_empty()))
+        .map_or_else(|| format!("记录 #{id}"), str::to_string)
 }
 
 fn record_page(app: &App, user: &AdminUser, id: i64, params: &Params, typed: Option<Typed>) -> Result<Out, Out> {
@@ -476,12 +485,7 @@ fn record_page(app: &App, user: &AdminUser, id: i64, params: &Params, typed: Opt
     }
     let raw = raw_of(&def, &current, typed.as_ref());
     let fields = form_fields(app, user, &def, &raw, &marks).map_err(internal)?;
-    let title = def
-        .fields
-        .iter()
-        .filter(|f| f.kind == FieldType::Text)
-        .find_map(|f| current[&f.name].as_str().filter(|s| !s.is_empty()))
-        .map_or_else(|| format!("记录 #{id}"), str::to_string);
+    let title = record_title(&def, &current, id);
     let mut ctx = list_ctx(app, user, &def, None, &vec![], Some(id))?;
     ctx["form"] = json!({
         "id": id, "title": title, "status": status, "status_label": status_label(status), "fields": fields,
@@ -497,18 +501,18 @@ fn record_page(app: &App, user: &AdminUser, id: i64, params: &Params, typed: Opt
 
 /// A posted form, urlencoded or multipart, read whole before anything is checked or stored.
 #[derive(Default)]
-struct Posted {
-    fields: HashMap<String, Vec<String>>,
+pub(super) struct Posted {
+    pub(super) fields: HashMap<String, Vec<String>>,
     /// (input name, file name, bytes); empty file inputs are left out.
     files: Vec<(String, String, Vec<u8>)>,
 }
 
 impl Posted {
-    fn one(&self, key: &str) -> &str {
+    pub(super) fn one(&self, key: &str) -> &str {
         self.fields.get(key).and_then(|v| v.last()).map_or("", String::as_str)
     }
 
-    fn note(&self, default: &str) -> String {
+    pub(super) fn note(&self, default: &str) -> String {
         let n = self.one("note").trim();
         if n.is_empty() { default.to_string() } else { n.to_string() }
     }
@@ -545,7 +549,7 @@ async fn read_posted(req: Request) -> Result<Posted, Out> {
 }
 
 /// Reads the form and checks its CSRF token; nothing else happens before this passes.
-async fn checked(user: &AdminUser, req: Request) -> Result<Posted, Out> {
+pub(super) async fn checked(user: &AdminUser, req: Request) -> Result<Posted, Out> {
     let posted = read_posted(req).await?;
     session::check_csrf(user, posted.one("csrf")).map_err(|s| Out::Fail(s, CSRF_FAIL.into()))?;
     Ok(posted)
@@ -630,8 +634,22 @@ fn create_blocking(app: &App, user: &AdminUser, name: &str, posted: Posted) -> R
 }
 
 /// Runs `delete_record` or `discard_draft`; a record that is gone afterwards sends you back to its list.
+/// Deleting or discarding a record that was never published removes it for good, so both ask first: the
+/// confirmation posts to `/delete` with `confirm=1`.
 fn finish_blocking(app: &App, user: &AdminUser, id: i64, posted: Posted, delete: bool) -> Result<Out, Out> {
     let row = load(app, id)?;
+    if row.published.is_none() && posted.one("confirm") != "1" {
+        let def = collection(app, &row.collection)?;
+        let (current, _) = docs(app, &def, &row)?;
+        let ctx = json!({
+            "heading": "删除这条草稿？",
+            "message": format!("“{}”从没发布过，删除后不会留下历史版本，也不能找回。", record_title(&def, &current, id)),
+            "id": id,
+            "note": posted.note(DELETE_NOTE),
+            "button": "确认删除",
+        });
+        return Ok(Out::Page(StatusCode::OK, "confirm.html", shell(app, user, &format!("c:{}", row.collection), ctx)));
+    }
     let done = if delete {
         tool(app, user, "delete_record", json!({ "id": id, "note": posted.note(DELETE_NOTE) }))
     } else {

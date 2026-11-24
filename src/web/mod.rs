@@ -3,6 +3,7 @@
 pub mod admin;
 pub mod content;
 pub mod session;
+pub mod settings;
 
 use crate::{render, Shared};
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Request, State};
@@ -30,6 +31,18 @@ pub fn router(app: Shared) -> Router {
         .route("/admin/r/{id}/delete", post(content::delete))
         .route("/admin/r/{id}/discard", post(content::discard))
         .route("/admin/media", get(content::media_library).post(content::upload).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
+        .route("/admin/publish", get(admin::publish_review).post(admin::publish))
+        .route("/admin/releases", get(admin::release_history))
+        .route("/admin/restore", post(admin::restore))
+        .route("/admin/settings", get(settings::page))
+        .route("/admin/settings/keys", post(settings::create_key))
+        .route("/admin/settings/keys/{id}/revoke", post(settings::revoke_key))
+        .route("/admin/settings/notes", post(settings::save_notes))
+        .route("/admin/settings/password", post(settings::change_password))
+        .route("/admin/settings/admins", post(settings::add_admin))
+        .route("/admin/settings/admins/{id}/reset", post(settings::reset_admin))
+        .route("/admin/settings/admins/{id}/delete", post(settings::remove_admin))
+        .route("/admin/settings/appearance", post(settings::appearance))
         .route("/admin/login", get(login_page).post(login))
         .route("/admin/logout", post(logout))
         .route("/admin/static/admin.css", get(css))
