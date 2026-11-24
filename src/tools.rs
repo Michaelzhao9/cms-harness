@@ -51,6 +51,11 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<NoArgs>("get_site_notes", Scope::Read, "读取站点说明（有草稿时返回草稿）和状态。"),
             spec::<SetSiteNotes>("set_site_notes", Scope::Structure, "修改站点说明草稿：一段给对话模型看的文字，最多 20000 个字符。发布后才生效。"),
             spec::<UploadMedia>("upload_media", Scope::Write, "上传图片或 PDF（base64，最大 5 MB）：返回 /uploads/ 路径，可填进 media 字段。"),
+            spec::<NoArgs>("list_site_files", Scope::Read, "List the built-in website's source files with status, size in bytes and line count (draft copy if any). Content is not included: use get_site_file."),
+            spec::<PathArgs>("get_site_file", Scope::Read, "Read one site file by path: its content (the draft if there is one) and status."),
+            spec::<WriteSiteFile>("write_site_file", Scope::Structure, "Create or replace a site file draft; it goes live when published. Text only, at most 1 MB, at most 2000 files. Path: relative, lowercase a-z 0-9 . _ / -, no '..', at most 200 characters, extension one of html css js mjs jsx ts tsx json svg txt md xml webmanifest map. `.html` files are minijinja templates (they may extend or include other files by path); `.jsx/.ts/.tsx` are served transpiled (TypeScript stripped, JSX via react/jsx-runtime). Syntax is checked on write. Images and fonts are binary: upload them with upload_media instead."),
+            spec::<DeleteSiteFile>("delete_site_file", Scope::Structure, "Delete a site file: a never-published file disappears now, a live one when the deletion is published."),
+            spec::<UploadSiteBundle>("upload_site_bundle", Scope::Structure, "Upload a zip of site files (for example a static build) as drafts in one step: every file follows the write_site_file rules, at most 50 MB uncompressed. One bad file rejects the whole bundle, with every problem listed. Files not in the bundle are left as they are. A single top folder holding index.html is stripped; directories and macOS metadata are skipped. Binary assets (images, fonts) go through upload_media, not the bundle."),
         ]
     })
 }
@@ -141,6 +146,11 @@ fn dispatch(app: &App, conn: &Connection, actor: &Actor, name: &str, args: Value
         "get_site_notes" => parse::<NoArgs>(name, args).and_then(|_| get_site_notes(conn)),
         "set_site_notes" => set_site_notes(conn, actor, parse(name, args)?),
         "upload_media" => upload_media(app, parse(name, args)?),
+        "list_site_files" => parse::<NoArgs>(name, args).and_then(|_| list_site_files(conn)),
+        "get_site_file" => get_site_file(conn, parse(name, args)?),
+        "write_site_file" => write_site_file(conn, actor, parse(name, args)?),
+        "delete_site_file" => delete_site_file(conn, actor, parse(name, args)?),
+        "upload_site_bundle" => upload_site_bundle(conn, actor, parse(name, args)?),
         _ => Err(format!("工具“{name}”{NOT_IMPLEMENTED}：它出现在工具列表里却没有处理逻辑，请联系开发者。")),
     }
 }
@@ -559,7 +569,7 @@ fn query_records(conn: &Connection, a: QueryRecords) -> Result<Value, String> {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct TargetArgs {
-    /// `collection:<name>`, `record:<id>`, `view:<name>` or `notes`.
+    /// `collection:<name>`, `record:<id>`, `view:<name>`, `file:<path>` or `notes`.
     target: String,
 }
 
@@ -734,4 +744,115 @@ fn upload_media(app: &App, a: UploadMedia) -> Result<Value, String> {
         return Err(format!("“{}”太大：通过工具上传最大 {} MB，更大的文件请用 POST /api/v1/media。", a.filename, crate::media::MAX_BYTES_INLINE >> 20));
     }
     Ok(json!({ "path": crate::media::store_upload(app, &a.filename, &bytes)? }))
+}
+
+// ---- site files ----
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct PathArgs {
+    path: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct WriteSiteFile {
+    path: String,
+    content: String,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeleteSiteFile {
+    path: String,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct UploadSiteBundle {
+    zip_base64: String,
+    note: String,
+}
+
+/// (status, current content) of a site file that exists; the draft copy when there is one.
+fn site_file(conn: &Connection, path: &str) -> Result<Option<(&'static str, String)>, String> {
+    let row: Option<(Option<String>, Option<String>, bool)> = conn
+        .query_row("SELECT published, draft, draft_deleted FROM site_files WHERE path = ?1", [path], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .optional()
+        .map_err(|e| format!("读取站点文件“{path}”失败：{e}"))?;
+    let Some((published, draft, deleting)) = row.filter(|(p, d, _)| p.is_some() || d.is_some()) else { return Ok(None) };
+    let status = changes::status(published.is_some(), draft.is_some(), deleting);
+    let json = draft.or(published).unwrap_or_default();
+    let content = serde_json::from_str(&json).map_err(|e| format!("站点文件“{path}”已损坏：{e}"))?;
+    Ok(Some((status, content)))
+}
+
+fn no_file(path: &str) -> String {
+    format!("站点文件“{path}”不存在或已删除，请先用 list_site_files 查看现有文件。")
+}
+
+fn list_site_files(conn: &Connection) -> Result<Value, String> {
+    let fail = |e: rusqlite::Error| format!("读取站点文件失败：{e}");
+    let mut stmt = conn.prepare("SELECT path FROM site_files WHERE published IS NOT NULL OR draft IS NOT NULL ORDER BY path").map_err(fail)?;
+    let paths: Vec<String> = stmt.query_map([], |r| r.get(0)).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;
+    let mut out = vec![];
+    for path in paths {
+        let Some((status, content)) = site_file(conn, &path)? else { continue };
+        out.push(json!({ "path": path, "status": status, "bytes": content.len(), "lines": content.lines().count() }));
+    }
+    Ok(Value::Array(out))
+}
+
+fn get_site_file(conn: &Connection, a: PathArgs) -> Result<Value, String> {
+    crate::site::check_path(&a.path)?;
+    let (status, content) = site_file(conn, &a.path)?.ok_or_else(|| no_file(&a.path))?;
+    Ok(json!({ "path": a.path, "status": status, "content": content }))
+}
+
+fn file_status(conn: &Connection, path: &str) -> Result<&'static str, String> {
+    changes::target_status(conn, &Target::File(path.to_string()))
+}
+
+fn write_site_file(conn: &Connection, actor: &Actor, a: WriteSiteFile) -> Result<Value, String> {
+    let note = check_note(&a.note)?;
+    crate::site::check_file(&a.path, &a.content)?;
+    changes::check_file_count(conn, std::slice::from_ref(&a.path))?;
+    changes::stage_file(conn, actor, &a.path, &a.content, note)?;
+    Ok(json!({ "path": a.path, "status": file_status(conn, &a.path)? }))
+}
+
+fn delete_site_file(conn: &Connection, actor: &Actor, a: DeleteSiteFile) -> Result<Value, String> {
+    let note = check_note(&a.note)?;
+    crate::site::check_path(&a.path)?;
+    if site_file(conn, &a.path)?.is_none() || file_status(conn, &a.path)? == "deleting" {
+        return Err(no_file(&a.path));
+    }
+    changes::mark_deleted(conn, actor, &Target::File(a.path.clone()), note)?;
+    Ok(json!({ "path": a.path, "status": file_status(conn, &a.path)? }))
+}
+
+fn upload_site_bundle(conn: &Connection, actor: &Actor, a: UploadSiteBundle) -> Result<Value, String> {
+    use base64::Engine;
+    let note = check_note(&a.note)?;
+    let data: String = a.zip_base64.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    // The archive itself can be no bigger than what it may unpack to.
+    if data.len() > crate::site::MAX_BUNDLE_BYTES / 3 * 4 + 8 {
+        return Err("压缩包太大：最多 50 MB。".into());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(&data).map_err(|e| format!("zip_base64 不是有效的 base64：{e}。"))?;
+    let files = crate::site::read_bundle(&bytes)?;
+    if files.is_empty() {
+        return Err("压缩包里没有文件。".into());
+    }
+    let paths: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
+    changes::check_file_count(conn, &paths)?;
+    let tx = conn.unchecked_transaction().map_err(|e| format!("写入站点文件失败：{e}"))?;
+    let mut written = 0;
+    for (path, content) in &files {
+        written += changes::stage_file(&tx, actor, path, content, note)? as usize;
+    }
+    tx.commit().map_err(|e| format!("写入站点文件失败：{e}"))?;
+    Ok(json!({ "files": files.len(), "written": written, "unchanged": files.len() - written }))
 }

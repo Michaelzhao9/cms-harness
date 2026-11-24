@@ -12,11 +12,13 @@ pub enum Target {
     Record(i64),
     View(String),
     Notes,
+    /// A site file, by path.
+    File(String),
 }
 
 impl Target {
     pub fn parse(s: &str) -> Result<Target, String> {
-        let bad = || format!("对象标识“{s}”不合法：请使用 collection:<名字>、record:<编号>、view:<名字> 或 notes。");
+        let bad = || format!("对象标识“{s}”不合法：请使用 collection:<名字>、record:<编号>、view:<名字>、file:<路径> 或 notes。");
         if s == "notes" {
             return Ok(Target::Notes);
         }
@@ -24,6 +26,7 @@ impl Target {
             ("collection", n) if crate::schema::valid_name(n) => Ok(Target::Collection(n.into())),
             ("view", n) if crate::schema::valid_name(n) => Ok(Target::View(n.into())),
             ("record", n) => n.parse().map(Target::Record).map_err(|_| bad()),
+            ("file", p) if crate::site::check_path(p).is_ok() => Ok(Target::File(p.into())),
             _ => Err(bad()),
         }
     }
@@ -35,6 +38,7 @@ impl Target {
             Target::Record(id) => ("records", "id", Sql::Integer(*id), true),
             Target::View(n) => ("views", "name", Sql::Text(n.clone()), true),
             Target::Notes => ("notes", "id", Sql::Integer(1), false),
+            Target::File(p) => ("site_files", "path", Sql::Text(p.clone()), true),
         }
     }
 }
@@ -46,6 +50,7 @@ impl fmt::Display for Target {
             Target::Record(id) => write!(f, "record:{id}"),
             Target::View(n) => write!(f, "view:{n}"),
             Target::Notes => write!(f, "notes"),
+            Target::File(p) => write!(f, "file:{p}"),
         }
     }
 }
@@ -519,12 +524,13 @@ fn names(conn: &Connection, sql: &str) -> Result<Vec<String>, String> {
     rows.collect::<Result<_, _>>().map_err(|e| format!("读取待发布清单失败：{e}"))
 }
 
-/// Every object with a draft or a pending deletion, in release order: collections, views, notes, records.
+/// Every object with a draft or a pending deletion, in release order: collections, views, site files, notes, records.
 fn pending_targets(conn: &Connection) -> Result<Vec<Target>, String> {
     let mut out: Vec<Target> = vec![];
     let waiting = "draft IS NOT NULL OR draft_deleted = 1";
     out.extend(names(conn, &format!("SELECT name FROM collections WHERE {waiting} ORDER BY name"))?.into_iter().map(Target::Collection));
     out.extend(names(conn, &format!("SELECT name FROM views WHERE {waiting} ORDER BY name"))?.into_iter().map(Target::View));
+    out.extend(names(conn, &format!("SELECT path FROM site_files WHERE {waiting} ORDER BY path"))?.into_iter().map(Target::File));
     if !names(conn, "SELECT 'notes' FROM notes WHERE draft IS NOT NULL")?.is_empty() {
         out.push(Target::Notes);
     }
@@ -573,6 +579,9 @@ pub struct Pending {
     pub note: String,
     /// For a collection: how many records it holds. Otherwise 1.
     pub affected: i64,
+    /// For a site file: line counts of the live copy and the draft (0 when there is none).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lines: Option<[usize; 2]>,
 }
 
 pub fn pending(conn: &Connection) -> Result<Vec<Pending>, String> {
@@ -588,6 +597,7 @@ pub fn pending(conn: &Connection) -> Result<Vec<Pending>, String> {
                 .find_map(|k| shown.get(*k).and_then(Value::as_str))
                 .map_or_else(|| format!("记录 {id}"), String::from),
             Target::Collection(n) | Target::View(n) => shown.get("title").and_then(Value::as_str).unwrap_or(n).to_string(),
+            Target::File(p) => p.clone(),
         };
         let kind = if s.draft_deleted { "deleted" } else if s.published.is_none() { "created" } else { "changed" };
         out.push(Pending {
@@ -598,6 +608,10 @@ pub fn pending(conn: &Connection) -> Result<Vec<Pending>, String> {
             actor: s.actor.unwrap_or_default(),
             note: s.note.unwrap_or_default(),
             affected: if let Target::Collection(n) = &target { record_count(conn, n)? } else { 1 },
+            lines: matches!(target, Target::File(_)).then(|| {
+                let count = |v: &Value| v.as_str().map_or(0, |s| s.lines().count());
+                [count(&old), if s.draft_deleted { 0 } else { count(&new) }]
+            }),
         });
     }
     Ok(out)
@@ -625,11 +639,11 @@ pub fn may_publish(actor: &Actor, target: &Target) -> bool {
 fn rank(target: &Target, deleting: bool) -> u8 {
     match (target, deleting) {
         (Target::Collection(_), false) => 0,
-        (Target::View(_), false) => 1,
+        (Target::View(_) | Target::File(_), false) => 1,
         (Target::Notes, _) => 2,
         (Target::Record(_), false) => 3,
         (Target::Record(_), true) => 4,
-        (Target::View(_), true) => 5,
+        (Target::View(_) | Target::File(_), true) => 5,
         (Target::Collection(_), true) => 6,
     }
 }
@@ -975,7 +989,7 @@ fn run_publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
                 }
                 touched.push(collection);
             }
-            Target::View(_) | Target::Notes => {
+            Target::View(_) | Target::Notes | Target::File(_) => {
                 if let Target::View(n) = target {
                     views.push(n.clone());
                 }
@@ -996,6 +1010,7 @@ fn run_publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
     check_relations(&tx, &touched, &mut problems)?;
     let scope: Vec<String> = touched.iter().cloned().chain(defs.iter().map(|(n, _)| n.clone())).collect();
     check_views(&tx, &views, &scope, &mut problems)?;
+    crate::site::check_live(&tx, &mut problems)?;
     if !problems.is_empty() {
         let mut seen = std::collections::HashSet::new();
         problems.retain(|p| seen.insert(p.clone()));
@@ -1092,6 +1107,11 @@ pub fn restore(conn: &Connection, actor: &Actor, target: &Target, version_id: i6
             let def = current_def(conn, &collection)?.ok_or_else(|| format!("记录 {id} 所属的集合“{collection}”没有定义，无法恢复。"))?;
             crate::schema::fit(&def, &doc).map_err(|e| format!("版本 {version_id} 不符合集合“{collection}”现在的定义，没有恢复：{e}"))?
         }
+        Target::File(path) => {
+            crate::site::check_file(path, doc.as_str().unwrap_or_default())?;
+            check_file_count(conn, std::slice::from_ref(path))?;
+            doc
+        }
         _ => doc,
     };
     save_draft(conn, actor, target, &doc, note)
@@ -1104,4 +1124,40 @@ pub fn to_current(conn: &Connection, collection: &str, doc: &Value) -> Result<Va
         (Some(live), Some(draft)) => crate::schema::migrate(&parse_def(collection, live)?, &parse_def(collection, draft)?, doc),
         _ => Ok(doc.clone()),
     }
+}
+
+// ---- site files ----
+
+/// Refuses when writing these paths would leave more than `site::MAX_FILES` files once everything pending is published.
+pub fn check_file_count(conn: &Connection, paths: &[String]) -> Result<(), String> {
+    let kept = names(conn, "SELECT path FROM site_files WHERE draft_deleted = 0 AND (draft IS NOT NULL OR published IS NOT NULL)")?;
+    let mut all: std::collections::HashSet<&str> = kept.iter().map(String::as_str).collect();
+    all.extend(paths.iter().map(String::as_str));
+    let max = crate::site::MAX_FILES;
+    if all.len() > max {
+        return Err(format!("站点最多 {max} 个文件，这次写入后会有 {} 个：请先删掉不用的文件。", all.len()));
+    }
+    Ok(())
+}
+
+/// Puts `content` into the draft of a site file, already checked. Content equal to the live copy drops any draft
+/// or pending deletion instead, so nothing waits to be published. Returns false when nothing changed.
+pub fn stage_file(conn: &Connection, actor: &Actor, path: &str, content: &str, note: &str) -> Result<bool, String> {
+    let target = Target::File(path.to_string());
+    let doc = Value::String(content.to_string());
+    let json = doc.to_string();
+    let s = slot(conn, &target)?;
+    let (published, draft, deleting) = s.map_or((None, None, false), |s| (s.published, s.draft, s.draft_deleted));
+    if published.as_deref() == Some(json.as_str()) {
+        let pending = draft.is_some() || deleting;
+        if pending {
+            clear_draft(conn, &target)?;
+        }
+        return Ok(pending);
+    }
+    if !deleting && draft.as_deref() == Some(json.as_str()) {
+        return Ok(false);
+    }
+    save_draft(conn, actor, &target, &doc, note)?;
+    Ok(true)
 }

@@ -189,6 +189,18 @@ fn describe(app: &App, p: &Value, target: &Target) -> (Vec<String>, Vec<Value>, 
             let summary = (changed && !keys.is_empty()).then(|| format!("改了{}", keys.join("、")));
             (vec![what.to_string(), title], vec![], summary)
         }
+        // Path and line counts only: a file can be a megabyte long.
+        Target::File(path) => {
+            let n = |i: usize| p["lines"][i].as_i64().unwrap_or_default();
+            let (old, new) = (n(0), n(1));
+            let summary = match p["kind"].as_str() {
+                Some("created") => format!("共 {new} 行"),
+                Some("deleted") => format!("原有 {old} 行"),
+                _ if new == old => format!("{old} 行，行数不变"),
+                _ => format!("{old} 行 → {new} 行（{:+}）", new - old),
+            };
+            (vec!["站点文件".into(), path.clone()], vec![], Some(summary))
+        }
     }
 }
 
@@ -248,6 +260,7 @@ fn version_title(target: &Target, doc: &Value) -> String {
         Target::Notes => "站点说明".into(),
         Target::Record(id) => named().unwrap_or_else(|| format!("记录 {id}")),
         Target::Collection(n) | Target::View(n) => named().unwrap_or_else(|| n.clone()),
+        Target::File(p) => p.clone(),
     }
 }
 

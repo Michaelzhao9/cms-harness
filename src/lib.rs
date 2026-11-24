@@ -7,6 +7,7 @@ pub mod api;
 pub mod media;
 pub mod tools;
 pub mod render;
+pub mod site;
 pub mod web;
 
 use rusqlite::Connection;
