@@ -189,9 +189,10 @@ async fn security_headers_are_on_every_response() {
     let (_, h, body) = get_with(&app, "/admin/login", None).await;
     assert_eq!(h[header::CONTENT_SECURITY_POLICY], ADMIN_CSP);
     assert!(!body.contains("<script") && !body.contains("<style") && !body.contains("style="), "{body}");
-    // The CSP is only for the admin; the placeholder home page keeps its inline style.
+    // The admin CSP is only for the admin; the site has its own, which allows inline styles.
     let (_, h, _) = get_with(&app, "/", None).await;
-    assert!(h.get(header::CONTENT_SECURITY_POLICY).is_none());
+    let site = h[header::CONTENT_SECURITY_POLICY].to_str().unwrap();
+    assert!(site != ADMIN_CSP && site.contains("style-src 'self' 'unsafe-inline'"), "{site}");
 }
 
 #[tokio::test]

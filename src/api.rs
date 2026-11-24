@@ -6,7 +6,7 @@ use crate::{changes, media, query, tools, Shared};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Multipart, Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
-use axum::response::{Html, IntoResponse, Response};
+use axum::response::{IntoResponse, Response};
 use axum::{routing::{get, post}, Json, Router};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -18,10 +18,10 @@ const MIB: usize = 1024 * 1024;
 
 pub fn router(app: Shared) -> Router {
     Router::new()
-        .route("/", get(home))
         .route("/api/v1/tools", get(list_tools))
         .route("/api/v1/tools/{name}", post(call_tool).layer(DefaultBodyLimit::max(8 * MIB)))
         .route("/mcp", post(mcp).layer(DefaultBodyLimit::max(8 * MIB)))
+        .route("/api/v1/site/bundle", post(site_bundle).layer(DefaultBodyLimit::max(crate::site::MAX_BUNDLE_BYTES)))
         .route("/api/v1/content/{collection}", get(list))
         .route("/api/v1/content/{collection}/{id}", get(one))
         .route("/api/v1/media", post(upload).layer(DefaultBodyLimit::max(media::UPLOAD_BODY_LIMIT)))
@@ -259,6 +259,23 @@ async fn call_tool(State(app): State<Shared>, Path(name): Path<String>, headers:
     }
 }
 
+/// `POST /api/v1/site/bundle?note=…&replace=1`: a zip as the raw body, for bundles too large for a tool call.
+/// The same tool, the same rules and scope check as `upload_site_bundle`.
+async fn site_bundle(State(app): State<Shared>, Query(p): Params, headers: HeaderMap, body: Bytes) -> Response {
+    use base64::Engine;
+    let actor = match actor(&app, &headers).await {
+        Ok(a) => a,
+        Err(r) => return *r,
+    };
+    let param = |k: &str| p.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()).unwrap_or_default();
+    let replace = matches!(param("replace").as_str(), "1" | "true");
+    let args = json!({ "zip_base64": base64::engine::general_purpose::STANDARD.encode(&body), "note": param("note"), "replace": replace });
+    match run_tool(&app, actor, "upload_site_bundle".into(), args).await {
+        Ok(result) => Json(json!({ "ok": true, "result": result })).into_response(),
+        Err(e) => error_response(StatusCode::BAD_REQUEST, e),
+    }
+}
+
 // Protocol revisions checked against https://modelcontextprotocol.io/docs/2026-07-28/learn/versioning on 2026-11-23.
 // 2026-07-28 has no initialize handshake: clients send tools/list and tools/call directly, which this stateless
 // endpoint accepts. Older clients open with initialize and one of the handshake revisions.
@@ -330,41 +347,3 @@ async fn mcp(State(app): State<Shared>, headers: HeaderMap, body: Bytes) -> Resp
     }
 }
 
-// ---- placeholder front page ----
-
-fn escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
-}
-
-async fn home(State(app): State<Shared>) -> Html<String> {
-    let name = escape(&app.site_name);
-    let api = escape(&format!("{}/api/v1/content/", app.origin));
-    Html(format!(
-        r#"<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{name}</title>
-<style>
-:root {{ color-scheme: light dark; }}
-body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: #fcfcfd; color: #1d1d1f;
-  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif; }}
-main {{ max-width: 34em; padding: 32px 24px; }}
-h1 {{ margin: 0 0 8px; font-size: 32px; letter-spacing: -0.02em; }}
-p {{ margin: 0 0 6px; color: #424245; }}
-code {{ font: 14px ui-monospace, "SF Mono", Menlo, monospace; }}
-@media (prefers-color-scheme: dark) {{ body {{ background: #111113; color: #f2f2f4; }} p {{ color: #b8b8bf; }} }}
-</style>
-</head>
-<body>
-<main>
-<h1>{name}</h1>
-<p>后台已就绪。</p>
-<p>前台通过内容接口读取已发布的内容：<code>{api}</code></p>
-</main>
-</body>
-</html>
-"#
-    ))
-}

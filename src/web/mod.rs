@@ -4,6 +4,7 @@ pub mod admin;
 pub mod content;
 pub mod session;
 pub mod settings;
+pub mod site;
 
 use crate::{render, Shared};
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Request, State};
@@ -46,6 +47,9 @@ pub fn router(app: Shared) -> Router {
         .route("/admin/login", get(login_page).post(login))
         .route("/admin/logout", post(logout))
         .route("/admin/static/admin.css", get(css))
+        .route("/_hc/preview.js", get(site::preview_js))
+        .route("/_hc/preview.css", get(site::preview_css))
+        .fallback(site::serve)
         .with_state(app)
 }
 

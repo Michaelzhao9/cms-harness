@@ -1,0 +1,13 @@
+{% extends "_hc/layout.html" %}
+{% block title %}{{ def.title }} · {% endblock %}
+{% block main %}
+<h1>{{ def.title }}</h1>
+{% set items = collection(def.name, limit=100) %}
+{% if items %}
+<ul class="list">
+{% for item in items %}<li><a href="/{{ def.name }}/{{ item.id }}">{% if def.label and item[def.label] %}{{ item[def.label] }}{% else %}记录 {{ item.id }}{% endif %}</a></li>
+{% endfor %}</ul>
+{% else %}
+<p class="empty">这里还没有内容。</p>
+{% endif %}
+{% endblock %}

@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS views(name TEXT PRIMARY KEY, published TEXT, draft TE
   draft_deleted INTEGER NOT NULL DEFAULT 0, draft_actor TEXT, draft_note TEXT);
 CREATE TABLE IF NOT EXISTS site_files(path TEXT PRIMARY KEY, published TEXT, draft TEXT,
   draft_deleted INTEGER NOT NULL DEFAULT 0, draft_actor TEXT, draft_note TEXT);
+CREATE TABLE IF NOT EXISTS site_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY CHECK(id = 1), published TEXT, draft TEXT, draft_actor TEXT, draft_note TEXT);
 CREATE TABLE IF NOT EXISTS releases(id INTEGER PRIMARY KEY, actor TEXT NOT NULL, note TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')));

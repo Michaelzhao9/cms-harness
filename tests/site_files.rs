@@ -85,18 +85,47 @@ fn site_files_follow_draft_publish_history_restore_and_discard() {
 fn paths_follow_the_rules() {
     let app = app();
     let long = format!("{}.html", "a".repeat(196));
-    for bad in ["/a.html", "../a.html", "a/../b.html", "a..b.html", "A.html", "a b.html", "a", "a.exe", "a//b.html", "dir/", "./a.html",
-                ".html", "a:b.html", "中.html", &long] {
+    for bad in ["/a.html", "../a.html", "a/../b.html", "a..b.html", "a b.html", "a", "a.exe", "a//b.html", "dir/", "./a.html",
+                ".html", "a:b.html", "中.html", "a.HTML", &long, "admin/x.html", "api/v1.json", "uploads/a.png", "_hc/preview.js", "mcp"] {
         let e = write_err(&app, bad, "x");
         assert!(e.contains("路径"), "{bad}: {e}");
     }
-    assert!(write_err(&app, "logo.png", "x").contains("upload_media"));
-    for good in ["a.html", "assets/app-1.2.js", ".well-known/security.txt", "sub_dir/site.webmanifest", "x/y/z.map", "feed.xml", "r.md",
-                 "i.svg", "t.txt", "m.mjs", "s.ts", &format!("{}.html", "a".repeat(195))] {
+    assert!(write_err(&app, "_hc/x.css", "x").contains("_hc/"));
+    for good in ["a.html", "A.html", "assets/index-DiwrgTda.js", ".well-known/security.txt", "sub_dir/site.webmanifest", "x/y/z.map", "feed.xml",
+                 "r.md", "i.svg", "t.txt", "m.mjs", "s.ts", "administrator.html", "apis/x.css", &format!("{}.html", "a".repeat(195))] {
         let body = if good.ends_with(".map") || good.ends_with(".webmanifest") { "{}" } else { "x" };
         write(&app, good, body);
     }
+    // Paths are case-sensitive: two files.
+    write(&app, "a.html", "lower");
+    assert_eq!(content(&app, "A.html")["content"], "x");
     assert!(err(&app, &builder(), "discard_draft", json!({ "target": "file:../x.html" })).contains("file:"));
+}
+
+#[test]
+fn binary_files_are_stored_as_base64() {
+    use base64::Engine;
+    let app = app();
+    let bytes: Vec<u8> = (0..=255u8).cycle().take(3000).collect();
+    let enc = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    // Whitespace in the base64 (line breaks) is accepted and dropped.
+    let wrapped: String = enc.as_bytes().chunks(76).map(|c| std::str::from_utf8(c).unwrap()).collect::<Vec<_>>().join("\n");
+    write(&app, "fonts/Inter.woff2", &wrapped);
+    let got = content(&app, "fonts/Inter.woff2");
+    assert_eq!((got["content"].as_str(), got["binary"].as_bool()), (Some(enc.as_str()), Some(true)), "{got}");
+    for ext in ["png", "jpg", "jpeg", "gif", "webp", "avif", "ico", "woff", "ttf", "otf", "mp4", "webm"] {
+        write(&app, &format!("f.{ext}"), "AAAA");
+    }
+    assert!(write_err(&app, "x.png", "not base64!").contains("base64"));
+    assert!(write_err(&app, "x.png", "").contains("x.png"));
+    let big = base64::engine::general_purpose::STANDARD.encode(vec![0u8; (5 << 20) + 1]);
+    assert!(write_err(&app, "big.mp4", &big).contains("5 MB"));
+    let listed_file = ok(&app, &reader(), "list_site_files", json!({})).as_array().unwrap().iter().find(|f| f["path"] == "fonts/Inter.woff2").unwrap().clone();
+    assert_eq!((listed_file["bytes"].as_u64(), listed_file["binary"].as_bool()), (Some(3000), Some(true)), "{listed_file}");
+    let pending = ok(&app, &reader(), "list_pending", json!({}));
+    let p = pending.as_array().unwrap().iter().find(|p| p["target"] == "file:fonts/Inter.woff2").unwrap();
+    assert!(p.get("lines").is_none(), "{p}");
+    publish_all(&app);
 }
 
 #[test]
@@ -171,14 +200,13 @@ fn transpile_strips_types_and_uses_the_automatic_jsx_runtime() {
 
 #[test]
 fn pages_render_with_their_layout_and_escape_values() {
-    use std::collections::BTreeMap;
-    let files: harness_cms::site::Files = std::sync::Arc::new(BTreeMap::from([
-        ("layout.html".to_string(), "<main>LAYOUT {% block body %}{% endblock %}</main>".to_string()),
-        ("index.html".to_string(), "{% extends \"layout.html\" %}{% block body %}{{ request.path }} {{ request.query.q }}{% endblock %}".to_string()),
-    ]));
-    let conn = harness_cms::store::open(":memory:").unwrap();
-    let out = harness_cms::site::render(&conn, &files, "index.html", json!({ "path": "/", "query": { "q": "<b>" } })).unwrap();
-    assert_eq!(out, "<main>LAYOUT &#x2f; &lt;b&gt;</main>");
+    let app = app();
+    write(&app, "layout.html", "<main>LAYOUT {% block body %}{% endblock %}</main>");
+    write(&app, "index.html", "{% extends \"layout.html\" %}{% block body %}{{ request.path }} {{ request.query.q }}{% endblock %}");
+    publish_all(&app);
+    let ctx = json!({ "request": { "path": "/", "query": { "q": "<b>" } } });
+    let out = harness_cms::site::render(&app.conn(), harness_cms::site::Mode::Live, "index.html", ctx).unwrap();
+    assert_eq!(out.html, "<main>LAYOUT &#x2f; &lt;b&gt;</main>");
 }
 
 #[test]
@@ -283,6 +311,32 @@ fn upload(app: &Shared, zip: &[u8]) -> Result<Value, String> {
 }
 
 #[test]
+fn a_bundle_carries_binary_assets_and_can_replace_the_site() {
+    let app = app();
+    write(&app, "old.html", "<p>old</p>");
+    write(&app, "index.html", "<p>v1</p>");
+    write(&app, "draft-only.css", "p{}");
+    ok(&app, &builder(), "publish", json!({ "targets": ["file:old.html", "file:index.html"], "note": "n" }));
+    let png = b"\x89PNG\r\n\x1a\n\x00\xff";
+    let zip = zip_of(&[("dist/index.html", b"<p>v2</p>"), ("dist/assets/Logo-AbC.png", png), ("dist/assets/index-DiwrgTda.js", b"export {};")]);
+    // Without replace, files outside the bundle stay.
+    let r = upload(&app, &zip).unwrap();
+    assert_eq!((r["written"].as_i64(), r["deleted"].as_i64()), (Some(3), Some(0)), "{r}");
+    assert_eq!(content(&app, "old.html")["status"], "published");
+    assert_eq!(content(&app, "assets/Logo-AbC.png")["content"], b64(png));
+    // With replace, live files outside the bundle get a pending deletion in the same step; drafts stay.
+    let r = harness_cms::tools::call(&app, &builder(), "upload_site_bundle", json!({ "zip_base64": b64(&zip), "note": "替换", "replace": true })).unwrap();
+    assert_eq!((r["written"].as_i64(), r["deleted"].as_i64()), (Some(0), Some(1)), "{r}");
+    assert_eq!(content(&app, "old.html")["status"], "deleting");
+    assert_eq!(content(&app, "draft-only.css")["status"], "draft");
+    publish_all(&app);
+    assert!(err(&app, &reader(), "get_site_file", json!({ "path": "old.html" })).contains("old.html"));
+    // A binary entry has its own size limit.
+    let e = upload(&app, &zip_of(&[("v.mp4", &vec![0u8; (5 << 20) + 1])])).unwrap_err();
+    assert!(e.contains("v.mp4") && e.contains("5 MB"), "{e}");
+}
+
+#[test]
 fn a_bundle_becomes_drafts_in_one_go() {
     let app = app();
     write(&app, "keep.txt", "untouched");
@@ -318,10 +372,11 @@ fn one_bad_file_rejects_the_whole_bundle_with_every_problem() {
         ("app.tsx", b"const = ;"),
         ("blob.txt", &[0xff, 0xfe, 0x00]),
         ("../evil.html", b"x"),
-        ("logo.png", b"\x89PNG"),
+        ("api/x.json", b"{}"),
+        ("logo.png", b""),
     ]);
     let e = upload(&app, &zip).unwrap_err();
-    for needle in ["Bad.HTML", "app.tsx", "blob.txt", "../evil.html", "logo.png"] {
+    for needle in ["Bad.HTML", "app.tsx", "blob.txt", "../evil.html", "api/x.json", "logo.png"] {
         assert!(e.contains(needle), "{needle}: {e}");
     }
     assert_eq!(listed(&app), vec![]);

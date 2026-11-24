@@ -87,20 +87,20 @@ pub fn logout(conn: &Connection, token_hash: &str) {
     let _ = conn.execute("DELETE FROM admin_sessions WHERE token_hash = ?1", [token_hash]);
 }
 
-/// The value of the `hc_admin` cookie, from any `Cookie` header.
-fn cookie_token(headers: &HeaderMap) -> Option<String> {
+/// The value of the cookie `name`, from any `Cookie` header.
+fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get_all(header::COOKIE)
         .iter()
         .filter_map(|v| v.to_str().ok())
         .flat_map(|v| v.split(';'))
-        .find_map(|pair| pair.trim().strip_prefix(COOKIE)?.strip_prefix('=').map(str::to_string))
+        .find_map(|pair| pair.trim().strip_prefix(name)?.strip_prefix('=').map(str::to_string))
         .filter(|t| !t.is_empty())
 }
 
 /// The logged-in admin, or `None`. An expired session is deleted when seen.
 pub fn from_cookie(conn: &Connection, headers: &HeaderMap) -> Option<AdminUser> {
-    let token_hash = sha256_hex(&cookie_token(headers)?);
+    let token_hash = sha256_hex(&cookie_value(headers, COOKIE)?);
     let (user, live) = conn
         .query_row(
             "SELECT a.id, a.email, a.role, s.csrf, json_patch(a.prefs, s.prefs), s.expires_at > datetime('now')
@@ -125,6 +125,37 @@ pub fn from_cookie(conn: &Connection, headers: &HeaderMap) -> Option<AdminUser> 
         return None;
     }
     Some(user)
+}
+
+// ---- the site preview's key ----
+//
+// The admin frames the preview in a sandbox without `allow-same-origin`, so everything the frame requests comes
+// from an opaque origin: the `SameSite=Strict` session cookie is not sent. The preview key is a second cookie,
+// `SameSite=None`, derived from the session (it dies with it) and good for one thing only: reading drafts on the
+// site.
+
+pub const PREVIEW_COOKIE: &str = "hc_preview";
+
+/// The preview key of the session with this token hash.
+pub fn preview_key(token_hash: &str) -> String {
+    sha256_hex(&format!("hc-preview:{token_hash}"))
+}
+
+/// The `Set-Cookie` value carrying a preview key. `Secure` is required with `SameSite=None`: it works on https
+/// (and Chrome takes it on http://127.0.0.1). Where third-party cookies are blocked, the browser may withhold it
+/// from the frame's stylesheets, scripts and images; those then come from the live site.
+pub fn preview_cookie(key: &str) -> String {
+    format!("{PREVIEW_COOKIE}={key}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=43200")
+}
+
+/// True when the request carries the preview key of a live admin session.
+// ponytail: scans live sessions (a handful); store the key hash in a column if sessions number in the thousands.
+pub fn has_preview_key(conn: &Connection, headers: &HeaderMap) -> bool {
+    let Some(key) = cookie_value(headers, PREVIEW_COOKIE) else { return false };
+    let Ok(mut stmt) = conn.prepare("SELECT token_hash FROM admin_sessions WHERE expires_at > datetime('now')") else { return false };
+    let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else { return false };
+    let found = rows.filter_map(Result::ok).any(|t| constant_eq(preview_key(&t).as_bytes(), key.as_bytes()));
+    found
 }
 
 /// Stores one string preference on the admin account, kept across sessions.

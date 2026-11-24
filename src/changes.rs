@@ -140,21 +140,27 @@ fn remove_row(conn: &Connection, target: &Target) -> Result<(), String> {
 }
 
 pub fn mark_deleted(conn: &Connection, actor: &Actor, target: &Target, note: &str) -> Result<(), String> {
+    let tx = conn.unchecked_transaction().map_err(|e| db(target, e))?;
+    mark_deleted_in(&tx, actor, target, note)?;
+    tx.commit().map_err(|e| db(target, e))
+}
+
+/// `mark_deleted` inside a transaction the caller holds.
+pub fn mark_deleted_in(tx: &Connection, actor: &Actor, target: &Target, note: &str) -> Result<(), String> {
     if matches!(target, Target::Notes) {
         return Err("说明不能删除，请直接修改它的内容。".into());
     }
-    let tx = conn.unchecked_transaction().map_err(|e| db(target, e))?;
-    let (live, ever) = liveness(&tx, target)?;
+    let (live, ever) = liveness(tx, target)?;
     if !ever {
-        remove_row(&tx, target)?;
+        remove_row(tx, target)?;
     } else if !live {
         // A tombstone whose restored draft is being dropped again: back to the tombstone.
-        clear_draft(&tx, target)?;
+        clear_draft(tx, target)?;
     } else {
         if let Target::Collection(name) = target {
             // The deletion replaces any pending definition: record drafts go back to the live definition first,
             // so restoring the collection later starts from a consistent state.
-            back_to_live(&tx, name, "删除集合")?;
+            back_to_live(tx, name, "删除集合")?;
         }
         let (table, key, val, _) = target.row();
         // For a collection the deletion replaces its pending definition, which was just undone above.
@@ -165,7 +171,7 @@ pub fn mark_deleted(conn: &Connection, actor: &Actor, target: &Target, note: &st
         )
         .map_err(|e| db(target, e))?;
     }
-    tx.commit().map_err(|e| db(target, e))
+    Ok(())
 }
 
 pub fn discard(conn: &Connection, target: &Target) -> Result<(), String> {
@@ -544,6 +550,11 @@ fn pending_targets(conn: &Connection) -> Result<Vec<Target>, String> {
     Ok(out)
 }
 
+/// Pending targets as `list_pending` lists them: the preview numbers its change marks by this order.
+pub fn pending_order(conn: &Connection) -> Result<Vec<String>, String> {
+    Ok(pending_targets(conn)?.iter().map(ToString::to_string).collect())
+}
+
 fn parse_doc(json: &Option<String>) -> Value {
     json.as_deref().and_then(|j| serde_json::from_str(j).ok()).unwrap_or(Value::Null)
 }
@@ -579,7 +590,7 @@ pub struct Pending {
     pub note: String,
     /// For a collection: how many records it holds. Otherwise 1.
     pub affected: i64,
-    /// For a site file: line counts of the live copy and the draft (0 when there is none).
+    /// For a text site file: line counts of the live copy and the draft (0 when there is none).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lines: Option<[usize; 2]>,
 }
@@ -608,7 +619,7 @@ pub fn pending(conn: &Connection) -> Result<Vec<Pending>, String> {
             actor: s.actor.unwrap_or_default(),
             note: s.note.unwrap_or_default(),
             affected: if let Target::Collection(n) = &target { record_count(conn, n)? } else { 1 },
-            lines: matches!(target, Target::File(_)).then(|| {
+            lines: matches!(&target, Target::File(p) if !crate::site::is_binary(p)).then(|| {
                 let count = |v: &Value| v.as_str().map_or(0, |s| s.lines().count());
                 [count(&old), if s.draft_deleted { 0 } else { count(&new) }]
             }),

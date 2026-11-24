@@ -68,11 +68,11 @@ async fn oversize_and_malformed_bodies_do_not_crash() {
 }
 
 #[tokio::test]
-async fn placeholder_page_is_served() {
+async fn a_fresh_site_has_a_front_page() {
     let app = app();
     let (status, headers, _) = get(&app, "/", None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(headers["content-type"].to_str().unwrap().starts_with("text/html"));
     let html = get_text(&app, "/").await;
-    assert!(html.contains("测试站") && html.contains("后台已就绪"));
+    assert!(html.contains("测试站") && html.contains("网站还没有内容"), "{html}");
 }

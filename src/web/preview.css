@@ -1,0 +1,15 @@
+/* harness-cms preview: change markers drawn over the page. Loaded only by preview pages. */
+:root { --mark: #f5b700; }
+#hc-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 2147483647; }
+#hc-overlay .hc-box { position: absolute; border-radius: 4px; box-shadow: 0 0 0 1px var(--mark); opacity: .35;
+  transition: opacity .12s ease, box-shadow .12s ease; }
+#hc-overlay .hc-dot { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%;
+  background: var(--mark); box-shadow: 0 0 0 2px #fff; }
+#hc-overlay .hc-box.active { opacity: 1;
+  box-shadow: 0 0 0 1.5px var(--mark), 0 0 0 5.5px color-mix(in srgb, var(--mark) 22%, transparent); }
+#hc-overlay .hc-pin { position: absolute; min-width: 18px; height: 18px; margin: -9px 0 0 -9px; padding: 0 5px; box-sizing: border-box;
+  border-radius: 9px; background: var(--mark); color: #1d1d1f; box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0, 0, 0, .25);
+  font: 600 11px/18px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; text-align: center; }
+#hc-overlay .hc-hover { position: absolute; border-radius: 3px; box-shadow: 0 0 0 1.5px #0a84ff; background: rgba(10, 132, 255, .06); }
+#hc-overlay .hc-picked { position: absolute; border-radius: 3px; box-shadow: 0 0 0 2px #0a84ff; background: rgba(10, 132, 255, .1); }
+html.hc-picking, html.hc-picking * { cursor: crosshair !important; }

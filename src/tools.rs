@@ -53,9 +53,9 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<UploadMedia>("upload_media", Scope::Write, "上传图片或 PDF（base64，最大 5 MB）：返回 /uploads/ 路径，可填进 media 字段。"),
             spec::<NoArgs>("list_site_files", Scope::Read, "List the built-in website's source files with status, size in bytes and line count (draft copy if any). Content is not included: use get_site_file."),
             spec::<PathArgs>("get_site_file", Scope::Read, "Read one site file by path: its content (the draft if there is one) and status."),
-            spec::<WriteSiteFile>("write_site_file", Scope::Structure, "Create or replace a site file draft; it goes live when published. Text only, at most 1 MB, at most 2000 files. Path: relative, lowercase a-z 0-9 . _ / -, no '..', at most 200 characters, extension one of html css js mjs jsx ts tsx json svg txt md xml webmanifest map. `.html` files are minijinja templates (they may extend or include other files by path); `.jsx/.ts/.tsx` are served transpiled (TypeScript stripped, JSX via react/jsx-runtime). Syntax is checked on write. Images and fonts are binary: upload them with upload_media instead."),
+            spec::<WriteSiteFile>("write_site_file", Scope::Structure, "Create or replace a site file draft; it goes live when published. At most 2000 files. Path: relative, letters (case-sensitive) digits . _ / -, no '..', at most 200 characters, not under admin/ api/ uploads/ _hc/ and not 'mcp'. Text files (html css js mjs jsx ts tsx json svg txt md xml webmanifest map): content is the text, at most 1 MB. Binary files (png jpg jpeg gif webp avif ico woff woff2 ttf otf mp4 webm): content is the bytes in standard base64, at most 5 MB decoded. `.html` files are minijinja templates served at their path (`/about` finds about.html or about/index.html); they may extend or include other files by path and read live content with collection(name, filter?, sort?, limit?, offset?) and record(collection, id), plus `site`, `request` and `member`. `.jsx/.ts/.tsx` are served transpiled (TypeScript stripped, JSX via react/jsx-runtime). Syntax is checked on write."),
             spec::<DeleteSiteFile>("delete_site_file", Scope::Structure, "Delete a site file: a never-published file disappears now, a live one when the deletion is published."),
-            spec::<UploadSiteBundle>("upload_site_bundle", Scope::Structure, "Upload a zip of site files (for example a static build) as drafts in one step: every file follows the write_site_file rules, at most 50 MB uncompressed. One bad file rejects the whole bundle, with every problem listed. Files not in the bundle are left as they are. A single top folder holding index.html is stripped; directories and macOS metadata are skipped. Binary assets (images, fonts) go through upload_media, not the bundle."),
+            spec::<UploadSiteBundle>("upload_site_bundle", Scope::Structure, "Upload a zip of site files (for example a Vite or Next static build, images and fonts included) as drafts in one step: every file follows the write_site_file rules, at most 50 MB uncompressed. One bad file rejects the whole bundle, with every problem listed. With replace: true, live files not in the bundle get a pending deletion in the same step; otherwise they are left as they are. A single top folder holding index.html is stripped; directories and macOS metadata are skipped. Large bundles can also go as a raw zip body to POST /api/v1/site/bundle?note=...&replace=1."),
         ]
     })
 }
@@ -774,6 +774,9 @@ struct DeleteSiteFile {
 struct UploadSiteBundle {
     zip_base64: String,
     note: String,
+    /// Also delete live files that are not in the bundle.
+    #[serde(default)]
+    replace: bool,
 }
 
 /// (status, current content) of a site file that exists; the draft copy when there is one.
@@ -800,7 +803,12 @@ fn list_site_files(conn: &Connection) -> Result<Value, String> {
     let mut out = vec![];
     for path in paths {
         let Some((status, content)) = site_file(conn, &path)? else { continue };
-        out.push(json!({ "path": path, "status": status, "bytes": content.len(), "lines": content.lines().count() }));
+        if crate::site::is_binary(&path) {
+            let bytes = crate::site::decode_binary(&content).map_or(0, |b| b.len());
+            out.push(json!({ "path": path, "status": status, "bytes": bytes, "binary": true }));
+        } else {
+            out.push(json!({ "path": path, "status": status, "bytes": content.len(), "lines": content.lines().count() }));
+        }
     }
     Ok(Value::Array(out))
 }
@@ -808,7 +816,7 @@ fn list_site_files(conn: &Connection) -> Result<Value, String> {
 fn get_site_file(conn: &Connection, a: PathArgs) -> Result<Value, String> {
     crate::site::check_path(&a.path)?;
     let (status, content) = site_file(conn, &a.path)?.ok_or_else(|| no_file(&a.path))?;
-    Ok(json!({ "path": a.path, "status": status, "content": content }))
+    Ok(json!({ "path": a.path, "status": status, "content": content, "binary": crate::site::is_binary(&a.path) }))
 }
 
 fn file_status(conn: &Connection, path: &str) -> Result<&'static str, String> {
@@ -817,9 +825,11 @@ fn file_status(conn: &Connection, path: &str) -> Result<&'static str, String> {
 
 fn write_site_file(conn: &Connection, actor: &Actor, a: WriteSiteFile) -> Result<Value, String> {
     let note = check_note(&a.note)?;
-    crate::site::check_file(&a.path, &a.content)?;
+    // Base64 may arrive wrapped in lines; it is stored as one.
+    let content = if crate::site::is_binary(&a.path) { a.content.split_whitespace().collect() } else { a.content };
+    crate::site::check_file(&a.path, &content)?;
     changes::check_file_count(conn, std::slice::from_ref(&a.path))?;
-    changes::stage_file(conn, actor, &a.path, &a.content, note)?;
+    changes::stage_file(conn, actor, &a.path, &content, note)?;
     Ok(json!({ "path": a.path, "status": file_status(conn, &a.path)? }))
 }
 
@@ -847,12 +857,24 @@ fn upload_site_bundle(conn: &Connection, actor: &Actor, a: UploadSiteBundle) -> 
         return Err("压缩包里没有文件。".into());
     }
     let paths: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
-    changes::check_file_count(conn, &paths)?;
-    let tx = conn.unchecked_transaction().map_err(|e| format!("写入站点文件失败：{e}"))?;
+    let fail = |e: rusqlite::Error| format!("写入站点文件失败：{e}");
+    let tx = conn.unchecked_transaction().map_err(fail)?;
+    let mut deleted = 0;
+    if a.replace {
+        let live: Vec<String> = tx
+            .prepare("SELECT path FROM site_files WHERE published IS NOT NULL AND draft_deleted = 0")
+            .and_then(|mut s| s.query_map([], |r| r.get(0))?.collect())
+            .map_err(fail)?;
+        for path in live.into_iter().filter(|p| !paths.contains(p)) {
+            changes::mark_deleted_in(&tx, actor, &Target::File(path), note)?;
+            deleted += 1;
+        }
+    }
+    changes::check_file_count(&tx, &paths)?;
     let mut written = 0;
     for (path, content) in &files {
         written += changes::stage_file(&tx, actor, path, content, note)? as usize;
     }
-    tx.commit().map_err(|e| format!("写入站点文件失败：{e}"))?;
-    Ok(json!({ "files": files.len(), "written": written, "unchanged": files.len() - written }))
+    tx.commit().map_err(fail)?;
+    Ok(json!({ "files": files.len(), "written": written, "unchanged": files.len() - written, "deleted": deleted }))
 }

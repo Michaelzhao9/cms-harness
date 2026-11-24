@@ -194,6 +194,7 @@ fn describe(app: &App, p: &Value, target: &Target) -> (Vec<String>, Vec<Value>, 
             let n = |i: usize| p["lines"][i].as_i64().unwrap_or_default();
             let (old, new) = (n(0), n(1));
             let summary = match p["kind"].as_str() {
+                _ if p["lines"].is_null() => "二进制文件".to_string(),
                 Some("created") => format!("共 {new} 行"),
                 Some("deleted") => format!("原有 {old} 行"),
                 _ if new == old => format!("{old} 行，行数不变"),
