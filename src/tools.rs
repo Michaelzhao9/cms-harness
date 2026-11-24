@@ -39,7 +39,7 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<UpdateRecord>("update_record", Scope::Write, "修改记录草稿：只需传要改的字段，null 表示清空该字段。"),
             spec::<DeleteRecord>("delete_record", Scope::Write, "删除记录；从未发布的记录直接消失，已发布的待发布时才真正删除。"),
             spec::<GetRecord>("get_record", Scope::Read, "按编号读取一条记录（有草稿时返回草稿）和状态。"),
-            spec::<QueryRecords>("query_records", Scope::Read, "查询集合的记录（草稿视图）。filter 与 sort 只能用 id 或设置了 index/unique 的字段。"),
+            spec::<QueryRecords>("query_records", Scope::Read, "查询集合的记录（草稿视图）。filter 与 sort 只能用 id 或设置了 index/unique 的字段；status 可只看某几种状态的记录。"),
             spec::<NoArgs>("list_pending", Scope::Read, "列出所有待发布的改动：改了什么、谁改的、波及多少记录。"),
             spec::<Publish>("publish", Scope::Publish, "把待发布的改动发布上线：全部，或只发 targets 里列出的几项。发布前整体检查，不通过就什么都不上线。"),
             spec::<TargetArgs>("list_versions", Scope::Read, "列出一个对象的发布历史（最近 30 个版本）。target 形如 record:12、collection:news。"),
@@ -425,6 +425,8 @@ struct QueryRecords {
     collection: String,
     /// `{"field": value}` or `{"field": {"gte": value}}`; operators: eq ne gt gte lt lte contains.
     filter: Option<Value>,
+    /// Keep only records in these states (draft, changed, deleting, published); leave out for all.
+    status: Option<Vec<query::Status>>,
     /// Field name, or `-field` for descending. Default: newest first.
     sort: Option<String>,
     /// 1 to 100, default 20.
@@ -539,6 +541,7 @@ fn query_records(conn: &Connection, a: QueryRecords) -> Result<Value, String> {
     let def = collection_def_for_read(conn, &a.collection)?;
     let q = Query {
         filters: a.filter.as_ref().map(|f| query::parse_filter(&def, f)).transpose()?.unwrap_or_default(),
+        status: a.status.unwrap_or_default(),
         sort: a.sort.map(|s| match s.strip_prefix('-') {
             Some(f) => (f.to_string(), true),
             None => (s, false),

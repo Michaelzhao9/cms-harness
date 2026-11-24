@@ -24,7 +24,7 @@ pub fn router(app: Shared) -> Router {
         .route("/mcp", post(mcp).layer(DefaultBodyLimit::max(8 * MIB)))
         .route("/api/v1/content/{collection}", get(list))
         .route("/api/v1/content/{collection}/{id}", get(one))
-        .route("/api/v1/media", post(upload).layer(DefaultBodyLimit::max(21 * 1024 * 1024)))
+        .route("/api/v1/media", post(upload).layer(DefaultBodyLimit::max(media::UPLOAD_BODY_LIMIT)))
         .route("/uploads/{*path}", get(serve))
         .layer(DefaultBodyLimit::max(MIB))
         .with_state(app.clone())

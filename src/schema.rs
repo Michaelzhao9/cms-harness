@@ -269,7 +269,7 @@ pub fn project(def: &CollectionDef, doc: &Value) -> Value {
     Value::Object(out)
 }
 
-fn strip_tags(html: &str) -> String {
+pub fn strip_tags(html: &str) -> String {
     let mut out = String::new();
     let mut in_tag = false;
     for c in html.chars() {

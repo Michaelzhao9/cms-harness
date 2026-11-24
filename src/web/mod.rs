@@ -1,10 +1,11 @@
 //! The admin web UI: router, session gate, Origin check and security headers.
 
 pub mod admin;
+pub mod content;
 pub mod session;
 
 use crate::{render, Shared};
-use axum::extract::{ConnectInfo, Request, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -22,6 +23,13 @@ pub fn router(app: Shared) -> Router {
     Router::new()
         .route("/admin", get(admin::home))
         .route("/admin/prefs", post(admin::prefs))
+        .route("/admin/c/{name}", get(content::collection_list))
+        .route("/admin/c/{name}/new", post(content::create).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
+        .route("/admin/v/{name}", get(content::view_list))
+        .route("/admin/r/{id}", get(content::record).post(content::save).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
+        .route("/admin/r/{id}/delete", post(content::delete))
+        .route("/admin/r/{id}/discard", post(content::discard))
+        .route("/admin/media", get(content::media_library).post(content::upload).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
         .route("/admin/login", get(login_page).post(login))
         .route("/admin/logout", post(logout))
         .route("/admin/static/admin.css", get(css))

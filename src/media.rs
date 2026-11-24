@@ -7,6 +7,8 @@ use std::io::Cursor;
 pub const MAX_BYTES: usize = 20 * 1024 * 1024;
 pub const MAX_BYTES_INLINE: usize = 5 * 1024 * 1024;
 pub const MAX_PIXELS: u64 = 40_000_000;
+/// Request body limit for routes that carry one upload: the file plus room for the multipart framing and form fields.
+pub const UPLOAD_BODY_LIMIT: usize = MAX_BYTES + 1024 * 1024;
 
 const ACCEPTED: &str = "JPEG、PNG、GIF、WebP、PDF";
 
@@ -86,4 +88,17 @@ pub fn read(app: &App, name: &str) -> Option<(Vec<u8>, &'static str)> {
         return None;
     }
     Some((std::fs::read(app.data_dir.join("uploads").join(name)).ok()?, ct))
+}
+
+/// Stored uploads as `(name, is image)`, newest first. A missing folder is an empty list.
+pub fn list(app: &App) -> Vec<(String, bool)> {
+    let Ok(dir) = std::fs::read_dir(app.data_dir.join("uploads")) else { return vec![] };
+    let mut files: Vec<(std::time::SystemTime, String)> = dir
+        .filter_map(|e| e.ok())
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.file_name().into_string().ok()?)))
+        // Only names `read` would serve: this skips temporary files.
+        .filter(|(_, n)| n.split_once('.').is_some_and(|(stem, ext)| stem.len() == 32 && content_type(ext).is_some()))
+        .collect();
+    files.sort_by(|a, b| b.cmp(a));
+    files.into_iter().map(|(_, n)| { let image = !n.ends_with(".pdf"); (n, image) }).collect()
 }

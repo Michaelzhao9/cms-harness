@@ -86,3 +86,89 @@ input[type='email'], input[type='password'], input[type='text'], input:not([type
   .shell > :is(.nav, .chat, .main) { flex: 1 1 100%; }
   .preview { min-height: 70vh; }
 }
+
+/* ---- content screens: list, record editor, media library ---- */
+.content { flex-grow: 1; display: flex; flex-wrap: wrap; align-items: stretch; }
+.records { flex: 999 1 420px; min-width: 0; display: flex; flex-direction: column; }
+.head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 22px 28px 12px; }
+.head h1 { font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
+.head .sum { flex-grow: 1; font-size: 13px; color: var(--muted); }
+.btn, .btn2 { height: 36px; display: inline-flex; align-items: center; gap: 8px; border-radius: 8px; font-size: 14px; white-space: nowrap; }
+.btn { padding: 0 16px; background: var(--ink); color: #fff; font-weight: 600; }
+.btn2 { padding: 0 14px; border: 1px solid var(--rule); background: transparent; color: var(--ink); font-weight: 500; }
+.txt { font-size: 13px; color: var(--muted); }
+.txt:hover { color: var(--ink); }
+.txt.bad { color: var(--bad); }
+
+/* Flat text tabs with an underline, never filled chips. */
+.tabs { display: flex; gap: 22px; padding: 0 28px; border-bottom: 1px solid var(--hair); font-size: 14px; }
+.tabs a { margin-bottom: -1px; padding: 6px 0 10px; border-bottom: 2px solid transparent; color: var(--muted); }
+.tabs a[aria-current='page'] { border-color: var(--ink); color: var(--ink); font-weight: 600; }
+.filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 14px 28px 4px; }
+.filters .fd { width: 180px; }
+.records > .note { margin: 12px 28px 0; }
+
+.scroll { overflow-x: auto; padding: 0 16px; }
+.table { width: 100%; min-width: 520px; border-collapse: collapse; }
+.table th { padding: 10px 12px; text-align: left; font-size: 12px; font-weight: 500; color: var(--muted); border-bottom: 1px solid rgba(0, 0, 0, .10); white-space: nowrap; }
+.table td { height: 52px; max-width: 22em; padding: 0 12px; border-bottom: 1px solid rgba(0, 0, 0, .06); font-size: 14px; color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.table td.lead { color: var(--ink); font-weight: 500; }
+.table td.lead a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.table tr.on { background: var(--panel); }
+.table tr.on td.lead { font-weight: 600; }
+.table td.end { text-align: right; }
+.table td.empty { height: 96px; text-align: center; color: var(--muted); white-space: normal; }
+.table form { margin: 0; }
+.flag { display: inline-flex; align-items: center; gap: 8px; color: #8a5a00; font-weight: 600; }
+.draft { color: var(--ink); font-weight: 500; }
+.thumb { width: 72px; height: 54px; object-fit: cover; border-radius: 8px; box-shadow: 0 0 0 1px var(--hair); }
+.thumb.sm { width: 32px; height: 24px; margin-right: 8px; border-radius: 4px; vertical-align: middle; }
+.pager { display: flex; justify-content: center; align-items: center; gap: 18px; padding: 14px; font-size: 13px; color: var(--muted); }
+.pager a { color: var(--ink); font-weight: 500; }
+
+.note { padding: 10px 14px; border-radius: 8px; font-size: 13px; }
+.note.bad { background: #fdecea; }
+.note.good { background: #e9f5ed; color: var(--good); }
+.note.warn { background: #fff6db; color: #8a5a00; }
+
+.editor { flex: 1 1 320px; max-width: 400px; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 20px 22px 22px;
+  border-left: 1px solid var(--hair); }
+.editor-head { display: flex; align-items: center; gap: 10px; }
+.editor-head h2 { flex-grow: 1; min-width: 0; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.editor-head > span { font-size: 12px; }
+.fields { display: flex; flex-direction: column; gap: 16px; }
+.fd { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.lb { font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.req { margin-left: 6px; font-size: 11px; font-weight: 400; color: var(--muted); }
+:is(input, select, textarea).in { width: 100%; height: 38px; padding: 0 12px; border: 1px solid var(--rule); border-radius: 8px; background: #fff; font-size: 14px; }
+textarea.in { height: auto; padding: 10px 12px; line-height: 1.6; resize: vertical; }
+textarea.in.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+select.in[multiple] { height: auto; min-height: 96px; padding: 6px 8px; }
+.fd.changed .in { border-color: var(--mark); box-shadow: 0 0 0 1px var(--mark); }
+.was { font-size: 12px; color: #8a5a00; overflow-wrap: anywhere; }
+.was s { color: var(--muted); }
+.was b { color: var(--ink); font-weight: 600; }
+.hint { font-size: 12px; color: var(--muted); }
+.rt { width: 100%; height: 180px; border: 1px solid var(--hair); border-radius: 8px; background: #fff; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink); }
+fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+legend { width: 100%; margin-bottom: 6px; padding: 0; }
+.thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
+input[type='file'] { max-width: 100%; font-size: 13px; color: var(--ink-2); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding-top: 4px; }
+.more { display: flex; flex-wrap: wrap; gap: 18px; padding-top: 14px; border-top: 1px solid var(--hair); }
+.more form { margin: 0; }
+
+.upload { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 0 28px 16px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 18px; padding: 20px 28px 40px; border-top: 1px solid var(--hair); }
+.grid .empty { grid-column: 1 / -1; color: var(--muted); }
+figure { min-width: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+figure img, figure .pdf { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 8px; background: var(--panel); box-shadow: 0 0 0 1px var(--hair); }
+figure .pdf { display: flex; align-items: center; justify-content: center; font-weight: 600; color: var(--muted); }
+figcaption { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+figcaption code { padding: 0; background: none; font-size: 11px; color: var(--muted); }
+
+@media (max-width: 860px) {
+  .editor { max-width: none; border-left: 0; border-top: 1px solid var(--hair); }
+}
