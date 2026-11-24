@@ -36,6 +36,7 @@
 - **什么模型都能用。** Claude、OpenAI、Gemini、DeepSeek、通义千问、Kimi、智谱 GLM、豆包、硅基流动、Mistral、xAI、Groq、OpenRouter，本机的 Ollama、LM Studio，或任何兼容 OpenAI 的接口。填好密钥就能列出可用的型号。
 - **技能。** 从 GitHub 或 zip 安装技能文件夹（带 `SKILL.md`），对话遇到相关的事会自己去读。
 - **你的 agent 也能接。** 内置 MCP 服务和 REST 接口，密钥分权限（`read`、`write`、`structure`、`publish`）。
+- **全文搜索。** 页面里用 `search("关键词")`，接口 `GET /api/v1/search`，还有 `search` 工具。中文不用词库也能搜，访客只会搜到自己能看的内容。
 - **中文和英文。** 后台在设置里切换，对话按管理员的语言回答。内置页面按访客的浏览器显示，也有 中文 / EN 切换。
 
 <table>
@@ -100,7 +101,7 @@ cargo build --release
 
 刚部署好的网站只有一个内置页面：显示站点名和进后台的链接。其他页面都是助手（或你的 agent）写的**网站文件**：
 
-- HTML 模板：`collection("news", limit=10, sort="-date")`、`record("news", 3)`、当前登录的会员 `member`、站点名 `site.name`。
+- HTML 模板：`collection("news", limit=10, sort="-date")`、`record("news", 3)`、`search(request.query.q, limit=20)`（每条结果带 `_collection` 和 `_snippet`）、当前登录的会员 `member`、站点名 `site.name`。
 - CSS、JavaScript，以及 JSX / TypeScript / TSX（访问时自动转换）。
 - 第三方库通过 import map 从 `https://esm.sh` 加载（`set_site_settings`），不需要打包；别处打包好的网站可以整个上传（`upload_site_bundle`）。
 
@@ -146,7 +147,7 @@ cargo build --release
 | --- | --- | --- |
 | `list_collections` `get_collection` | read | 列出集合、查看定义 |
 | `create_collection` `update_collection` `delete_collection` | structure | 新建、修改、删除集合（记录保留） |
-| `get_record` `query_records` | read | 读记录 |
+| `get_record` `query_records` `search` | read | 读记录、全文搜索 |
 | `create_record` `update_record` `delete_record` | write | 写记录 |
 | `list_pending` `list_versions` | read | 待发布的改动、发布历史 |
 | `publish` | publish | 发布 |

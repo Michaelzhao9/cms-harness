@@ -14,6 +14,7 @@ pub mod skills;
 pub mod members;
 pub mod access;
 pub mod i18n;
+pub mod search;
 pub mod web;
 
 use rusqlite::Connection;

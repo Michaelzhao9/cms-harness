@@ -36,6 +36,7 @@ It needs no external services. One executable and one SQLite file serve the publ
 - **Any model.** Claude, OpenAI, Gemini, DeepSeek, Qwen, Kimi, GLM, Doubao, SiliconFlow, Mistral, xAI, Groq, OpenRouter, a local Ollama or LM Studio, or any OpenAI-compatible API. Paste a key and it lists the models you can use.
 - **Skills.** Install a skill folder (with a `SKILL.md`) from GitHub or a zip. The chat reads it when the task needs it.
 - **Your agent, too.** A built-in MCP server and a REST API with scoped keys (`read`, `write`, `structure`, `publish`).
+- **Full-text search.** `search("query")` in a page, `GET /api/v1/search` and a `search` tool. Chinese works without a dictionary, and visitors only ever find what they may open.
 - **Chinese and English.** The admin switches in Settings. The chat replies in the admin's language. Built-in pages follow the visitor's browser, and have a 中文 / EN switch.
 
 <table>
@@ -100,7 +101,7 @@ Or use REST: `GET /api/v1/tools` lists the tools this key can call with their pa
 
 A fresh site has one built-in page: a welcome with the site's name and a link to the admin. Every other page comes from **site files** that the assistant (or your agent) writes:
 
-- HTML with templates: `collection("news", limit=10, sort="-date")`, `record("news", 3)`, the signed-in `member`, `site.name`.
+- HTML with templates: `collection("news", limit=10, sort="-date")`, `record("news", 3)`, `search(request.query.q, limit=20)` (each hit has `_collection` and `_snippet`), the signed-in `member`, `site.name`.
 - CSS, JavaScript, and JSX / TypeScript / TSX, which are transpiled when served.
 - Libraries from `https://esm.sh` through an import map (`set_site_settings`), so no bundler is needed. A site built elsewhere can be uploaded in one piece (`upload_site_bundle`).
 
@@ -146,7 +147,7 @@ Only fields declared with `index` or `unique` can filter and sort.
 | --- | --- | --- |
 | `list_collections` `get_collection` | read | list collections, read one |
 | `create_collection` `update_collection` `delete_collection` | structure | create, change, delete (records are kept) |
-| `get_record` `query_records` | read | read records |
+| `get_record` `query_records` `search` | read | read records, full-text search |
 | `create_record` `update_record` `delete_record` | write | write records |
 | `list_pending` `list_versions` | read | pending changes, release history |
 | `publish` | publish | publish |

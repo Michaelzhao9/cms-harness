@@ -364,6 +364,7 @@ fn step_label(name: &str, input: &Value) -> String {
         "update_record" => format!("修改记录 #{}", s("id")),
         "delete_record" => format!("删除记录 #{}", s("id")),
         "list_pending" => "检查待发布的改动".into(),
+        "search" => format!("搜索 {}", s("q")),
         "get_site_file" => format!("读取页面文件 {}", s("path")),
         "write_site_file" => format!("修改页面文件 {}", s("path")),
         "delete_site_file" => format!("删除页面文件 {}", s("path")),

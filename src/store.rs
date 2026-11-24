@@ -60,5 +60,9 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     if !conn.prepare("SELECT 1 FROM pragma_table_info('admins') WHERE name = 'prefs'")?.exists([])? {
         conn.execute_batch("ALTER TABLE admins ADD COLUMN prefs TEXT NOT NULL DEFAULT '{}'")?;
     }
+    // Full-text search: the functions its triggers call, then the index, filled for records published before it.
+    crate::search::register(&conn)?;
+    conn.execute_batch(crate::search::SCHEMA)?;
+    crate::search::backfill(&conn)?;
     Ok(conn)
 }

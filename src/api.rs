@@ -24,6 +24,7 @@ pub fn router(app: Shared) -> Router {
         .route("/api/v1/site/bundle", post(site_bundle).layer(DefaultBodyLimit::max(crate::site::MAX_BUNDLE_BYTES)))
         .route("/api/v1/content/{collection}", get(list).post(submit).layer(DefaultBodyLimit::max(crate::access::MAX_SUBMIT_BYTES + 1024)))
         .route("/api/v1/content/{collection}/{id}", get(one))
+        .route("/api/v1/search", get(search))
         .route("/api/v1/media", post(upload).layer(DefaultBodyLimit::max(media::UPLOAD_BODY_LIMIT)))
         .route("/uploads/{*path}", get(serve))
         .layer(DefaultBodyLimit::max(MIB))
@@ -51,6 +52,45 @@ fn db(e: impl std::fmt::Display) -> Fail {
 
 async fn list(State(app): State<Shared>, Path(c): Path<String>, Query(p): Params, h: HeaderMap) -> Response {
     read(app, c, None, p, &h).await
+}
+
+/// `GET /api/v1/search?q=…&collection=…&limit=…`: published records matching `q` that the caller may read (a key
+/// sees every live collection, a member what members may see, anyone else the public ones).
+async fn search(State(app): State<Shared>, Query(p): Params, h: HeaderMap) -> Response {
+    let get = |k: &str| p.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+    let (q, only) = (get("q").unwrap_or_default(), get("collection"));
+    let limit = get("limit").and_then(|l| l.parse::<usize>().ok()).unwrap_or(20).clamp(1, 50);
+    let key = bearer(&h);
+    let token = crate::web::session::cookie_value(&h, crate::members::COOKIE);
+    let done = tokio::task::spawn_blocking(move || {
+        let conn = app.conn();
+        let viewer = crate::access::viewer(&conn, key.as_deref(), token.as_deref());
+        let hits = crate::search::search(&conn, &q, only.as_deref(), viewer, limit)?;
+        let mut items = vec![];
+        for hit in hits {
+            let (Ok(def), Ok(Some(doc))) = (
+                changes::live_def(&conn, &hit.collection),
+                conn.query_row("SELECT published FROM records WHERE id = ?1", [hit.id], |r| r.get::<_, Option<String>>(0)),
+            ) else { continue };
+            let mut data = crate::schema::project(&def, &serde_json::from_str(&doc).unwrap_or(Value::Null));
+            data["id"] = json!(hit.id);
+            items.push(json!({ "collection": hit.collection, "id": hit.id, "snippet": hit.snippet, "data": data }));
+        }
+        Ok::<_, String>((viewer, json!({ "items": items })))
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()));
+    match done {
+        Ok((viewer, v)) => {
+            let mut resp = Json(v).into_response();
+            // Without credentials the answer holds only public content, so any site may read it.
+            if viewer == crate::access::Viewer::Anon {
+                resp.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+            }
+            resp
+        }
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
 }
 
 /// `POST /api/v1/content/<collection>`: a visitor or a logged-in member adds a record, when the collection's

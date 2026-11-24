@@ -795,3 +795,5 @@ name 要是一段文字，或者 null 恢复默认。	name must be text, or null
 。	.
 修改网站设置	Change site settings
 设置会员登录	Set member login
+搜索 {}	Search {}
+搜索失败：{}	Search failed: {}

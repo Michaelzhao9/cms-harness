@@ -242,6 +242,7 @@ fn any_def(conn: &Connection, mode: Mode, name: &str) -> Result<Option<Collectio
 enum Ask {
     File(String),
     Records { collection: String, filter: Value, sort: Option<String>, limit: i64, offset: i64, id: Option<i64> },
+    Search { q: String, collection: Option<String>, limit: usize },
 }
 
 enum Answer {
@@ -302,6 +303,19 @@ impl Server<'_> {
                 Ok(Answer::File(Some(format!("{REG_OPEN}{path}{REG_MID}{n}{REG_END_HEAD}{source}{REG_CLOSE}"))))
             }
             Ask::Records { collection, filter, sort, limit, offset, id } => self.records(&collection, &filter, sort, limit, offset, id).map(Answer::Records),
+            Ask::Search { q, collection, limit } => {
+                let hits = crate::search::search(self.conn, &q, collection.as_deref(), self.viewer, limit)?;
+                let mut out = vec![];
+                for hit in hits {
+                    // The record as this render sees it (drafts in preview), plus where it came from.
+                    if let Some(mut rec) = self.records(&hit.collection, &Value::Null, None, 1, 0, Some(hit.id))?.into_iter().next() {
+                        rec.0.push(("_collection".into(), json!(hit.collection), false, None));
+                        rec.0.push(("_snippet".into(), json!(hit.snippet), false, None));
+                        out.push(rec);
+                    }
+                }
+                Ok(Answer::Records(out))
+            }
         }
     }
 
@@ -475,6 +489,14 @@ fn render_thread(asker: Asker, mode: Mode, page: &str, ctx: Value) -> Result<Str
         let recs = a.records(Ask::Records { collection: name, filter, sort, limit, offset, id: None })?;
         Ok(minijinja::Value::from(recs.into_iter().map(|r| to_template(r, &l)).collect::<Vec<_>>()))
     });
+    let (a, l) = (asker.clone(), last.clone());
+    env.add_function("search", move |q: String, kwargs: Kwargs| {
+        let collection = kwargs.get::<Option<String>>("collection")?;
+        let limit = kwargs.get::<Option<i64>>("limit")?.unwrap_or(20).clamp(1, 50) as usize;
+        kwargs.assert_all_used()?;
+        let recs = a.records(Ask::Search { q, collection, limit })?;
+        Ok(minijinja::Value::from(recs.into_iter().map(|r| to_template(r, &l)).collect::<Vec<_>>()))
+    });
     let (a, l) = (asker, last.clone());
     env.add_function("record", move |name: String, id: i64| {
         let recs = a.records(Ask::Records { collection: name, filter: Value::Null, sort: None, limit: 1, offset: 0, id: Some(id) })?;
@@ -504,7 +526,8 @@ pub struct Rendered {
 }
 
 /// Renders the template at `page` (a site file, or a built-in `_hc/` template) with `ctx` plus the site
-/// functions `collection(name, filter?, sort?, limit?, offset?)` and `record(collection, id)`. Lookups run on
+/// functions `collection(name, filter?, sort?, limit?, offset?)`, `record(collection, id)` and
+/// `search(q, collection?, limit?)` (published records this visitor may read, each with `_collection` and `_snippet`). Lookups run on
 /// `conn`, the caller's connection, so a render inside the publish transaction sees what is about to go live.
 pub fn render(conn: &Connection, mode: Mode, page: &str, ctx: Value) -> Result<Rendered, String> {
     let viewer = ctx["member"]["id"].as_i64().map_or(crate::access::Viewer::Anon, crate::access::Viewer::Member);

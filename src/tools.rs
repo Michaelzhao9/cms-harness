@@ -40,6 +40,7 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<DeleteRecord>("delete_record", Scope::Write, "删除记录；从未发布的记录直接消失，已发布的待发布时才真正删除。"),
             spec::<GetRecord>("get_record", Scope::Read, "按编号读取一条记录（有草稿时返回草稿）和状态。"),
             spec::<QueryRecords>("query_records", Scope::Read, "查询集合的记录（草稿视图）。filter 与 sort 只能用 id 或设置了 index/unique 的字段；status 可只看某几种状态的记录。"),
+            spec::<Search>("search", Scope::Read, "全文搜索已发布的记录（中文、英文都行），按相关度排序，返回集合、编号和命中的一小段文字。网站页面里用模板函数 search(q, collection=..., limit=...) 做站内搜索，访客只会搜到自己能看的内容。"),
             spec::<NoArgs>("list_pending", Scope::Read, "列出所有待发布的改动：改了什么、谁改的、波及多少记录。"),
             spec::<Publish>("publish", Scope::Publish, "把待发布的改动发布上线：全部，或只发 targets 里列出的几项。发布前整体检查，不通过就什么都不上线。"),
             spec::<TargetArgs>("list_versions", Scope::Read, "列出一个对象的发布历史（最近 30 个版本）。target 形如 record:12、collection:news。"),
@@ -140,6 +141,11 @@ fn dispatch(app: &App, conn: &Connection, actor: &Actor, name: &str, args: Value
         "delete_record" => delete_record(conn, actor, parse(name, args)?),
         "get_record" => get_record(conn, parse(name, args)?),
         "query_records" => query_records(conn, parse(name, args)?),
+        "search" => {
+            let a: Search = parse(name, args)?;
+            let hits = crate::search::search(conn, &a.q, a.collection.as_deref(), crate::access::Viewer::Key, a.limit.unwrap_or(20).clamp(1, 50))?;
+            Ok(json!(hits.into_iter().map(|h| json!({ "collection": h.collection, "id": h.id, "snippet": h.snippet })).collect::<Vec<_>>()))
+        }
         "list_pending" => parse::<NoArgs>(name, args).and_then(|_| Ok(json!(changes::pending(conn)?))),
         "publish" => publish(conn, actor, parse(name, args)?),
         "list_versions" => list_versions(conn, parse(name, args)?),
@@ -924,6 +930,17 @@ fn upload_media(app: &App, a: UploadMedia) -> Result<Value, String> {
 #[serde(deny_unknown_fields)]
 struct PathArgs {
     path: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct Search {
+    /// What to look for: words or Chinese text.
+    q: String,
+    /// Only this collection.
+    collection: Option<String>,
+    /// At most this many hits, 1 to 50 (default 20).
+    limit: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
