@@ -36,7 +36,11 @@ async fn handle(State(log): State<Shared>, headers: HeaderMap, body: Bytes) -> i
 
 async fn server(replies: Vec<Canned>) -> (String, Shared) {
     let log: Shared = Arc::new(Mutex::new(Log { requests: vec![], replies: replies.into() }));
-    let app = Router::new().route("/v1/messages", post(handle)).route("/v1/chat/completions", post(handle)).with_state(log.clone());
+    let app = Router::new()
+        .route("/v1/messages", post(handle))
+        .route("/v1/chat/completions", post(handle))
+        .route("/v1/models", axum::routing::get(handle))
+        .with_state(log.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -225,4 +229,48 @@ fn settings_come_from_the_environment_and_hide_the_key() {
     assert_eq!(Settings::from_vars(vars(&[("LLM_PROVIDER", "openai"), ("LLM_MODEL", "qwen")])), None, "openai needs a base url");
     let s = Settings::from_vars(vars(&[("LLM_PROVIDER", "OpenAI"), ("LLM_MODEL", "qwen"), ("LLM_BASE_URL", "http://localhost:11434/v1")])).unwrap();
     assert_eq!((s.provider, s.api_key), (Provider::OpenAi, None));
+}
+
+#[tokio::test]
+async fn anthropic_models_are_listed_across_pages() {
+    let (base, log) = server(vec![
+        ok_json(json!({"data": [{"id": "claude-opus-5-5", "display_name": "Claude Opus 5.5"}], "has_more": true, "last_id": "claude-opus-5-5"})),
+        ok_json(json!({"data": [{"id": "claude-haiku-5-5", "display_name": "Claude Haiku 5.5"}], "has_more": false, "last_id": "claude-haiku-5-5"})),
+    ])
+    .await;
+    let s = Settings { provider: Provider::Anthropic, api_key: Some("sk-test".into()), model: String::new(), base_url: base };
+    let models = list_models(&s).await.unwrap();
+    assert_eq!(models.iter().map(|m| (m.id.as_str(), m.name.as_str())).collect::<Vec<_>>(), vec![("claude-opus-5-5", "Claude Opus 5.5"), ("claude-haiku-5-5", "Claude Haiku 5.5")]);
+    assert_eq!(default_model(Provider::Anthropic, &models).as_deref(), Some("claude-opus-5-5"));
+    let l = log.lock().unwrap();
+    assert_eq!(l.requests[0].0["x-api-key"], "sk-test");
+    assert_eq!(l.requests[0].0["anthropic-version"], "2026-10-21");
+}
+
+#[tokio::test]
+async fn openai_compatible_models_skip_non_chat_ones() {
+    let (base, log) = server(vec![ok_json(json!({"data": [{"id": "text-embedding-3"}, {"id": "qwen-max"}, {"id": "deepseek-chat"}, {"id": "whisper-1"}]}))]).await;
+    let s = Settings { provider: Provider::OpenAi, api_key: Some("k".into()), model: String::new(), base_url: format!("{base}/v1") };
+    let models = list_models(&s).await.unwrap();
+    assert_eq!(models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), vec!["deepseek-chat", "qwen-max"]);
+    assert_eq!(log.lock().unwrap().requests[0].0["authorization"], "Bearer k");
+}
+
+#[test]
+fn every_preset_is_usable_and_saved_settings_keep_the_key() {
+    for p in PRESETS {
+        assert!(p.id == "custom" || p.base_url.starts_with("https://") || p.base_url.starts_with("http://localhost"), "{}", p.id);
+    }
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    assert_eq!(load_saved(&conn).unwrap(), None);
+    assert!(save(&conn, "deepseek", "", "deepseek-chat", None).unwrap_err().contains("密钥"));
+    let s = save(&conn, "deepseek", "", "deepseek-chat", Some("sk-1")).unwrap();
+    assert_eq!((s.provider, s.base_url.as_str(), s.api_key.as_deref()), (Provider::OpenAi, "https://api.deepseek.com/v1", Some("sk-1")));
+    // Saving again without a key keeps the old one: the form never shows it back.
+    let s = save(&conn, "deepseek", "", "deepseek-reasoner", None).unwrap();
+    assert_eq!((s.model.as_str(), s.api_key.as_deref()), ("deepseek-reasoner", Some("sk-1")));
+    assert_eq!(load_saved(&conn).unwrap().unwrap().0, "deepseek");
+    assert!(save(&conn, "ollama", "http://localhost:11434/v1", "qwen3", None).is_ok(), "local models need no key");
+    assert!(save(&conn, "custom", "ftp://x", "m", None).unwrap_err().contains("http"));
+    assert!(save(&conn, "nope", "", "m", None).is_err());
 }

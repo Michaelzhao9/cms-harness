@@ -113,6 +113,10 @@ fn serve(conn: rusqlite::Connection, data: PathBuf, port: String) -> ExitCode {
     }
     let origin = env("HC_ORIGIN", &format!("http://127.0.0.1:{port}"));
     let app = App::new(conn, data, origin.trim_end_matches('/').to_string(), env("HC_SITE_NAME", "harness-cms"));
+    let model = harness_cms::llm::effective(&app.conn());
+    if let Some(settings) = model {
+        app.set_model(settings.client());
+    }
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(r) => r,
         Err(e) => {

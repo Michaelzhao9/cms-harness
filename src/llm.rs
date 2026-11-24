@@ -186,8 +186,8 @@ fn http() -> reqwest::Client {
     reqwest::Client::builder().timeout(REQUEST_TIMEOUT).build().expect("http client")
 }
 
-/// POST with up to two retries on 429, 5xx and connection errors, honouring `retry-after` (capped at 30 s).
-async fn post_with_retries(build: impl Fn() -> reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
+/// Sends with up to two retries on 429, 5xx and connection errors, honouring `retry-after` (capped at 30 s).
+async fn send_with_retries(build: impl Fn() -> reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
     let mut attempt = 0;
     loop {
         let wait = match build().send().await {
@@ -255,7 +255,7 @@ impl Anthropic {
     async fn post(&self, body: &Value) -> Result<reqwest::Response, String> {
         let url = format!("{}/v1/messages", self.settings.base_url.trim_end_matches('/'));
         let key = self.settings.api_key.clone().unwrap_or_default();
-        post_with_retries(|| {
+        send_with_retries(|| {
             self.http
                 .post(&url)
                 .header("x-api-key", &key)
@@ -572,7 +572,7 @@ impl Model for OpenAiCompatible {
         Box::pin(async move {
             let url = format!("{}/chat/completions", self.settings.base_url.trim_end_matches('/'));
             let body = self.body(system, tools, messages);
-            let resp = post_with_retries(|| {
+            let resp = send_with_retries(|| {
                 let req = self.http.post(&url).header("content-type", "application/json").json(&body);
                 match &self.settings.api_key {
                     Some(k) => req.bearer_auth(k),
@@ -584,4 +584,174 @@ impl Model for OpenAiCompatible {
             parse_openai(v)
         })
     }
+}
+
+// ---------- Providers and model discovery ----------
+
+/// A known service. Everything except Anthropic speaks the OpenAI-compatible chat API.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Preset {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub provider: Provider,
+    pub base_url: &'static str,
+    pub needs_key: bool,
+}
+
+const fn openai(id: &'static str, name: &'static str, base_url: &'static str, needs_key: bool) -> Preset {
+    Preset { id, name, provider: Provider::OpenAi, base_url, needs_key }
+}
+
+pub const PRESETS: &[Preset] = &[
+    Preset { id: "anthropic", name: "Anthropic Claude", provider: Provider::Anthropic, base_url: DEFAULT_ANTHROPIC_URL, needs_key: true },
+    openai("openai", "OpenAI", "https://api.openai.com/v1", true),
+    openai("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", true),
+    openai("deepseek", "DeepSeek 深度求索", "https://api.deepseek.com/v1", true),
+    openai("qwen", "通义千问（阿里云百炼）", "https://dashscope.aliyuncs.com/compatible-mode/v1", true),
+    openai("moonshot", "Kimi（月之暗面）", "https://api.moonshot.cn/v1", true),
+    openai("zhipu", "智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", true),
+    openai("doubao", "豆包（火山方舟）", "https://ark.cn-beijing.volces.com/api/v3", true),
+    openai("siliconflow", "硅基流动", "https://api.siliconflow.cn/v1", true),
+    openai("mistral", "Mistral", "https://api.mistral.ai/v1", true),
+    openai("xai", "xAI Grok", "https://api.x.ai/v1", true),
+    openai("groq", "Groq", "https://api.groq.com/openai/v1", true),
+    openai("openrouter", "OpenRouter（几百个模型）", "https://openrouter.ai/api/v1", true),
+    openai("ollama", "Ollama（本机）", "http://localhost:11434/v1", false),
+    openai("lmstudio", "LM Studio（本机）", "http://localhost:1234/v1", false),
+    openai("custom", "其他兼容 OpenAI 的接口", "", false),
+];
+
+pub fn preset(id: &str) -> Option<&'static Preset> {
+    PRESETS.iter().find(|p| p.id == id)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelInfo {
+    pub id: String,
+    /// What the service calls it, when it says.
+    pub name: String,
+}
+
+/// Models that cannot chat (embeddings, speech, images, moderation) are left out of the list.
+fn chat_capable(id: &str) -> bool {
+    let id = id.to_ascii_lowercase();
+    !["embed", "whisper", "tts", "dall-e", "moderation", "transcribe", "rerank", "audio"].iter().any(|w| id.contains(w))
+}
+
+/// Asks the service which models this key can use. Needs the base URL and, for most services, the key;
+/// the model in `settings` is ignored.
+pub async fn list_models(settings: &Settings) -> Result<Vec<ModelInfo>, String> {
+    let http = reqwest::Client::builder().timeout(Duration::from_secs(20)).build().map_err(|e| e.to_string())?;
+    let base = settings.base_url.trim_end_matches('/');
+    if base.is_empty() {
+        return Err("请先填接口地址。".into());
+    }
+    let key = settings.api_key.clone().unwrap_or_default();
+    let mut out = vec![];
+    match settings.provider {
+        Provider::Anthropic => {
+            let mut after: Option<String> = None;
+            loop {
+                let mut url = format!("{base}/v1/models?limit=100");
+                if let Some(a) = &after {
+                    url.push_str(&format!("&after_id={a}"));
+                }
+                let resp = send_with_retries(|| http.get(&url).header("x-api-key", &key).header("anthropic-version", ANTHROPIC_VERSION)).await?;
+                let v: Value = resp.json().await.map_err(|e| format!("模型列表读不懂：{e}"))?;
+                for m in v["data"].as_array().into_iter().flatten() {
+                    let id = m["id"].as_str().unwrap_or("").to_string();
+                    out.push(ModelInfo { name: m["display_name"].as_str().unwrap_or(&id).to_string(), id });
+                }
+                match (v["has_more"].as_bool(), v["last_id"].as_str()) {
+                    (Some(true), Some(last)) if out.len() < 1000 => after = Some(last.to_string()),
+                    _ => break,
+                }
+            }
+        }
+        Provider::OpenAi => {
+            let url = format!("{base}/models");
+            let resp = send_with_retries(|| {
+                let req = http.get(&url);
+                if key.is_empty() { req } else { req.bearer_auth(&key) }
+            })
+            .await?;
+            let v: Value = resp.json().await.map_err(|e| format!("模型列表读不懂：{e}"))?;
+            for m in v["data"].as_array().into_iter().flatten() {
+                let id = m["id"].as_str().unwrap_or("").to_string();
+                if !id.is_empty() && chat_capable(&id) {
+                    out.push(ModelInfo { name: m["name"].as_str().unwrap_or(&id).to_string(), id });
+                }
+            }
+            out.sort_by(|a, b| a.id.cmp(&b.id));
+        }
+    }
+    if out.is_empty() {
+        return Err("接口没有返回可用的模型：请检查密钥，或者直接填模型名。".into());
+    }
+    Ok(out)
+}
+
+/// The model picked when the admin has not chosen one: Claude's default if offered, else the first listed.
+pub fn default_model(provider: Provider, models: &[ModelInfo]) -> Option<String> {
+    if provider == Provider::Anthropic && models.iter().any(|m| m.id == DEFAULT_MODEL) {
+        return Some(DEFAULT_MODEL.into());
+    }
+    models.first().map(|m| m.id.clone())
+}
+
+// ---------- Settings saved from the admin ----------
+
+fn ensure_table(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS llm_settings (id INTEGER PRIMARY KEY CHECK (id = 1), preset TEXT NOT NULL, base_url TEXT NOT NULL,
+         model TEXT NOT NULL, api_key TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')))",
+        [],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("准备模型设置表失败：{e}"))
+}
+
+/// What the admin saved, if anything: (preset id, settings).
+pub fn load_saved(conn: &rusqlite::Connection) -> Result<Option<(String, Settings)>, String> {
+    ensure_table(conn)?;
+    use rusqlite::OptionalExtension;
+    conn.query_row("SELECT preset, base_url, model, api_key FROM llm_settings WHERE id = 1", [], |r| {
+        let preset_id: String = r.get(0)?;
+        let provider = preset(&preset_id).map(|p| p.provider).unwrap_or(Provider::OpenAi);
+        Ok((preset_id, Settings { provider, base_url: r.get(1)?, model: r.get(2)?, api_key: r.get(3)? }))
+    })
+    .optional()
+    .map_err(|e| format!("读取模型设置失败：{e}"))
+}
+
+/// Saves the admin's choice. `api_key: None` keeps the key already saved (the form never shows it back).
+pub fn save(conn: &rusqlite::Connection, preset_id: &str, base_url: &str, model: &str, api_key: Option<&str>) -> Result<Settings, String> {
+    let p = preset(preset_id).ok_or("不认识这个模型服务。")?;
+    let base_url = if base_url.trim().is_empty() { p.base_url } else { base_url.trim() };
+    if !(base_url.starts_with("https://") || base_url.starts_with("http://")) {
+        return Err("接口地址要以 https:// 或 http:// 开头。".into());
+    }
+    if model.trim().is_empty() {
+        return Err("请选一个模型，或者直接填模型名。".into());
+    }
+    ensure_table(conn)?;
+    let key = match api_key.map(str::trim).filter(|k| !k.is_empty()) {
+        Some(k) => Some(k.to_string()),
+        None => load_saved(conn)?.and_then(|(_, s)| s.api_key),
+    };
+    if p.needs_key && key.is_none() {
+        return Err(format!("{} 需要密钥。", p.name));
+    }
+    conn.execute(
+        "INSERT INTO llm_settings (id, preset, base_url, model, api_key) VALUES (1, ?1, ?2, ?3, ?4)
+         ON CONFLICT(id) DO UPDATE SET preset = ?1, base_url = ?2, model = ?3, api_key = ?4, updated_at = datetime('now')",
+        rusqlite::params![preset_id, base_url.trim_end_matches('/'), model.trim(), key],
+    )
+    .map_err(|e| format!("保存模型设置失败：{e}"))?;
+    Ok(Settings { provider: p.provider, base_url: base_url.trim_end_matches('/').to_string(), model: model.trim().to_string(), api_key: key })
+}
+
+/// Environment settings win (the server operator's choice); otherwise what the admin saved.
+pub fn effective(conn: &rusqlite::Connection) -> Option<Settings> {
+    Settings::from_env().or_else(|| load_saved(conn).ok().flatten().map(|(_, s)| s))
 }
