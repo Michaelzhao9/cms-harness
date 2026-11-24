@@ -45,6 +45,8 @@ pub fn router(app: Shared) -> Router {
         .route("/admin/r/{id}/discard", post(content::discard))
         .route("/admin/media", get(content::media_library).post(content::upload).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
         .route("/admin/publish", get(admin::publish_review).post(admin::publish))
+        .route("/admin/publish/schedule", post(admin::schedule))
+        .route("/admin/publish/schedule/{id}/cancel", post(admin::cancel_schedule))
         .route("/admin/releases", get(admin::release_history))
         .route("/admin/restore", post(admin::restore))
         .route("/admin/settings", get(settings::page))

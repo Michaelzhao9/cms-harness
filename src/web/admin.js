@@ -546,3 +546,10 @@ document.addEventListener('submit', async (e) => {
   const k = $('#m-key');
   if (k) k.value = key;
 });
+
+// Scheduled publishing: the time field is in the browser's zone, the server keeps UTC.
+for (const tz of document.querySelectorAll('[data-tz]')) tz.value = String(-new Date().getTimezoneOffset());
+for (const t of document.querySelectorAll('time[data-utc]')) {
+  const d = new Date(t.getAttribute('datetime'));
+  if (!Number.isNaN(d.getTime())) t.textContent = d.toLocaleString(document.documentElement.lang === 'en' ? 'en' : 'zh-CN', { dateStyle: 'medium', timeStyle: 'short' });
+}

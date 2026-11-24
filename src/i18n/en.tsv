@@ -825,3 +825,21 @@ name 要是一段文字，或者 null 恢复默认。	name must be text, or null
 创建备份目录失败：{}	Could not create the backups folder: {}
 这个数据库在内存里，不能恢复。	This database lives in memory and cannot be restored.
 打开恢复后的数据库失败：{}。恢复前的整站备份在 {}。	Could not open the restored database: {}. The site as it was before is saved at {}.
+或者定时发布	Or publish later
+定时发布	Scheduled publishing
+到时间按同样的检查发布，记在发布记录里。	At that time it publishes with the same checks and goes into the release history.
+处改动	changes
+所有待发布的改动	everything pending
+等待中	Waiting
+没发布成功	Failed
+已取消	Cancelled
+你没有发布权限，不能取消定时发布。	You may not publish, so you cannot cancel a scheduled publish.
+读写定时发布失败：{}	Could not read or write the schedule: {}
+时间“{}”看不懂：请写成 2026-12-01 09:00 这样。	Could not read the time “{}”: write it like 2026-12-01 09:00.
+定时发布的时间要在将来。	The time must be in the future.
+定时发布最远排到一年以后。	A publish can be scheduled at most a year ahead.
+“{}”没有发布权限，不能定时发布。	“{}” may not publish, so it cannot schedule a publish.
+没有选要定时发布的改动。	No changes are checked for the scheduled publish.
+没有等待中的定时发布 {}：它可能已经发布或取消了。	There is no waiting scheduled publish {}: it may have run or been cancelled.
+“{}”已经不在了或没有发布权限了。	“{}” no longer exists or may no longer publish.
+定时发布出错：{}	Scheduled publishing failed: {}

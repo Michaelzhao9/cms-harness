@@ -267,7 +267,10 @@ fn publish_page(app: &App, user: &AdminUser, checked: Option<&[String]>, note: &
         }
     };
     let status = if error.is_some() { StatusCode::BAD_REQUEST } else { StatusCode::OK };
-    let ctx = json!({ "items": items, "check": check, "publishable": publishable.len(), "note": note, "error": error });
+    let schedules = crate::schedule::list(&app.conn()).map_err(content::internal)?;
+    let can_publish = actor.can(crate::auth::Scope::Publish);
+    let ctx = json!({ "items": items, "check": check, "publishable": publishable.len(), "note": note, "error": error,
+        "schedules": schedules, "can_publish": can_publish });
     Ok(Out::Page(status, "publish.html", content::shell(app, user, "publish", ctx)))
 }
 
@@ -348,6 +351,46 @@ pub async fn publish(State(app): State<Shared>, Extension(user): Extension<Admin
         match content::tool(&app, &user, "publish", json!({ "targets": targets, "note": note })) {
             Ok(r) => Ok(Out::Go(format!("/admin/publish?done={}", r["release_id"]))),
             Err(e) => publish_page(&app, &user, Some(&targets), &note, Some(e)),
+        }
+    })
+    .await
+}
+
+/// `POST /admin/publish/schedule`: the checked changes go live at the time given (in the browser's zone, `tz` minutes
+/// ahead of UTC; admin.js fills it in, UTC without it).
+pub async fn schedule(State(app): State<Shared>, Extension(user): Extension<AdminUser>, req: Request) -> Response {
+    let posted = match content::checked(&user, req).await {
+        Ok(p) => p,
+        Err(o) => return o.into_response(),
+    };
+    content::blocking(move || {
+        let targets = posted.fields.get("target").cloned().unwrap_or_default();
+        let note = posted.note(PUBLISH_NOTE);
+        let tz = posted.one("tz").trim().parse::<i64>().unwrap_or(0).clamp(-14 * 60, 14 * 60);
+        let made = {
+            let conn = app.conn();
+            crate::schedule::normalize(&conn, posted.one("at"), tz).and_then(|at| crate::schedule::create(&conn, &user.actor(), &at, Some(targets.clone()), &note))
+        };
+        match made {
+            Ok(_) => Ok(Out::Go("/admin/publish?scheduled=1".into())),
+            Err(e) => publish_page(&app, &user, Some(&targets), &note, Some(e)),
+        }
+    })
+    .await
+}
+
+/// `POST /admin/publish/schedule/<id>/cancel`.
+pub async fn cancel_schedule(State(app): State<Shared>, Extension(user): Extension<AdminUser>, axum::extract::Path(id): axum::extract::Path<i64>, req: Request) -> Response {
+    if let Err(o) = content::checked(&user, req).await {
+        return o.into_response();
+    }
+    content::blocking(move || {
+        if !user.actor().can(crate::auth::Scope::Publish) {
+            return publish_page(&app, &user, None, PUBLISH_NOTE, Some("你没有发布权限，不能取消定时发布。".into()));
+        }
+        match crate::schedule::cancel(&app.conn(), id) {
+            Ok(()) => Ok(Out::Go("/admin/publish".into())),
+            Err(e) => publish_page(&app, &user, None, PUBLISH_NOTE, Some(e)),
         }
     })
     .await

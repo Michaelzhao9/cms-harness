@@ -574,3 +574,18 @@ body.signin { background: #efeff1; }
 @media (max-width: 900px) { .signin-grid { grid-template-columns: 1fr; padding: 0; } .signin-art { display: none; }
   .signin-form { border-radius: 0; box-shadow: none; padding: 20px 20px 24px; min-height: 100vh; } .signin-head h1 { font-size: 32px; } }
 
+
+/* ---- scheduled publishing ---- */
+.review .later { display: flex; flex-direction: column; gap: 6px; padding-top: 14px; border-top: 1px solid var(--hair); }
+.review .later .field-row { display: flex; gap: 8px; }
+.review .later .in { flex-grow: 1; }
+.schedules { margin-top: 28px; }
+.schedules h2 { font-size: 17px; }
+.schedules ul { display: flex; flex-direction: column; }
+.sched { display: flex; align-items: baseline; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--hair); font-size: 14px; }
+.sched .when { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.sched .grow { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sched .state { color: var(--muted); white-space: nowrap; }
+.sched.waiting .state { color: var(--mark-ink); }
+.sched.failed .state { color: var(--bad); }
+.sched.cancelled { opacity: .55; }

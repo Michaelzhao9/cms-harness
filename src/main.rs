@@ -232,6 +232,20 @@ fn serve(conn: rusqlite::Connection, data: PathBuf, port: String) -> ExitCode {
         }
     };
     runtime.block_on(async move {
+        // Scheduled publishes: checked every 20 seconds.
+        let ticker = app.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(20));
+            loop {
+                tick.tick().await;
+                let a = ticker.clone();
+                match tokio::task::spawn_blocking(move || cms_harness::schedule::run_due(&a.conn())).await {
+                    Ok(Err(e)) => eprintln!("定时发布出错：{e}"),
+                    Err(e) => eprintln!("定时发布出错：{e}"),
+                    Ok(Ok(_)) => {}
+                }
+            }
+        });
         let addr = format!("127.0.0.1:{port}");
         let listener = match tokio::net::TcpListener::bind(&addr).await {
             Ok(l) => l,

@@ -48,8 +48,27 @@
 {% if publishable -%}
 <div class="fd"><label class="lb" for="p-note">{{ "发布说明"|t }}</label><input class="in" id="p-note" type="text" name="note" value="{{ note|t }}"></div>
 <button type="submit" class="btn wide">{{ "发布勾选的改动"|t }}</button>
+<div class="later">
+<label class="lb" for="p-at">{{ "或者定时发布"|t }}</label>
+<div class="field-row"><input class="in" id="p-at" type="datetime-local" name="at" data-local-time><input type="hidden" name="tz" value="0" data-tz>
+<button type="submit" class="btn2" formaction="/admin/publish/schedule">{{ i.icon("clock", 16) }}{{ "定时发布"|t }}</button></div>
+<span class="small">{{ "到时间按同样的检查发布，记在发布记录里。"|t }}</span>
+</div>
 {%- endif %}
 </form>
+{% if schedules -%}
+<section class="review schedules" aria-labelledby="sch-h">
+<h2 id="sch-h">{{ "定时发布"|t }}</h2>
+<ul>
+{% for s in schedules %}<li class="sched {{ s.status }}">
+<span class="when"><time datetime="{{ s.at|replace(' ', 'T') }}Z" data-utc>{{ s.at }} UTC</time></span>
+<span class="grow">{% if s.targets %}{{ s.targets|length }} {{ "处改动"|t }}{% else %}{{ "所有待发布的改动"|t }}{% endif %}{% if s.note %} · {{ s.note|t }}{% endif %}<span class="by">{{ s.actor|t }}</span>{% if s.result %}<span class="by bad">{{ s.result|t }}</span>{% endif %}</span>
+<span class="state">{% if s.status == "waiting" %}{{ "等待中"|t }}{% elif s.status == "done" %}<a href="/admin/releases">{{ "已发布"|t }}</a>{% elif s.status == "failed" %}{{ "没发布成功"|t }}{% else %}{{ "已取消"|t }}{% endif %}</span>
+{% if s.status == "waiting" and can_publish %}<form method="post" action="/admin/publish/schedule/{{ s.id }}/cancel"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">{{ "取消"|t }}</button></form>{% endif %}
+</li>
+{% endfor %}</ul>
+</section>
+{%- endif %}
 {%- endif %}
 </div>
 {% endblock %}

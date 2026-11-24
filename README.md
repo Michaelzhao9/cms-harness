@@ -37,6 +37,7 @@ It needs no external services. One executable and one SQLite file serve the publ
 - **Skills.** Install a skill folder (with a `SKILL.md`) from GitHub or a zip. The chat reads it when the task needs it.
 - **Your agent, too.** A built-in MCP server and a REST API with scoped keys (`read`, `write`, `structure`, `publish`).
 - **Full-text search.** `search("query")` in a page, `GET /api/v1/search` and a `search` tool. Chinese works without a dictionary, and visitors only ever find what they may open.
+- **Scheduled publishing.** Pick a time on the review page, or call `schedule_publish`. When the time comes it goes through the same checks and history as a normal publish, as the person who scheduled it.
 - **Backup and restore.** The whole site (database and uploads) as one zip, from **Settings → Backup** or `cms-harness backup`. A restore checks the archive and saves the current site first.
 - **Chinese and English.** The admin switches in Settings. The chat replies in the admin's language. Built-in pages follow the visitor's browser, and have a 中文 / EN switch.
 
@@ -159,6 +160,7 @@ Only fields declared with `index` or `unique` can filter and sort.
 | `create_record` `update_record` `delete_record` | write | write records |
 | `list_pending` `list_versions` | read | pending changes, release history |
 | `publish` | publish | publish |
+| `schedule_publish` `cancel_schedule` / `list_schedules` | publish / read | publish at a set time |
 | `restore_version` `discard_draft` | write | put a version back as a draft, drop a draft |
 | `list_views` / `set_view` `delete_view` | read / structure | admin screens |
 | `get_site_notes` / `set_site_notes` | read / structure | notes for the assistant |

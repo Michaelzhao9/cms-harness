@@ -37,6 +37,7 @@
 - **技能。** 从 GitHub 或 zip 安装技能文件夹（带 `SKILL.md`），对话遇到相关的事会自己去读。
 - **你的 agent 也能接。** 内置 MCP 服务和 REST 接口，密钥分权限（`read`、`write`、`structure`、`publish`）。
 - **全文搜索。** 页面里用 `search("关键词")`，接口 `GET /api/v1/search`，还有 `search` 工具。中文不用词库也能搜，访客只会搜到自己能看的内容。
+- **定时发布。** 在「发布前看一遍」里选一个时间，或调用 `schedule_publish`。到时间按普通发布的检查和记录上线，发布人是设定它的人。
 - **备份和恢复。** 整站（数据库和上传的文件）打成一个 zip，在 **设置 → 备份** 下载，或运行 `cms-harness backup`。恢复前会先检查备份，并把现在的整站另存一份。
 - **中文和英文。** 后台在设置里切换，对话按管理员的语言回答。内置页面按访客的浏览器显示，也有 中文 / EN 切换。
 
@@ -159,6 +160,7 @@ cargo build --release
 | `create_record` `update_record` `delete_record` | write | 写记录 |
 | `list_pending` `list_versions` | read | 待发布的改动、发布历史 |
 | `publish` | publish | 发布 |
+| `schedule_publish` `cancel_schedule` / `list_schedules` | publish / read | 定时发布 |
 | `restore_version` `discard_draft` | write | 把历史版本放回草稿、丢弃草稿 |
 | `list_views` / `set_view` `delete_view` | read / structure | 后台界面 |
 | `get_site_notes` / `set_site_notes` | read / structure | 给助手看的站点说明 |
