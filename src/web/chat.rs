@@ -1,6 +1,7 @@
 //! The workbench: the site preview page, and the chat on every admin page — posting a message, starting over,
 //! stopping, the event stream, and the view that both the templates and `admin.js` render.
 
+use super::address::Address;
 use super::admin::back_to;
 use super::content::{self, Out};
 use super::session::AdminUser;
@@ -185,7 +186,7 @@ fn routes(app: &App) -> Vec<String> {
     out
 }
 
-pub async fn home(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Query(q): Query<Vec<(String, String)>>) -> Response {
+pub async fn home(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Extension(addr): Extension<Address>, Query(q): Query<Vec<(String, String)>>) -> Response {
     let get = |k: &str| q.iter().rev().find(|(key, _)| key == k).map_or("", |(_, v)| v.as_str()).to_string();
     let (p, w, v, marks) = (preview_path(&get("p")), get("w"), get("v"), get("marks") != "0");
     let width = if matches!(w.as_str(), "tablet" | "mobile") { w } else { "desktop".into() };
@@ -193,15 +194,20 @@ pub async fn home(State(app): State<Shared>, Extension(user): Extension<AdminUse
     let published = get("published") == "1";
     let chat_ctx = Some(get("ctx")).filter(|c| c.len() <= 200 && !c.contains(['<', '>', '"'])).filter(|c| !c.is_empty()).unwrap_or_else(|| format!("page:{p}"));
     content::blocking(move || {
-        let sep = if p.contains('?') { '&' } else { '?' };
         let link = |w: &str, v: &str, m: bool| format!("/admin?p={p}&w={w}&v={v}&marks={}", if m { 1 } else { 0 });
+        // Drafts come from the admin's own preview entry; 线上 is the live site itself (on its own origin in 分开).
+        let token = super::session::issue_preview(&app.conn(), &user.token_hash).map_err(content::internal)?;
+        let preview_base = format!("/_hc/preview/{token}");
+        // Only a checked origin goes into the page unescaped.
+        let live_base = if addr.admin.is_some() { super::address::normalize(&app.origin).unwrap_or_default() } else { String::new() };
         let ctx = json!({
             "workbench": true,
-            "origin": app.origin,
             "path": p,
             "home": p == "/",
-            "draft_src": format!("{p}{sep}preview=1"),
-            "live_src": p,
+            "preview_base": preview_base,
+            "live_base": live_base,
+            "draft_src": format!("{preview_base}{p}"),
+            "live_src": format!("{live_base}{p}"),
             "width": width,
             "version": version,
             "marks": marks,
@@ -228,15 +234,15 @@ fn from_script(headers: &HeaderMap) -> bool {
     headers.get("x-hc-fetch").is_some_and(|v| v == "1")
 }
 
-fn done(app: &App, headers: &HeaderMap) -> Response {
+fn done(addr: &Address, headers: &HeaderMap) -> Response {
     if from_script(headers) {
         StatusCode::NO_CONTENT.into_response()
     } else {
-        Redirect::to(&back_to(&app.origin, headers)).into_response()
+        Redirect::to(&back_to(&addr.here, headers)).into_response()
     }
 }
 
-pub async fn post(State(app): State<Shared>, Extension(user): Extension<AdminUser>, req: Request) -> Response {
+pub async fn post(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Extension(addr): Extension<Address>, req: Request) -> Response {
     let headers = req.headers().clone();
     let posted = match content::checked(&user, req).await {
         Ok(p) => p,
@@ -245,27 +251,27 @@ pub async fn post(State(app): State<Shared>, Extension(user): Extension<AdminUse
     let attachments = posted.files.iter().filter(|(input, _, _)| input == "files").map(|(_, name, bytes)| Attachment { filename: name.clone(), bytes: bytes.clone() }).collect();
     let ctx = Some(posted.one("ctx").trim().to_string()).filter(|c| !c.is_empty());
     match chat::start(app.clone(), &user, posted.one("text").to_string(), attachments, ctx) {
-        Ok(()) => done(&app, &headers),
+        Ok(()) => done(&addr, &headers),
         Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
     }
 }
 
-pub async fn new(State(app): State<Shared>, Extension(user): Extension<AdminUser>, req: Request) -> Response {
+pub async fn new(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Extension(addr): Extension<Address>, req: Request) -> Response {
     let headers = req.headers().clone();
     if let Err(o) = content::checked(&user, req).await {
         return o.into_response();
     }
     chat::reset(&app, &user.token_hash);
-    done(&app, &headers)
+    done(&addr, &headers)
 }
 
-pub async fn stop(State(app): State<Shared>, Extension(user): Extension<AdminUser>, req: Request) -> Response {
+pub async fn stop(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Extension(addr): Extension<Address>, req: Request) -> Response {
     let headers = req.headers().clone();
     if let Err(o) = content::checked(&user, req).await {
         return o.into_response();
     }
     chat::stop(&app, &user.token_hash);
-    done(&app, &headers)
+    done(&addr, &headers)
 }
 
 // ---- the event stream ----

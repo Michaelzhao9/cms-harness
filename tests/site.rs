@@ -220,7 +220,8 @@ async fn a_runaway_page_runs_out_of_fuel_and_shows_a_plain_error() {
     assert!(!body.contains("index.html") && !body.contains("1 + "), "{body}");
     // The same failure in preview names the problem.
     let (cookie, _) = admin_session(&app, "builder").await;
-    let (status, _, body) = page(&app, "/?preview=1", &[("cookie", &cookie)]).await;
+    let base = preview_base(&app, &cookie).await;
+    let (status, _, body) = page(&app, &format!("{base}/"), &[]).await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     assert!(body.contains("index.html"), "{body}");
 }
@@ -258,58 +259,158 @@ async fn the_import_map_is_injected_with_its_hash_and_script_origins_extend_the_
 // ---- preview ----
 
 #[tokio::test]
-async fn a_draft_template_shows_only_in_preview_and_only_for_an_admin() {
+async fn site_routes_serve_published_whatever_the_request_carries() {
+    let app = app();
+    write(&app, "index.html", "<h1>v1</h1>");
+    write(&app, "style.css", "p{color:red}");
+    write(&app, "app.js", "export const v = 1;");
+    publish_all(&app);
+    write(&app, "index.html", "<h1>v2</h1>");
+    write(&app, "style.css", "p{color:blue}");
+    write(&app, "app.js", "export const v = 2;");
+    write(&app, "new.css", "p{}");
+
+    let (cookie, _) = admin_session(&app, "builder").await;
+    // The old Task 6 preview key of this very session, as a browser might still hold it.
+    let hash = cms_harness::web::session::from_cookie(&app.conn(), &{ let mut m = HeaderMap::new(); m.insert(header::COOKIE, cookie.parse().unwrap()); m }).unwrap().token_hash;
+    use sha2::Digest;
+    let old_key = format!("hc_preview={}", hex::encode(sha2::Sha256::digest(format!("hc-preview:{hash}").as_bytes())));
+    let both = format!("{cookie}; {old_key}");
+    let carried: Vec<Vec<(&str, &str)>> = vec![
+        vec![],
+        vec![("cookie", &cookie)],
+        vec![("cookie", &both)],
+        vec![("cookie", &both), ("sec-fetch-site", "cross-site"), ("sec-fetch-dest", "iframe")],
+        vec![("cookie", &both), ("sec-fetch-site", "cross-site"), ("sec-fetch-dest", "style")],
+        vec![("cookie", &both), ("sec-fetch-site", "cross-site"), ("sec-fetch-dest", "script"), ("origin", "null")],
+        vec![("cookie", &both), ("sec-fetch-site", "same-origin"), ("sec-fetch-dest", "document")],
+    ];
+    for headers in &carried {
+        for path in ["/", "/?preview=1", "/?preview=live"] {
+            let (status, h, body) = page(&app, path, headers).await;
+            assert_eq!(status, StatusCode::OK, "{path} {headers:?}");
+            assert!(body.contains("v1") && !body.contains("v2") && !body.contains("/_hc/preview.js"), "{path} {headers:?}: {body}");
+            assert!(h.get(header::SET_COOKIE).is_none(), "{path} {headers:?}");
+            assert_eq!(h[header::CACHE_CONTROL], "no-cache", "{path} {headers:?}");
+            assert!(!csp(&h).contains("sandbox"), "{path} {headers:?}");
+        }
+        for (path, live) in [("/style.css", "p{color:red}"), ("/style.css?preview=1", "p{color:red}"), ("/app.js", "export const v = 1;")] {
+            assert_eq!(page(&app, path, headers).await.2, live, "{path} {headers:?}");
+        }
+        assert_eq!(page(&app, "/new.css?preview=1", headers).await.0, StatusCode::NOT_FOUND, "{headers:?}");
+    }
+}
+
+#[tokio::test]
+async fn the_admin_preview_serves_drafts_with_module_scripts_and_absolute_assets() {
     let app = app();
     write(&app, "index.html", "<h1>v1</h1>");
     write(&app, "style.css", "p{color:red}");
     publish_all(&app);
-    write(&app, "index.html", "<h1>v2</h1>");
-    write(&app, "style.css", "p{color:blue}");
-    write(&app, "new.css", "p{}");
+    // A Vite-like build: absolute paths everywhere, a module entry that imports a chunk by absolute path.
+    write(&app, "index.html", concat!(
+        "<!doctype html><html><head><title>t</title><link rel=\"stylesheet\" href=\"/style.css\">",
+        "<link rel=\"modulepreload\" href=\"/assets/chunk.js\"><script type=\"module\" src=\"/assets/app.js\"></script></head>",
+        "<body><h1>v2</h1><a href=\"/about\">关于</a><a href=\"https://example.com/x\">外</a><a href=\"//cdn.example/x\">cdn</a>",
+        "<a href='/blog/'>博客</a><img src=\"/img/a.png\" srcset=\"/img/a.png 1x, /img/b.png 2x\"><img src=\"/uploads/u.png\">",
+        "<a href=\"/api/v1/content/news\">api</a><a href=\"#top\">top</a><a href=\"rel.html\">rel</a>",
+        "<p style=\"background:url('/img/a.png')\">x</p><pre>1 < 2</pre></body></html>"));
+    write(&app, "style.css", "p{color:blue;background:url(/img/a.png)} @import \"/more.css\"; i{background:url(\"https://x.example/a.png\")}");
+    write(&app, "assets/app.js", "import { n } from \"/assets/chunk.js\"; console.log(n);");
+    write(&app, "assets/chunk.js", "export const n = 2;");
+    let png: &[u8] = b"\x89PNG\r\n\x1a\nA";
+    write(&app, "img/a.png", &b64(png));
+    write(&app, "about.html", "<p>关于草稿</p>");
 
-    for path in ["/", "/?preview=1", "/?preview=live"] {
-        let (_, h, body) = page(&app, path, &[]).await;
-        assert!(body.contains("v1") && !body.contains("/_hc/preview.js"), "{path}: {body}");
-        assert!(h.get(header::SET_COOKIE).is_none(), "{path}");
-    }
     let (cookie, _) = admin_session(&app, "builder").await;
-    let (_, h, body) = page(&app, "/", &[("cookie", &cookie)]).await;
-    assert!(body.contains("v1"), "an admin without ?preview sees the live site: {body}");
-    assert_eq!(h[header::CACHE_CONTROL], "no-cache");
-    let (_, _, body) = page(&app, "/?preview=live", &[("cookie", &cookie)]).await;
-    assert!(body.contains("v1"), "{body}");
-
-    let (status, h, body) = page(&app, "/?preview=1", &[("cookie", &cookie)]).await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("v2") && body.contains("<script src=\"/_hc/preview.js\"") && body.contains("href=\"/_hc/preview.css\""), "{body}");
-    assert_eq!(h[header::CACHE_CONTROL], "no-store");
-    assert!(csp(&h).starts_with("sandbox allow-scripts allow-forms allow-popups; default-src 'self';"), "{}", csp(&h));
-    // The preview cookie lets the sandboxed frame (which sends no admin cookie) fetch drafts.
-    let set = h[header::SET_COOKIE].to_str().unwrap();
-    assert!(set.starts_with("hc_preview=") && set.contains("HttpOnly") && set.contains("Secure") && set.contains("SameSite=None"), "{set}");
-    let preview = set.split(';').next().unwrap().to_string();
-
-    let framed = [("cookie", preview.as_str()), ("sec-fetch-site", "cross-site"), ("sec-fetch-dest", "style")];
-    assert_eq!(page(&app, "/style.css", &framed).await.2, "p{color:blue}");
-    assert_eq!(page(&app, "/new.css", &framed).await.0, StatusCode::OK);
-    assert_eq!(page(&app, "/style.css", &framed).await.1[header::CACHE_CONTROL], "no-store");
-    let nav = [("cookie", preview.as_str()), ("sec-fetch-site", "cross-site"), ("sec-fetch-dest", "iframe")];
-    assert!(page(&app, "/", &nav).await.2.contains("v2"));
-    assert!(page(&app, "/?preview=1", &[("cookie", preview.as_str())]).await.2.contains("v2"));
-    // The same cookie on ordinary browsing, or on a top-level visit from another site, shows the live site.
-    for headers in [vec![("cookie", preview.as_str())],
-                    vec![("cookie", preview.as_str()), ("sec-fetch-site", "same-origin"), ("sec-fetch-dest", "style")],
-                    vec![("cookie", preview.as_str()), ("sec-fetch-site", "cross-site"), ("sec-fetch-dest", "document")]] {
-        assert_eq!(page(&app, "/style.css", &headers).await.2, "p{color:red}", "{headers:?}");
-        assert!(page(&app, "/", &headers).await.2.contains("v1"), "{headers:?}");
+    let base = preview_base(&app, &cookie).await;
+    assert!(base.starts_with("/_hc/preview/") && base.len() >= "/_hc/preview/".len() + 32 && !base.ends_with('/'), "{base}");
+    // No cookie is needed: the sandboxed frame sends none, the token is in the path.
+    let (status, h, body) = page(&app, &format!("{base}/"), &[]).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("<h1>v2</h1>"), "{body}");
+    // The page's own absolute paths point into the preview; server routes, other hosts and relative links stay.
+    for needle in [format!("href=\"{base}/style.css\""), format!("href=\"{base}/assets/chunk.js\""), format!("src=\"{base}/assets/app.js\""),
+                   format!("href=\"{base}/about\""), format!("href='{base}/blog/'"), format!("src=\"{base}/img/a.png\""),
+                   format!("srcset=\"{base}/img/a.png 1x, {base}/img/b.png 2x\""), format!("url('{base}/img/a.png')"),
+                   "href=\"https://example.com/x\"".into(), "href=\"//cdn.example/x\"".into(), "src=\"/uploads/u.png\"".into(),
+                   "href=\"/api/v1/content/news\"".into(), "href=\"#top\"".into(), "href=\"rel.html\"".into(), "<pre>1 < 2</pre>".into(),
+                   "<link rel=\"stylesheet\" href=\"/_hc/preview.css\">".into(), format!("<script src=\"/_hc/preview.js\" data-hc-base=\"{base}\"")] {
+        assert!(body.contains(&needle), "missing {needle}: {body}");
     }
-    // A made-up key is ignored, and the key dies with the session.
-    let forged = [("cookie", "hc_preview=00ff"), ("sec-fetch-site", "cross-site"), ("sec-fetch-dest", "style")];
-    assert_eq!(page(&app, "/style.css", &forged).await.2, "p{color:red}");
-    let csrf = cms_harness::web::session::from_cookie(&app.conn(), &{ let mut m = HeaderMap::new(); m.insert(header::COOKIE, cookie.parse().unwrap()); m }).unwrap().csrf;
+    // The import map sends absolute module imports into the preview too, and the CSP allows exactly that map.
+    let start = body.find("<script type=\"importmap\">").expect(&body) + "<script type=\"importmap\">".len();
+    let inner = &body[start..start + body[start..].find("</script>").unwrap()];
+    let map: Value = serde_json::from_str(inner).unwrap();
+    assert_eq!(map["imports"]["/"], format!("{base}/"), "{map}");
+    assert_eq!(map["imports"]["/_hc/"], "/_hc/", "{map}");
+    use base64::Engine;
+    use sha2::Digest;
+    let hash = base64::engine::general_purpose::STANDARD.encode(sha2::Sha256::digest(inner.as_bytes()));
+    let policy = csp(&h);
+    assert!(policy.starts_with("sandbox allow-scripts allow-forms allow-popups; default-src 'self';") && policy.contains(&format!("'sha256-{hash}'")), "{policy}");
+    assert_eq!(h[header::CACHE_CONTROL], "no-store");
+    // An opaque-origin frame loads module scripts, fetches and fonts in CORS mode.
+    assert_eq!(h[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+
+    for (path, kind, want) in [("/assets/app.js", "text/javascript; charset=utf-8", "import { n } from \"/assets/chunk.js\"; console.log(n);"),
+                               ("/assets/chunk.js", "text/javascript; charset=utf-8", "export const n = 2;")] {
+        let (status, h, body) = page(&app, &format!("{base}{path}"), &[("origin", "null"), ("sec-fetch-dest", "script")]).await;
+        assert_eq!((status, h[header::CONTENT_TYPE].to_str().unwrap(), body.as_str()), (StatusCode::OK, kind, want), "{path}");
+        assert_eq!(h[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*", "{path}");
+        assert_eq!(h[header::CACHE_CONTROL], "no-store", "{path}");
+        assert!(csp(&h).starts_with("sandbox "), "{path}");
+    }
+    let (_, h, css) = page(&app, &format!("{base}/style.css"), &[]).await;
+    assert_eq!(css, format!("p{{color:blue;background:url({base}/img/a.png)}} @import \"{base}/more.css\"; i{{background:url(\"https://x.example/a.png\")}}"));
+    assert_eq!(h[header::CONTENT_TYPE], "text/css; charset=utf-8");
+    let (status, _, bytes) = fetch(&app, &format!("{base}/img/a.png"), &[]).await;
+    assert_eq!((status, bytes.as_slice()), (StatusCode::OK, png));
+    let (_, _, about) = page(&app, &format!("{base}/about"), &[]).await;
+    assert!(about.contains("关于草稿"), "{about}");
+    // Server routes are not part of the preview.
+    assert_eq!(page(&app, &format!("{base}/admin"), &[]).await.0, StatusCode::NOT_FOUND);
+    // Only GET.
+    let resp = cms_harness::api::router(app.clone()).oneshot(Request::post(format!("{base}/")).body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::METHOD_NOT_ALLOWED);
+    // The live site is untouched.
+    assert_eq!(page(&app, "/style.css", &[]).await.2, "p{color:red}");
+    assert_eq!(page(&app, "/assets/app.js", &[]).await.0, StatusCode::NOT_FOUND);
+    assert!(page(&app, "/", &[]).await.2.contains("v1"));
+}
+
+#[tokio::test]
+async fn a_foreign_or_expired_preview_token_gets_nothing() {
+    let app = app();
+    write(&app, "index.html", "<h1>v1</h1>");
+    publish_all(&app);
+    write(&app, "index.html", "<h1>v2</h1>");
+    let (cookie, csrf) = admin_session(&app, "builder").await;
+    let base = preview_base(&app, &cookie).await;
+    assert!(page(&app, &format!("{base}/"), &[]).await.2.contains("v2"));
+    // Without the slash the frame's relative links would break: it is added.
+    let (status, h, _) = page(&app, &base, &[]).await;
+    assert_eq!((status, h[header::LOCATION].to_str().unwrap()), (StatusCode::SEE_OTHER, format!("{base}/").as_str()));
+
+    let token = base.rsplit('/').next().unwrap().to_string();
+    let forged = format!("{}{}", &token[..token.len() - 1], if token.ends_with('0') { '1' } else { '0' });
+    for bad in [format!("/_hc/preview/{forged}/"), "/_hc/preview/00ff/".into(), "/_hc/preview/../".into(), "/_hc/preview/".into(),
+                format!("/_hc/preview/{}/", "0".repeat(token.len())), format!("/_hc/preview/{}/", token.to_uppercase())] {
+        let (status, h, body) = page(&app, &bad, &[("cookie", &cookie)]).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{bad}");
+        assert!(!body.contains("v2") && !body.contains("v1"), "{bad}: {body}");
+        assert_eq!(h[header::CACHE_CONTROL], "no-store", "{bad}");
+    }
+    // An expired token is dead, even with the admin's cookie.
+    app.conn().execute("UPDATE preview_tokens SET expires_at = datetime('now', '-1 minute')", []).unwrap();
+    let (status, _, body) = page(&app, &format!("{base}/"), &[("cookie", &cookie)]).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body.contains("预览") && !body.contains("v2"), "{body}");
+    // A token dies with its session.
+    let base = preview_base(&app, &cookie).await;
+    assert!(page(&app, &format!("{base}/"), &[]).await.2.contains("v2"));
     post_form(&app, "/admin/logout", Some(&(cookie.clone(), csrf)), &[]).await;
-    assert_eq!(page(&app, "/style.css", &framed).await.2, "p{color:red}");
-    assert!(page(&app, "/?preview=1", &[("cookie", &cookie)]).await.2.contains("v1"));
+    assert_eq!(page(&app, &format!("{base}/"), &[]).await.0, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -335,10 +436,11 @@ async fn changed_values_are_marked_in_preview_without_changing_template_logic() 
     let (na, nf) = (n(format!("record:{a}")), n(format!("record:{fresh}")));
 
     let (cookie, _) = admin_session(&app, "builder").await;
-    let (_, _, body) = page(&app, "/?preview=1", &[("cookie", &cookie)]).await;
+    let base = preview_base(&app, &cookie).await;
+    let (_, _, body) = page(&app, &format!("{base}/"), &[]).await;
     // Marks only in text, never inside a tag or a raw-text element.
     assert!(body.contains("<title>新标题</title>"), "{body}");
-    assert!(body.contains("<a title=\"新标题\" href=\"/n/a\">"), "{body}");
+    assert!(body.contains(&format!("<a title=\"新标题\" href=\"{base}/n/a\">")), "{body}");
     assert!(body.contains(&format!("<span data-hc-change=\"{na}\">新标题</span></a>")), "{body}");
     // Template logic sees the plain values.
     assert!(body.contains("<em>TAG</em>") && body.contains("<i>42</i>"), "{body}");
@@ -367,7 +469,8 @@ async fn a_changed_include_is_wrapped_in_a_region_and_a_changed_layout_marks_the
     let n = |t: &str| pending.iter().position(|p| p == t).unwrap() + 1;
 
     let (cookie, _) = admin_session(&app, "builder").await;
-    let (_, _, body) = page(&app, "/?preview=1", &[("cookie", &cookie)]).await;
+    let base = preview_base(&app, &cookie).await;
+    let (_, _, body) = page(&app, &format!("{base}/"), &[]).await;
     let part = n("file:part.html");
     assert!(body.contains(&format!("<hc-region data-hc-file=\"part.html\" data-hc-change=\"{part}\" style=\"display:contents\"><p>v2</p></hc-region>")), "{body}");
     // An include inside <head> is not wrapped; it and the layout are changes of the whole page.
@@ -399,7 +502,7 @@ async fn the_admin_frames_the_preview_in_a_sandbox_without_same_origin() {
     let app = app();
     let (cookie, _) = admin_session(&app, "builder").await;
     let (_, _, body) = get_with(&app, "/admin", Some(&cookie)).await;
-    assert!(body.contains("<iframe class=\"preview\" sandbox=\"allow-scripts allow-forms allow-popups\" src=\"/?preview=1\""), "{body}");
+    assert!(body.contains("<iframe class=\"preview\" sandbox=\"allow-scripts allow-forms allow-popups\" src=\"/_hc/preview/"), "{body}");
     assert!(!body.contains("allow-same-origin"), "{body}");
 }
 

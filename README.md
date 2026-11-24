@@ -96,6 +96,7 @@ cargo build --release
 | `HC_ORIGIN` | `http://127.0.0.1:<端口>` | 对外地址 |
 | `HC_SITE_NAME` | `CMS Harness` | 站点名称 |
 | `HC_ADMIN_PASSWORD` | 无 | `cms-harness admin` 使用的密码，不设则随机生成 |
+| `HC_ADMIN_ORIGIN` | 无 | 后台单独的网址（比如 `https://admin.example.com`），设了就是“分开网址”；设成 `off` 强制“同一个网址”。会盖过 设置 → 网址 里的选择。进不去后台时也可以运行 `cms-harness admin-origin off` 切回同一个网址，正在运行的服务马上生效 |
 
 ### 当前范围
 
@@ -157,7 +158,7 @@ Query parameters: `field=value` (equals); `field__ne`, `__gt`, `__gte`, `__lt`, 
 
 ### Environment
 
-`HC_PORT` (4200), `HC_DATA` (`data`), `HC_DB` (`<HC_DATA>/harness.db`), `HC_ORIGIN` (`http://127.0.0.1:<port>`), `HC_SITE_NAME` (`CMS Harness`), `HC_ADMIN_PASSWORD` (used by `cms-harness admin`; random when unset).
+`HC_PORT` (4200), `HC_DATA` (`data`), `HC_DB` (`<HC_DATA>/harness.db`), `HC_ORIGIN` (`http://127.0.0.1:<port>`), `HC_SITE_NAME` (`CMS Harness`), `HC_ADMIN_PASSWORD` (used by `cms-harness admin`; random when unset). `HC_ADMIN_ORIGIN`: the admin's own origin (e.g. `https://admin.example.com`) for separate site and admin addresses, or `off` to force one shared address; it overrides 设置 → 网址. `cms-harness admin-origin <url|off>` changes the saved choice and applies to a running server at once.
 
 ### Scope of this release
 

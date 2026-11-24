@@ -37,7 +37,7 @@
 <a class="ib sm marks" href="{{ links.marks|safe }}" aria-label="在草稿上标出改动" aria-pressed="{{ 'true' if marks else 'false' }}" data-marks>{{ i.icon("highlighter", 17) }}</a>
 <a class="btn publish" href="/admin/publish" data-publish{% if not chat.pending %} hidden{% endif %}>发布<span class="count">{{ chat.pending }}</span></a>
 </header>
-<div class="stage w-{{ width }} v-{{ version }}{% if not marks %} nomarks{% endif %}" data-stage>
+<div class="stage w-{{ width }} v-{{ version }}{% if not marks %} nomarks{% endif %}" data-stage data-preview="{{ preview_base|safe }}" data-live="{{ live_base|safe }}" data-path="{{ path|safe }}">
 <div class="frames">
 {% if version != "live" -%}
 <div class="frame">{% if version == "split" %}<span class="tag">草稿</span>{% endif %}<iframe class="preview" sandbox="allow-scripts allow-forms allow-popups" src="{{ draft_src|safe }}" title="网站预览：草稿" data-frame="draft"></iframe></div>

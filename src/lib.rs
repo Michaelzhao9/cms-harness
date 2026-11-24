@@ -16,6 +16,7 @@ pub mod web;
 use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
+use std::time::Instant;
 
 pub type Shared = Arc<App>;
 
@@ -32,6 +33,13 @@ pub struct App {
     model: RwLock<Option<Arc<dyn llm::Model>>>,
     /// The chat model the server's environment sets (`LLM_*`), set once at startup; 设置 shows it read-only.
     pub env_model: OnceLock<llm::Settings>,
+    /// `HC_ADMIN_ORIGIN` from the environment, set once at startup: `Some(origin)` forces 分开网址, `None`
+    /// (`off`) forces 同一个网址. Unset, the choice saved in 设置 → 网址 applies.
+    pub env_admin_origin: OnceLock<Option<String>>,
+    /// After a switch made here, admin requests on other hosts are still answered (GETs redirect) until then.
+    pub old_admin_until: Mutex<Option<Instant>>,
+    /// The one-time answer `/_hc/ping` gives while a switch checks that the new admin address reaches us.
+    pub ping_nonce: Mutex<Option<String>>,
 }
 
 impl App {
@@ -45,6 +53,9 @@ impl App {
             chat: chat::Store::default(),
             model: RwLock::new(None),
             env_model: OnceLock::new(),
+            env_admin_origin: OnceLock::new(),
+            old_admin_until: Mutex::new(None),
+            ping_nonce: Mutex::new(None),
         })
     }
 

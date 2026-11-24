@@ -84,7 +84,7 @@ async fn nav_lists_collections_and_their_views() {
     assert!(at("href=\"/admin/media\"") < at("href=\"/admin/releases\""));
     assert!(at("href=\"/admin/releases\"") < at("href=\"/admin/settings\""));
     // The home page frames the site preview.
-    assert!(body.contains("src=\"/?preview=1\""), "{body}");
+    assert!(frame_src(&body, "draft").starts_with("/_hc/preview/"), "{body}");
 
     // Editors see the same nav.
     let e = admin_session(&app, "editor").await;

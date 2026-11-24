@@ -324,6 +324,9 @@ let want = null; // a change to show once its page is ready
 let navIndex = 0;
 let pickOn = false;
 let marksOn = !stage?.classList.contains('nomarks');
+// Drafts come from the admin's preview entry (/_hc/preview/<token>); 线上 is the live site ('' or its origin).
+const previewBase = stage?.dataset.preview || '';
+const liveBase = stage?.dataset.live || '';
 
 function post(msg) {
   frame?.contentWindow?.postMessage(msg, '*');
@@ -335,15 +338,13 @@ function markColor() {
 
 function navTo(path) {
   if (!frame) return;
-  const sep = path.includes('?') ? '&' : '?';
-  frame.src = `${path}${sep}preview=1`;
+  frame.src = previewBase + path;
 }
 
 function reloadFrames() {
   for (const f of $$('[data-frame]')) {
-    const live = f.dataset.frame === 'live';
-    const path = page.path || new URL(f.src, location.href).pathname;
-    f.src = live ? path : `${path}${path.includes('?') ? '&' : '?'}preview=1`;
+    const path = page.path || stage?.dataset.path || '/';
+    f.src = (f.dataset.frame === 'live' ? liveBase : previewBase) + path;
   }
 }
 
@@ -413,7 +414,7 @@ function setPage(path) {
   const strong = $('[data-address] strong');
   if (strong) strong.hidden = path !== '/';
   const open = $('[data-open]');
-  if (open) open.href = `${path}${path.includes('?') ? '&' : '?'}preview=1`;
+  if (open) open.href = previewBase + path;
   const url = new URL(location.href);
   url.searchParams.set('p', path);
   history.replaceState(null, '', url);

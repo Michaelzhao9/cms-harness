@@ -1,8 +1,11 @@
 // cms-harness preview: draws change markers over the page and talks to the admin that frames it.
 //
-// The page runs in a sandbox without allow-same-origin, so its own origin is opaque ("null"). It never reaches the
-// admin's DOM: the only channel is postMessage with window.parent. Outgoing messages are addressed to the site's
-// origin (the admin lives there); incoming ones are accepted only from window.parent and from that origin.
+// The page is served under the admin's preview entry, /_hc/preview/<token>/… on the admin's own address, in a
+// sandbox without allow-same-origin, so its own origin is opaque ("null"). It never reaches the admin's DOM: the
+// only channel is postMessage with window.parent. Outgoing messages are addressed to the address it was served
+// from (the admin's); incoming ones are accepted only from window.parent and from that origin.
+// The server keeps the page's own absolute paths under the preview (attributes, CSS, the import map); this script
+// does the same for fetch() and XMLHttpRequest, and reports paths without the prefix.
 //
 // admin -> preview: {type:"hc:activate", n} {type:"hc:pick", on} {type:"hc:back"} {type:"hc:forward"} {type:"hc:mark-color", color}
 // preview -> admin: {type:"hc:ready", path, changes, canBack, canForward} {type:"hc:picked", items:[{path, selector, text, change}]}
@@ -13,14 +16,23 @@
   const framed = window.parent !== window;
   const script = document.currentScript;
   const pageChanges = ((script && script.dataset.hcPage) || "").split(",").filter(Boolean).map(Number);
+  const BASE = (script && script.dataset.hcBase) || "";
 
   const send = (msg) => { if (framed) window.parent.postMessage(msg, ORIGIN); };
 
-  // The page's path as a visitor sees it: without the preview switch.
+  // An absolute site path, moved under the preview; server routes and other hosts stay.
+  const SITE_PATH = /^\/(?![\/\\]|(?:admin|api|uploads|_hc|mcp)(?:[\/?#]|$))/;
+  const inPreview = (u) => (typeof u === "string" && BASE && SITE_PATH.test(u) ? BASE + u : u);
+  const realFetch = window.fetch;
+  if (realFetch) window.fetch = function (input, init) { return realFetch.call(window, inPreview(input), init); };
+  const realOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url, ...rest) { return realOpen.call(this, method, inPreview(url), ...rest); };
+
+  // The page's path as a visitor sees it: without the preview's prefix.
   const path = () => {
     const u = new URL(location.href);
-    u.searchParams.delete("preview");
-    return u.pathname + u.search + u.hash;
+    const p = BASE && u.pathname.startsWith(BASE) ? u.pathname.slice(BASE.length) || "/" : u.pathname;
+    return p + u.search + u.hash;
   };
 
   // ---- history: the frame's own stack, kept in window.name (it survives navigations; storage does not exist here) ----

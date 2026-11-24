@@ -92,7 +92,7 @@ pub(super) fn back_to(origin: &str, headers: &HeaderMap) -> String {
         .to_string()
 }
 
-pub async fn prefs(State(app): State<Shared>, Extension(user): Extension<AdminUser>, headers: HeaderMap, Form(f): Form<PrefsForm>) -> Response {
+pub async fn prefs(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Extension(addr): Extension<super::address::Address>, headers: HeaderMap, Form(f): Form<PrefsForm>) -> Response {
     if let Err(s) = session::check_csrf(&user, &f.csrf) {
         return (s, "表单已失效，请刷新页面后再试。").into_response();
     }
@@ -106,7 +106,7 @@ pub async fn prefs(State(app): State<Shared>, Extension(user): Extension<AdminUs
         .await
         .unwrap_or_else(|e| Err(format!("服务器内部错误：{e}")));
     match saved {
-        Ok(()) => Redirect::to(&back_to(&app.origin, &headers)).into_response(),
+        Ok(()) => Redirect::to(&back_to(&addr.here, &headers)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
 }

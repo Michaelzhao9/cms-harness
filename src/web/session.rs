@@ -127,35 +127,35 @@ pub fn from_cookie(conn: &Connection, headers: &HeaderMap) -> Option<AdminUser> 
     Some(user)
 }
 
-// ---- the site preview's key ----
+// ---- the site preview's tokens ----
 //
-// The admin frames the preview in a sandbox without `allow-same-origin`, so everything the frame requests comes
-// from an opaque origin: the `SameSite=Strict` session cookie is not sent. The preview key is a second cookie,
-// `SameSite=None`, derived from the session (it dies with it) and good for one thing only: reading drafts on the
-// site.
+// The admin frames the preview in a sandbox without `allow-same-origin`: everything the frame asks for comes from
+// an opaque origin and carries no cookie. So the preview lives under `/_hc/preview/<token>/…` on the admin's
+// address, and the token in the path is the whole permission: reading drafts, nothing else. Each workbench page
+// gets a fresh one. It dies with its session (logout, password change) and after an hour without use.
 
-pub const PREVIEW_COOKIE: &str = "hc_preview";
-
-/// The preview key of the session with this token hash.
-pub fn preview_key(token_hash: &str) -> String {
-    sha256_hex(&format!("hc-preview:{token_hash}"))
+/// A new preview token for the session with this token hash.
+pub fn issue_preview(conn: &Connection, token_hash: &str) -> Result<String, String> {
+    let db = |e: rusqlite::Error| format!("保存预览链接失败：{e}");
+    conn.execute("DELETE FROM preview_tokens WHERE expires_at <= datetime('now')", []).map_err(db)?;
+    let mut bytes = [0u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    let token = hex::encode(bytes);
+    conn.execute("INSERT INTO preview_tokens(token_hash, session, expires_at) VALUES(?1, ?2, datetime('now', '+1 hour'))", params![sha256_hex(&token), token_hash])
+        .map_err(db)?;
+    Ok(token)
 }
 
-/// The `Set-Cookie` value carrying a preview key. `Secure` is required with `SameSite=None`: it works on https
-/// (and Chrome takes it on http://127.0.0.1). Where third-party cookies are blocked, the browser may withhold it
-/// from the frame's stylesheets, scripts and images; those then come from the live site.
-pub fn preview_cookie(key: &str) -> String {
-    format!("{PREVIEW_COOKIE}={key}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=43200")
-}
-
-/// True when the request carries the preview key of a live admin session.
-// ponytail: scans live sessions (a handful); store the key hash in a column if sessions number in the thousands.
-pub fn has_preview_key(conn: &Connection, headers: &HeaderMap) -> bool {
-    let Some(key) = cookie_value(headers, PREVIEW_COOKIE) else { return false };
-    let Ok(mut stmt) = conn.prepare("SELECT token_hash FROM admin_sessions WHERE expires_at > datetime('now')") else { return false };
-    let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else { return false };
-    let found = rows.filter_map(Result::ok).any(|t| constant_eq(preview_key(&t).as_bytes(), key.as_bytes()));
-    found
+/// True when the token is live (and its session too); each use keeps it alive for another hour.
+pub fn use_preview(conn: &Connection, token: &str) -> bool {
+    let ok = token.len() == 32 && token.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    ok && conn
+        .execute(
+            "UPDATE preview_tokens SET expires_at = datetime('now', '+1 hour') WHERE token_hash = ?1 AND expires_at > datetime('now')
+             AND session IN (SELECT token_hash FROM admin_sessions WHERE expires_at > datetime('now'))",
+            [sha256_hex(token)],
+        )
+        .is_ok_and(|n| n == 1)
 }
 
 /// Stores one string preference on the admin account, kept across sessions.

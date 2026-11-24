@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS versions(id INTEGER PRIMARY KEY, release_id INTEGER N
 CREATE INDEX IF NOT EXISTS versions_target ON versions(target, id);
 CREATE TABLE IF NOT EXISTS admin_sessions(token_hash TEXT PRIMARY KEY, admin_id INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
   csrf TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')), expires_at TEXT NOT NULL, prefs TEXT NOT NULL DEFAULT '{}');
+CREATE TABLE IF NOT EXISTS preview_tokens(token_hash TEXT PRIMARY KEY,
+  session TEXT NOT NULL REFERENCES admin_sessions(token_hash) ON DELETE CASCADE, expires_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS login_attempts(key TEXT NOT NULL, at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE INDEX IF NOT EXISTS login_attempts_key ON login_attempts(key, at);
 ";

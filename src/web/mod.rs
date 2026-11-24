@@ -1,5 +1,6 @@
 //! The admin web UI: router, session gate, Origin check and security headers.
 
+pub mod address;
 pub mod admin;
 pub mod chat;
 pub mod content;
@@ -7,7 +8,8 @@ pub mod session;
 pub mod settings;
 pub mod site;
 
-use crate::{render, Shared};
+use crate::{render, App, Shared};
+use address::Address;
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
@@ -55,6 +57,7 @@ pub fn router(app: Shared) -> Router {
         .route("/admin/settings/model/detect", post(settings::detect_models))
         .route("/admin/settings/skills/install", post(settings::install_skill).layer(DefaultBodyLimit::max(settings::SKILL_BODY_LIMIT)))
         .route("/admin/settings/skills/{name}/{action}", post(settings::skill_action))
+        .route("/admin/settings/address", post(address::switch))
         .route("/admin/login", get(login_page).post(login))
         .route("/admin/logout", post(logout))
         .route("/admin/static/admin.css", get(css))
@@ -62,6 +65,9 @@ pub fn router(app: Shared) -> Router {
         .route("/admin/static/logo.svg", get(logo))
         .route("/_hc/preview.js", get(site::preview_js))
         .route("/_hc/preview.css", get(site::preview_css))
+        .route("/_hc/preview/", get(site::preview))
+        .route("/_hc/preview/{*rest}", get(site::preview))
+        .route("/_hc/ping", get(address::ping))
         .fallback(site::serve)
         .with_state(app)
 }
@@ -75,9 +81,10 @@ pub async fn guard(State(app): State<Shared>, mut req: Request, next: Next) -> R
         return next.run(req).await;
     }
     if req.method() == Method::POST {
+        let here = req.extensions().get::<Address>().map_or(app.origin.as_str(), |a| a.here.as_str());
         if let Some(origin) = req.headers().get(header::ORIGIN) {
-            if origin.as_bytes() != app.origin.as_bytes() {
-                return (StatusCode::FORBIDDEN, "请求来源与站点地址（HC_ORIGIN）不一致，已拒绝。请用 HC_ORIGIN 里的地址打开后台后再提交。").into_response();
+            if origin.as_bytes() != here.as_bytes() {
+                return (StatusCode::FORBIDDEN, format!("请求来源与后台地址（{here}）不一致，已拒绝。请用这个地址打开后台后再提交。")).into_response();
             }
         }
     }
@@ -96,20 +103,45 @@ pub async fn guard(State(app): State<Shared>, mut req: Request, next: Next) -> R
     }
 }
 
-/// Headers on every response; the admin CSP on `/admin` pages; HSTS on https.
-pub async fn security_headers(State(app): State<Shared>, req: Request, next: Next) -> Response {
-    let admin = req.uri().path().starts_with("/admin");
-    let mut resp = next.run(req).await;
+/// The front door, around everything. Reads where the admin lives, routes by Host in 分开 mode
+/// (`address::route`), hands the `Address` to the handlers, and sets the headers every response gets: the admin
+/// CSP on `/admin` pages, HSTS on https.
+pub async fn security_headers(State(app): State<Shared>, mut req: Request, next: Next) -> Response {
+    // ponytail: one small query per request, so `cms-harness admin-origin` applies to a running server at once;
+    // cache it for a second if this ever shows up in a profile.
+    let a = app.clone();
+    let admin = tokio::task::spawn_blocking(move || address::current(&a)).await.ok().flatten();
+    let path = req.uri().path().to_string();
+    let addr = match address::route(&app, admin, &req) {
+        Ok(addr) => addr,
+        Err(resp) => return headers(&app, &Address { admin: None, here: app.origin.clone() }, &path, *resp),
+    };
+    req.extensions_mut().insert(addr.clone());
+    let resp = next.run(req).await;
+    headers(&app, &addr, &path, resp)
+}
+
+fn headers(app: &App, addr: &Address, path: &str, mut resp: Response) -> Response {
     let h = resp.headers_mut();
     h.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     h.insert(header::REFERRER_POLICY, HeaderValue::from_static("strict-origin-when-cross-origin"));
-    h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("SAMEORIGIN"));
+    // In 分开 mode the admin frames the live site from its own origin: there the CSP's frame-ancestors decides
+    // (it names the admin), and X-Frame-Options, which can only say "same origin", is left out.
+    let csp_frames = h.get(header::CONTENT_SECURITY_POLICY).is_some_and(|v| v.to_str().unwrap_or_default().contains("frame-ancestors"));
+    if addr.admin.is_none() || !csp_frames {
+        h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("SAMEORIGIN"));
+    }
     h.insert("permissions-policy", HeaderValue::from_static("camera=(), microphone=(), geolocation=()"));
-    if app.secure_cookies {
+    if app.secure_cookies || addr.secure() {
         h.insert(header::STRICT_TRANSPORT_SECURITY, HeaderValue::from_static("max-age=31536000"));
     }
-    if admin {
-        h.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(ADMIN_CSP));
+    if path.starts_with("/admin") {
+        // 分开: the 线上 view frames the site's origin.
+        let csp = match &addr.admin {
+            Some(_) => HeaderValue::from_str(&ADMIN_CSP.replace("frame-src 'self';", &format!("frame-src 'self' {};", app.origin))).ok(),
+            None => None,
+        };
+        h.insert(header::CONTENT_SECURITY_POLICY, csp.unwrap_or(HeaderValue::from_static(ADMIN_CSP)));
     }
     resp
 }
@@ -158,7 +190,7 @@ struct LoginForm {
     password: String,
 }
 
-async fn login(State(app): State<Shared>, peer: Option<Extension<ConnectInfo<SocketAddr>>>, headers: HeaderMap, Form(f): Form<LoginForm>) -> Response {
+async fn login(State(app): State<Shared>, Extension(addr): Extension<Address>, peer: Option<Extension<ConnectInfo<SocketAddr>>>, headers: HeaderMap, Form(f): Form<LoginForm>) -> Response {
     let trust = std::env::var("HC_TRUST_PROXY").is_ok_and(|v| v == "1");
     let client = client_key(&headers, peer.map(|Extension(ConnectInfo(a))| a), trust);
     let a = app.clone();
@@ -167,7 +199,8 @@ async fn login(State(app): State<Shared>, peer: Option<Extension<ConnectInfo<Soc
         .unwrap_or_else(|e| Err(format!("服务器内部错误：{e}")));
     match done {
         Ok(token) => {
-            let cookie = session::session_cookie(&token, app.secure_cookies);
+            // Host-only (no Domain): in 分开 mode the cookie stays on the admin's host.
+            let cookie = session::session_cookie(&token, addr.secure());
             ([(header::SET_COOKIE, cookie)], Redirect::to("/admin")).into_response()
         }
         Err(e) => {
@@ -187,12 +220,12 @@ struct CsrfForm {
     csrf: String,
 }
 
-async fn logout(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Form(f): Form<CsrfForm>) -> Response {
+async fn logout(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Extension(addr): Extension<Address>, Form(f): Form<CsrfForm>) -> Response {
     if let Err(s) = session::check_csrf(&user, &f.csrf) {
         return (s, "表单已失效，请刷新页面后再试。").into_response();
     }
     crate::chat::reset(&app, &user.token_hash);
     let a = app.clone();
     let _ = tokio::task::spawn_blocking(move || session::logout(&a.conn(), &user.token_hash)).await;
-    ([(header::SET_COOKIE, session::clear_cookie(app.secure_cookies))], Redirect::to("/admin/login")).into_response()
+    ([(header::SET_COOKIE, session::clear_cookie(addr.secure()))], Redirect::to("/admin/login")).into_response()
 }

@@ -104,6 +104,8 @@ struct Extra {
     notes: Option<String>,
     /// The model form as posted (a detect, or a refused save).
     model: ModelForm,
+    /// The admin address as typed into a refused 网址 form.
+    address: Option<String>,
     saved: String,
 }
 
@@ -139,9 +141,12 @@ fn settings_page(app: &App, user: &AdminUser, extra: Extra) -> Result<Out, Out> 
     let notes = content::tool(app, user, "get_site_notes", json!({})).map_err(content::internal)?;
     let nav = super::admin::nav(&app.conn(), user, "settings");
     let status = if extra.error.is_some() { StatusCode::BAD_REQUEST } else { StatusCode::OK };
+    let address = super::address::section(app, extra.address);
     let ctx = json!({
-        "mcp_url": format!("{}/mcp", app.origin),
+        // Tools are the admin's, content is the site's (two different origins in 分开 mode).
+        "mcp_url": format!("{}/mcp", address["admin"].as_str().unwrap_or(&app.origin)),
         "api_url": format!("{}/api/v1/content/", app.origin),
+        "address": address,
         "keys": keys,
         "builder": builder,
         "new_key": extra.new_key.map(|(name, key)| json!({ "name": name, "key": key })),
@@ -165,6 +170,16 @@ fn settings_page(app: &App, user: &AdminUser, extra: Extra) -> Result<Out, Out> 
 
 fn refused(app: &App, user: &AdminUser, error: String) -> Result<Out, Out> {
     settings_page(app, user, Extra { error: Some(error), ..Default::default() })
+}
+
+/// The 网址 form refused, with what was typed.
+pub(super) fn address_refused(app: &App, user: &AdminUser, error: String, typed: String) -> Result<Out, Out> {
+    settings_page(app, user, Extra { error: Some(error), address: Some(typed), ..Default::default() })
+}
+
+/// The page after a switch, shown right here: the next request on this address may already be redirected.
+pub(super) fn address_saved(app: &App, user: &AdminUser) -> Result<Out, Out> {
+    settings_page(app, user, Extra { saved: "address".into(), ..Default::default() })
 }
 
 pub async fn page(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Query(q): Query<Vec<(String, String)>>) -> Response {
@@ -289,8 +304,8 @@ pub async fn reset_admin(State(app): State<Shared>, Extension(user): Extension<A
     .await
 }
 
-pub async fn remove_admin(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Path(id): Path<i64>, req: Request) -> Response {
-    let secure = app.secure_cookies;
+pub async fn remove_admin(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Extension(addr): Extension<super::address::Address>, Path(id): Path<i64>, req: Request) -> Response {
+    let secure = addr.secure();
     let mut resp = handle(app, user, req, true, move |app, user, _| {
         let removed = {
             let conn = app.conn();

@@ -148,7 +148,7 @@ async fn without_a_model_the_page_says_how_to_configure_one_and_the_rest_works()
     assert!(page.contains("还没有配置对话用的模型") && page.contains("href=\"/admin/settings#s-model\"") && page.contains("LLM_API_KEY"), "{page}");
     assert!(h[header::CONTENT_SECURITY_POLICY].to_str().unwrap().contains("script-src 'self'"));
     // The preview and the rest of the admin are there.
-    assert!(page.contains("sandbox=\"allow-scripts allow-forms allow-popups\"") && page.contains("src=\"/?preview=1\""), "{page}");
+    assert!(page.contains("sandbox=\"allow-scripts allow-forms allow-popups\"") && frame_src(&page, "draft").starts_with("/_hc/preview/"), "{page}");
     for path in ["/admin/c/news", "/admin/settings", "/admin/publish"] {
         let (status, _, page) = get_with(&app, path, Some(&s.0)).await;
         assert_eq!(status, StatusCode::OK, "{path}");
@@ -398,10 +398,20 @@ async fn admin_js_and_the_logo_are_served_and_pages_carry_only_the_external_scri
         assert!(page.contains("<script type=\"module\" src=\"/admin/static/admin.js?v="), "{path}");
     }
     let (_, _, split) = get_with(&app, "/admin?v=split&w=mobile&p=/news", Some(&s.0)).await;
-    assert!(split.contains("src=\"/news?preview=1\"") && split.contains("src=\"/news\"") && split.contains("w-mobile"), "{split}");
+    let (draft, live) = (frame_src(&split, "draft"), frame_src(&split, "live"));
+    assert!(draft.starts_with("/_hc/preview/") && draft.ends_with("/news") && split.contains("w-mobile"), "{split}");
+    // 线上 is the live site itself: no preview at all, whatever cookie the frame carries.
+    assert_eq!(live, "/news");
+    ok(&app, &builder(), "update_collection", json!({ "name": "news", "public_read": true, "note": "公开" }));
+    publish_all(&app);
+    ok(&app, &builder(), "update_record", json!({ "id": id, "data": { "title": "草稿标题" }, "note": "改" }));
+    let (_, _, live_page) = get_with(&app, &live, Some(&s.0)).await;
+    assert!(live_page.contains("旧标题") && !live_page.contains("草稿标题") && !live_page.contains("/_hc/preview.js"), "{live_page}");
+    let (_, _, draft_page) = get_with(&app, &draft, None).await;
+    assert!(draft_page.contains("草稿标题") && draft_page.contains("/_hc/preview.js"), "{draft_page}");
     // A preview path must stay on the site.
     let (_, _, odd) = get_with(&app, "/admin?p=https://evil.example/x", Some(&s.0)).await;
-    assert!(odd.contains("src=\"/?preview=1\"") && !odd.contains("evil.example"), "{odd}");
+    assert!(frame_src(&odd, "draft").ends_with('/') && !odd.contains("evil.example"), "{odd}");
 }
 
 #[tokio::test]

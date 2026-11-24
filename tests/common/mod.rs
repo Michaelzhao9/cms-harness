@@ -153,6 +153,21 @@ pub async fn post_form_with(app: &Shared, path: &str, session: Option<&(String, 
     send_text(app, req.body(axum::body::Body::from(form_encode(&all))).unwrap()).await
 }
 
+/// The `src` of the workbench iframe marked `data-frame="<which>"` (`draft` or `live`).
+pub fn frame_src(page: &str, which: &str) -> String {
+    let at = page.find(&format!("data-frame=\"{which}\"")).unwrap_or_else(|| panic!("no {which} frame: {page}"));
+    let tag = &page[page[..at].rfind("<iframe").unwrap()..at];
+    let s = tag.find("src=\"").unwrap() + 5;
+    tag[s..s + tag[s..].find('"').unwrap()].to_string()
+}
+
+/// The workbench's preview prefix (`/_hc/preview/<token>`) for this admin session, as the page hands it out.
+pub async fn preview_base(app: &Shared, cookie: &str) -> String {
+    let (_, _, page) = get_with(app, "/admin", Some(cookie)).await;
+    let at = page.find("data-preview=\"").unwrap_or_else(|| panic!("no preview base: {page}")) + "data-preview=\"".len();
+    page[at..at + page[at..].find('"').unwrap()].to_string()
+}
+
 /// Every `<script` on an admin page is the one external `admin.js`, with nothing inside; no inline styles.
 pub fn assert_only_admin_js(page: &str) {
     for (i, _) in page.match_indices("<script") {

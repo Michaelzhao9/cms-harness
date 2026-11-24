@@ -40,6 +40,35 @@
 {%- else %}<p class="small">只有搭建者可以新建或吊销密钥。</p>{% endif %}
 </section>
 
+<section aria-labelledby="s-address-h" id="s-address">
+<h2 id="s-address-h">网址</h2>
+{% if saved == "address" -%}
+{% if address.admin %}<p class="note good" role="status">已切换到分开网址。后台现在在 <a href="{{ address.admin }}/admin/login">{{ address.admin }}</a>，请到那里重新登录。这个旧地址 10 分钟内还会把你带过去，之后只剩网站。</p>
+{%- else %}<p class="note good" role="status">已切回同一个网址。后台现在在 <a href="{{ address.site }}/admin/login">{{ address.site }}/admin</a>，请到那里重新登录。</p>{% endif %}
+{%- endif %}
+<dl class="facts">
+<div><dt>网站</dt><dd>{{ address.site }}</dd></div>
+<div><dt>后台</dt><dd>{{ address.admin or address.site }}/admin</dd></div>
+</dl>
+{% if not address.admin -%}
+<div class="note warn" role="note"><p><strong>安全提示</strong>：现在网站和后台用的是同一个网址。网站上的脚本（不管是对话写的、你写的还是从别处拿来的）在你登录了后台的浏览器里运行时，可以冒充你操作后台：改内容、发布、建密钥。</p><p>只在网站上放你信得过的脚本。更稳妥的做法是选下面的“分开网址”，把后台放到单独的网址上。</p></div>
+{%- endif %}
+{% if address.env -%}
+<p class="small">网址由服务器的环境变量 HC_ADMIN_ORIGIN 设置，这里只能看。要换，请改环境变量后重启。</p>
+{%- elif builder -%}
+<form class="fields" method="post" action="/admin/settings/address">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="radios" role="radiogroup" aria-label="网站和后台的网址">
+<label class="radio"><input type="radio" name="mode" value="same"{% if not address.admin %} checked{% endif %}><span class="grow">同一个网址：网站和后台都在 {{ address.site }}</span></label>
+<label class="radio"><input type="radio" name="mode" value="separate"{% if address.admin %} checked{% endif %}><span class="grow">分开网址：后台放到自己的网址上，网站留在 {{ address.site }}</span></label>
+</div>
+<div class="fd"><label class="lb" for="ad-url">后台的网址<span class="req">选“分开网址”时填</span></label><input class="in mono" id="ad-url" type="url" name="admin_origin" value="{{ address.typed or address.admin or '' }}" placeholder="https://admin.example.com"></div>
+<p class="small">切换前先做好这一步：{{ address.setup }} 保存时会先检查这个网址确实能访问到这台服务器，检查不过就不切换。</p>
+<div class="actions"><button type="submit" class="btn">检查并保存</button><span class="small">进不去后台时，在服务器上运行 cms-harness admin-origin off 就能切回同一个网址。</span></div>
+</form>
+{%- else %}<p class="small">只有搭建者可以改网址。</p>{% endif %}
+</section>
+
 <section aria-labelledby="s-model-h" id="s-model">
 <h2 id="s-model-h">对话用的模型</h2>
 {% if saved == "model" %}<p class="note good" role="status">已保存，左边的对话马上就用它。</p>{% endif %}
