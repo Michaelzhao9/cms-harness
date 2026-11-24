@@ -388,7 +388,9 @@ pub async fn cancel_schedule(State(app): State<Shared>, Extension(user): Extensi
         if !user.actor().can(crate::auth::Scope::Publish) {
             return publish_page(&app, &user, None, PUBLISH_NOTE, Some("你没有发布权限，不能取消定时发布。".into()));
         }
-        match crate::schedule::cancel(&app.conn(), id) {
+        // The lock is released before the page below takes it again.
+        let cancelled = crate::schedule::cancel(&app.conn(), id);
+        match cancelled {
             Ok(()) => Ok(Out::Go("/admin/publish".into())),
             Err(e) => publish_page(&app, &user, None, PUBLISH_NOTE, Some(e)),
         }

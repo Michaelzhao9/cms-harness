@@ -94,10 +94,11 @@ pub async fn guard(State(app): State<Shared>, req: Request, next: Next) -> Respo
     plain_in(lang, resp).await
 }
 
-/// A plain-text reply (the errors handlers send) in `lang`. HTML pages translate themselves.
+/// A plain-text error a handler sent, in `lang`. HTML pages translate themselves; successful replies (a site's own
+/// `.txt` files among them) pass through untouched.
 async fn plain_in(lang: crate::i18n::Lang, resp: Response) -> Response {
     let plain = resp.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(|v| v.starts_with("text/plain"));
-    if lang == crate::i18n::Lang::Zh || !plain {
+    if lang == crate::i18n::Lang::Zh || !plain || !(resp.status().is_client_error() || resp.status().is_server_error()) {
         return resp;
     }
     let (mut parts, body) = resp.into_parts();

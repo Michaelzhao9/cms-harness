@@ -10,13 +10,13 @@ use std::collections::HashMap;
 
 /// The schema, after `register` has added the functions the triggers call.
 pub const SCHEMA: &str = "
-CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(terms, body UNINDEXED, tokenize = 'unicode61');
+CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(terms, tokenize = 'unicode61');
 CREATE TRIGGER IF NOT EXISTS records_search_insert AFTER INSERT ON records WHEN new.published IS NOT NULL BEGIN
-  INSERT INTO search(rowid, terms, body) VALUES (new.id, hc_terms(hc_text(new.published)), hc_text(new.published));
+  INSERT INTO search(rowid, terms) VALUES (new.id, hc_terms(hc_text(new.published)));
 END;
 CREATE TRIGGER IF NOT EXISTS records_search_update AFTER UPDATE OF published ON records BEGIN
   DELETE FROM search WHERE rowid = old.id;
-  INSERT INTO search(rowid, terms, body) SELECT new.id, hc_terms(hc_text(new.published)), hc_text(new.published) WHERE new.published IS NOT NULL;
+  INSERT INTO search(rowid, terms) SELECT new.id, hc_terms(hc_text(new.published)) WHERE new.published IS NOT NULL;
 END;
 CREATE TRIGGER IF NOT EXISTS records_search_delete AFTER DELETE ON records BEGIN
   DELETE FROM search WHERE rowid = old.id;
@@ -32,7 +32,7 @@ pub fn register(conn: &Connection) -> rusqlite::Result<()> {
 /// Indexes the published records an older database already has.
 pub fn backfill(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute(
-        "INSERT INTO search(rowid, terms, body) SELECT id, hc_terms(hc_text(published)), hc_text(published) FROM records
+        "INSERT INTO search(rowid, terms) SELECT id, hc_terms(hc_text(published)) FROM records
          WHERE published IS NOT NULL AND id NOT IN (SELECT rowid FROM search)",
         [],
     )?;
@@ -148,30 +148,37 @@ pub fn search(conn: &Connection, q: &str, only: Option<&str>, viewer: crate::acc
     // ponytail: reads up to 500 hits and filters by access in Rust; push the rules into SQL if sites get that big.
     let mut stmt = conn
         .prepare(
-            "SELECT r.id, r.collection, r.owner, s.body FROM search s JOIN records r ON r.id = s.rowid
+            "SELECT r.id, r.collection, r.owner, r.published FROM search s JOIN records r ON r.id = s.rowid
              WHERE search MATCH ?1 AND (?2 IS NULL OR r.collection = ?2) ORDER BY bm25(search) LIMIT 500",
         )
         .map_err(fail)?;
     let rows = stmt
-        .query_map(rusqlite::params![expr, only], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<i64>>(2)?, r.get::<_, String>(3)?)))
+        .query_map(rusqlite::params![expr, only], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<i64>>(2)?, r.get::<_, Option<String>>(3)?))
+        })
         .map_err(fail)?;
-    // Each collection's rule once: None when this viewer may not read it, Some(owner filter) otherwise.
-    let mut rules: HashMap<String, Option<Option<i64>>> = HashMap::new();
+    // Each collection's definition and rule once: None when this viewer may not read it.
+    let mut rules: HashMap<String, Option<(crate::schema::CollectionDef, Option<i64>)>> = HashMap::new();
+    let wanted = terms(q, true);
+    let wanted: Vec<&str> = wanted.split(' ').filter(|t| !t.is_empty()).collect();
+    let prefix_last = q.trim_end().chars().last().is_some_and(|c| c.is_alphanumeric() && !is_cjk(c));
     let mut out = vec![];
     for row in rows {
-        let (id, collection, owner, body) = row.map_err(fail)?;
-        let rule = match rules.get(&collection) {
-            Some(r) => *r,
-            None => {
-                let r = crate::site::visible_def(conn, crate::site::Mode::Live, &collection, viewer)?.map(|(_, owner)| owner);
-                rules.insert(collection.clone(), r);
-                r
-            }
-        };
-        match rule {
-            Some(None) => {}
-            Some(Some(me)) if owner == Some(me) => {}
-            _ => continue,
+        let (id, collection, owner, doc) = row.map_err(fail)?;
+        if !rules.contains_key(&collection) {
+            let r = crate::site::visible_def(conn, crate::site::Mode::Live, &collection, viewer)?;
+            rules.insert(collection.clone(), r);
+        }
+        let Some((def, rule)) = rules.get(&collection).and_then(Option::as_ref) else { continue };
+        if rule.is_some_and(|me| owner != Some(me)) {
+            continue;
+        }
+        // Only what the collection still defines counts: a removed field's text stays in the record (so the field
+        // can come back) but is neither found nor shown.
+        let doc: Value = doc.and_then(|d| serde_json::from_str(&d).ok()).unwrap_or(Value::Null);
+        let body = text_of(&crate::schema::project(def, &doc).to_string());
+        if !contains_all(&body, &wanted, prefix_last) {
+            continue;
         }
         out.push(Hit { id, snippet: snippet(&body, q), collection });
         if out.len() >= limit {
@@ -179,6 +186,19 @@ pub fn search(conn: &Connection, q: &str, only: Option<&str>, viewer: crate::acc
         }
     }
     Ok(out)
+}
+
+/// Whether `body` holds every query term (the last one as a prefix when the query ends in a word).
+fn contains_all(body: &str, wanted: &[&str], prefix_last: bool) -> bool {
+    let have = terms(body, false);
+    let have: std::collections::HashSet<&str> = have.split(' ').collect();
+    wanted.iter().enumerate().all(|(i, w)| {
+        if prefix_last && i == wanted.len() - 1 {
+            have.iter().any(|h| h.starts_with(w))
+        } else {
+            have.contains(w)
+        }
+    })
 }
 
 /// About 100 characters of `body` around the first place a word of `q` appears.

@@ -93,6 +93,10 @@ async fn the_publish_page_schedules_lists_and_cancels() {
     let (code, _, _) = post_form(&app, &format!("/admin/publish/schedule/{sid}/cancel"), Some(&s), &[]).await;
     assert_eq!(code, StatusCode::SEE_OTHER);
     assert_eq!(status(&app, sid).0, "cancelled");
+    // A second click (or the ticker got there first) is an error on the page, not a stuck server.
+    let (code, _, body) = post_form(&app, &format!("/admin/publish/schedule/{sid}/cancel"), Some(&s), &[]).await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    assert!(body.contains("没有等待中的定时发布"), "{body}");
     // The chat never gets scheduling: it is publishing.
     let names: Vec<String> = cms_harness::chat::chat_tools(&builder()).into_iter().map(|t| t.name).collect();
     assert!(!names.iter().any(|n| n == "schedule_publish" || n == "cancel_schedule"), "{names:?}");

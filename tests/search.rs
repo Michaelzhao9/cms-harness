@@ -126,3 +126,20 @@ fn an_older_database_is_indexed_when_opened() {
     drop(conn);
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn text_of_a_removed_field_is_not_found() {
+    let app = app();
+    ok(&app, &builder(), "create_collection", json!({ "name": "people", "title": "人", "read": "public", "note": "建",
+        "fields": [{ "name": "name", "title": "名字", "type": "text" }, { "name": "phone", "title": "电话", "type": "text" }] }));
+    ok(&app, &builder(), "create_record", json!({ "collection": "people", "note": "写", "data": { "name": "小王", "phone": "机密号码 13800" } }));
+    publish_all(&app);
+    assert_eq!(ids(&app, "机密号码", Viewer::Anon).len(), 1);
+    // The field goes; its content stays in the record (so it can come back) but no longer shows anywhere.
+    ok(&app, &builder(), "update_collection", json!({ "name": "people", "note": "去掉电话", "remove_fields": ["phone"], "confirm": 1 }));
+    publish_all(&app);
+    assert!(ids(&app, "机密号码", Viewer::Anon).is_empty());
+    let hits = search(&app.conn(), "小王", None, Viewer::Anon, 5).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert!(!hits[0].snippet.contains("13800"), "{}", hits[0].snippet);
+}

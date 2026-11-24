@@ -109,3 +109,14 @@ async fn built_in_site_pages_follow_the_visitor() {
     let (_, page) = get_lang(&app, "/admin/login?lang=en", None, "zh-CN").await;
     assert!(page.contains("<html lang=\"en\">") && chinese_left(&page).is_empty(), "{:?}", chinese_left(&page));
 }
+
+#[tokio::test]
+async fn a_sites_own_text_files_reach_english_browsers_untouched() {
+    let app = app();
+    let big = "中文内容\n".repeat(20_000);
+    ok(&app, &builder(), "write_site_file", serde_json::json!({ "path": "notes.txt", "content": big, "note": "x" }));
+    publish_all(&app);
+    let (status, body) = get_lang(&app, "/notes.txt", None, "en-US").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, big);
+}
