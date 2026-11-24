@@ -8,6 +8,7 @@ pub mod media;
 pub mod tools;
 pub mod render;
 pub mod site;
+pub mod llm;
 pub mod web;
 
 use rusqlite::Connection;
