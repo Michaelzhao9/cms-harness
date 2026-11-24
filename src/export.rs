@@ -30,7 +30,11 @@ fn page_file(dir: &Path, path: &str) -> PathBuf {
 async fn get(app: &Shared, path: &str) -> Result<(StatusCode, Vec<u8>), String> {
     let uri = crate::routes::encode(path);
     let req = Request::get(uri.as_str()).body(axum::body::Body::empty()).map_err(|e| e.to_string())?;
-    let resp = crate::api::router(app.clone()).oneshot(req).await.map_err(|e| e.to_string())?;
+    // The router never fails: its error type is Infallible.
+    let resp = match crate::api::router(app.clone()).oneshot(req).await {
+        Ok(r) => r,
+        Err(never) => match never {},
+    };
     let status = resp.status();
     let body = axum::body::to_bytes(resp.into_body(), 64 << 20).await.map_err(|e| format!("读取 {path} 失败：{e}"))?;
     Ok((status, body.to_vec()))
