@@ -229,7 +229,18 @@ pub async fn create_key(State(app): State<Shared>, Extension(user): Extension<Ad
 }
 
 pub async fn revoke_key(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Path(id): Path<i64>, req: Request) -> Response {
-    handle(app, user, req, true, move |app, user, _| {
+    handle(app, user, req, true, move |app, user, posted| {
+        if posted.one("confirm") != "1" {
+            let name: String = app.conn().query_row("SELECT name FROM api_keys WHERE id = ?1", [id], |r| r.get(0)).unwrap_or_else(|_| format!("密钥 {id}"));
+            let ctx = json!({
+                "heading": format!("吊销密钥“{name}”？"),
+                "message": "吊销后，用这把密钥的 agent 和程序立刻失去访问，不能恢复；要再接入，得新建一把。",
+                "action": format!("/admin/settings/keys/{id}/revoke"),
+                "back": "/admin/settings",
+                "button": "确认吊销",
+            });
+            return Ok(Out::Page(StatusCode::OK, "confirm.html", content::shell(app, user, "settings", ctx)));
+        }
         let done = auth::revoke_key(&app.conn(), id);
         match done {
             Ok(()) => Ok(Out::Go("/admin/settings".into())),
@@ -306,7 +317,19 @@ pub async fn reset_admin(State(app): State<Shared>, Extension(user): Extension<A
 
 pub async fn remove_admin(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Extension(addr): Extension<super::address::Address>, Path(id): Path<i64>, req: Request) -> Response {
     let secure = addr.secure();
-    let mut resp = handle(app, user, req, true, move |app, user, _| {
+    let mut resp = handle(app, user, req, true, move |app, user, posted| {
+        if posted.one("confirm") != "1" {
+            let email: String = app.conn().query_row("SELECT email FROM admins WHERE id = ?1", [id], |r| r.get(0)).unwrap_or_else(|_| format!("管理员 {id}"));
+            let you = if id == user.id { "这是你自己的账号，删除后你会立刻退出，" } else { "" };
+            let ctx = json!({
+                "heading": format!("删除管理员 {email}？"),
+                "message": format!("{you}删除后这个账号不能再登录后台，它的登录也会马上失效。要恢复只能重新添加。"),
+                "action": format!("/admin/settings/admins/{id}/delete"),
+                "back": "/admin/settings",
+                "button": "确认删除",
+            });
+            return Ok(Out::Page(StatusCode::OK, "confirm.html", content::shell(app, user, "settings", ctx)));
+        }
         let removed = {
             let conn = app.conn();
             // One statement, so two removals at once cannot both pass the count.

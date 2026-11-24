@@ -179,10 +179,10 @@ async fn editors_cannot_manage_keys_or_admins() {
     let builder_id = user_of(&app, &b.0).id;
     let routes: Vec<(String, Vec<(&str, &str)>)> = vec![
         ("/admin/settings/keys".into(), vec![("name", "偷偷的"), ("scope", "write")]),
-        (format!("/admin/settings/keys/{key_id}/revoke"), vec![]),
+        (format!("/admin/settings/keys/{key_id}/revoke"), vec![("confirm", "1")]),
         ("/admin/settings/admins".into(), vec![("email", "new@test"), ("role", "builder")]),
         (format!("/admin/settings/admins/{builder_id}/reset"), vec![]),
-        (format!("/admin/settings/admins/{builder_id}/delete"), vec![]),
+        (format!("/admin/settings/admins/{builder_id}/delete"), vec![("confirm", "1")]),
     ];
     let state = |app: &Shared| {
         let conn = app.conn();
@@ -249,7 +249,7 @@ async fn a_new_key_is_shown_once() {
     assert_eq!(count(&app, "SELECT count(*) FROM api_keys"), keys);
 
     let id = count(&app, "SELECT max(id) FROM api_keys");
-    let (status, headers, _) = post_form(&app, &format!("/admin/settings/keys/{id}/revoke"), Some(&s), &[]).await;
+    let (status, headers, _) = post_form(&app, &format!("/admin/settings/keys/{id}/revoke"), Some(&s), &[("confirm", "1")]).await;
     assert_eq!((status, location(&headers)), (StatusCode::SEE_OTHER, "/admin/settings"));
     assert!(auth::actor_from_key(&app.conn(), &key).is_none());
     let (_, _, page) = get_with(&app, "/admin/settings", Some(&s.0)).await;
@@ -264,7 +264,7 @@ async fn the_last_builder_cannot_be_removed() {
     let me = user_of(&app, &s.0).id;
     let editor_id: i64 = app.conn().query_row("SELECT id FROM admins WHERE email = 'editor@test'", [], |r| r.get(0)).unwrap();
 
-    let (status, _, page) = post_form(&app, &format!("/admin/settings/admins/{me}/delete"), Some(&s), &[]).await;
+    let (status, _, page) = post_form(&app, &format!("/admin/settings/admins/{me}/delete"), Some(&s), &[("confirm", "1")]).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(page.contains("至少要留一位搭建者"), "{page}");
     assert_eq!(count(&app, "SELECT count(*) FROM admins WHERE role = 'builder'"), 1);
@@ -297,9 +297,9 @@ async fn the_last_builder_cannot_be_removed() {
     assert_eq!(post_form(&app, &format!("/admin/settings/admins/{me}/reset"), Some(&s), &[]).await.0, StatusCode::BAD_REQUEST);
 
     // With a second builder, removing works, yourself included: you are logged out.
-    let (status, headers, _) = post_form(&app, &format!("/admin/settings/admins/{editor_id}/delete"), Some(&s), &[]).await;
+    let (status, headers, _) = post_form(&app, &format!("/admin/settings/admins/{editor_id}/delete"), Some(&s), &[("confirm", "1")]).await;
     assert_eq!((status, location(&headers)), (StatusCode::SEE_OTHER, "/admin/settings"));
-    let (status, headers, _) = post_form(&app, &format!("/admin/settings/admins/{me}/delete"), Some(&s), &[]).await;
+    let (status, headers, _) = post_form(&app, &format!("/admin/settings/admins/{me}/delete"), Some(&s), &[("confirm", "1")]).await;
     assert_eq!((status, location(&headers)), (StatusCode::SEE_OTHER, "/admin/login"));
     assert_eq!(get_with(&app, "/admin/settings", Some(&s.0)).await.0, StatusCode::SEE_OTHER);
     assert_eq!(count(&app, "SELECT count(*) FROM admins"), 1);
@@ -487,4 +487,22 @@ fn an_old_database_gets_the_admin_prefs_column() {
     drop(conn);
     cms_harness::store::open(path.to_str().unwrap()).unwrap();
     let _ = std::fs::remove_file(&path);
+}
+
+#[tokio::test]
+async fn revoking_a_key_and_removing_an_admin_ask_first() {
+    let app = app();
+    let s = admin_session(&app, "builder").await;
+    admin_session(&app, "editor").await;
+    key(&app, &[Scope::Write]);
+    let key_id: i64 = app.conn().query_row("SELECT id FROM api_keys", [], |r| r.get(0)).unwrap();
+    let editor_id: i64 = app.conn().query_row("SELECT id FROM admins WHERE email = 'editor@test'", [], |r| r.get(0)).unwrap();
+    let (status, _, page) = post_form(&app, &format!("/admin/settings/keys/{key_id}/revoke"), Some(&s), &[]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("确认吊销") && page.contains("name=\"confirm\""));
+    assert_eq!(count(&app, "SELECT count(*) FROM api_keys WHERE revoked = 0"), 1, "nothing revoked yet");
+    let (status, _, page) = post_form(&app, &format!("/admin/settings/admins/{editor_id}/delete"), Some(&s), &[]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("确认删除") && page.contains("editor@test"));
+    assert_eq!(count(&app, "SELECT count(*) FROM admins"), 2, "nobody removed yet");
 }
