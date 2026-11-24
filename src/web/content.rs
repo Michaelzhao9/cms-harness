@@ -29,6 +29,7 @@ pub(super) enum Out {
     Page(StatusCode, &'static str, Value),
     Go(String),
     Fail(StatusCode, String),
+    Json(Value),
 }
 
 impl IntoResponse for Out {
@@ -37,6 +38,7 @@ impl IntoResponse for Out {
             Out::Page(status, name, ctx) => page(status, name, ctx),
             Out::Go(to) => Redirect::to(&to).into_response(),
             Out::Fail(status, msg) => (status, msg).into_response(),
+            Out::Json(v) => axum::Json(v).into_response(),
         }
     }
 }

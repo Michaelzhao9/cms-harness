@@ -428,6 +428,28 @@ fn setting_pairs(key: &str, old: &Value, new: &Value) -> Vec<Value> {
     if key == "site_name" {
         return vec![json!({ "field": "站点名称", "old": old.as_str(), "new": new.as_str().map(String::from).or_else(gone) })];
     }
+    if key == crate::canvas::KEY {
+        // One row per changed property: element (its file and position), width, property.
+        let flat = |v: &Value| {
+            let mut m = std::collections::BTreeMap::new();
+            for (el, e) in v["els"].as_object().into_iter().flatten() {
+                for (tier, props) in e["style"].as_object().into_iter().flatten() {
+                    for (p, val) in props.as_object().into_iter().flatten() {
+                        m.insert((el.clone(), tier.clone(), p.clone()), val.as_str().unwrap_or_default().to_string());
+                    }
+                }
+            }
+            m
+        };
+        let (o, n) = (flat(old), flat(new));
+        let label = |(el, tier, p): &(String, String, String)| {
+            let tier = match tier.as_str() { "desktop" => "电脑", "tablet" => "平板", "mobile" => "手机", _ => "所有宽度" };
+            format!("{el} · {tier} · {p}")
+        };
+        let mut out: Vec<Value> = n.iter().filter(|(k, v)| o.get(*k) != Some(*v)).map(|(k, v)| json!({ "field": label(k), "old": o.get(k), "new": v })).collect();
+        out.extend(o.iter().filter(|(k, _)| !n.contains_key(*k)).map(|(k, v)| json!({ "field": label(k), "old": v, "new": gone() })));
+        return out;
+    }
     if key == "script_origins" {
         let list = |v: &Value| v.as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect::<Vec<_>>();
         let (o, n) = (list(old), list(new));

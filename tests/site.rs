@@ -38,7 +38,20 @@ async fn fetch(app: &Shared, path: &str, headers: &[(&str, &str)]) -> (StatusCod
 
 async fn page(app: &Shared, path: &str, headers: &[(&str, &str)]) -> (StatusCode, HeaderMap, String) {
     let (s, h, b) = fetch(app, path, headers).await;
-    (s, h, String::from_utf8(b).unwrap())
+    (s, h, without_sources(&String::from_utf8(b).unwrap()))
+}
+
+/// A page without the canvas's `data-hc-src` marks, which a preview puts on every element (tests/canvas.rs).
+fn without_sources(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(at) = rest.find(" data-hc-src=\"") {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + " data-hc-src=\"".len()..];
+        rest = &after[after.find('"').map_or(after.len(), |e| e + 1)..];
+    }
+    out.push_str(rest);
+    out
 }
 
 fn csp(h: &HeaderMap) -> String {

@@ -8,8 +8,11 @@
 // does the same for fetch() and XMLHttpRequest, and reports paths without the prefix.
 //
 // admin -> preview: {type:"hc:activate", n} {type:"hc:pick", on} {type:"hc:back"} {type:"hc:forward"} {type:"hc:mark-color", color}
+//                   {type:"hc:style", src, prop, value} {type:"hc:deselect"}
 // preview -> admin: {type:"hc:ready", path, changes, canBack, canForward} {type:"hc:picked", items:[{path, selector, text, change}]}
 //                   {type:"hc:navigated", path, canBack, canForward}
+//                   {type:"hc:select", src, tag, text, rect, style, menu} {type:"hc:rect", rect} {type:"hc:deselect"} {type:"hc:text", src, text}
+// The canvas (selecting, editing text) only reports: the admin page checks and saves every edit.
 (() => {
   "use strict";
   const ORIGIN = new URL(location.href).origin;
@@ -98,6 +101,36 @@
       place(h, hovered.getBoundingClientRect(), 0);
       overlay.appendChild(h);
     }
+    if (sel && sel.isConnected) {
+      for (const el of document.querySelectorAll(`[data-hc-src="${CSS.escape(sel.dataset.hcSrc)}"]`)) {
+        if (el === sel) continue;
+        const o = document.createElement("div");
+        o.className = "hc-same";
+        place(o, el.getBoundingClientRect(), 0);
+        overlay.appendChild(o);
+      }
+      const b = sel.getBoundingClientRect();
+      const box = document.createElement("div");
+      box.className = "hc-sel";
+      place(box, b, 3);
+      overlay.appendChild(box);
+      if (!editing) {
+        for (const [x, y] of [[0, 0], [.5, 0], [1, 0], [0, .5], [1, .5], [0, 1], [.5, 1], [1, 1]]) {
+          const h = document.createElement("div");
+          h.className = "hc-handle";
+          h.style.left = (b.left - 3 + (b.width + 6) * x) + "px";
+          h.style.top = (b.top - 3 + (b.height + 6) * y) + "px";
+          overlay.appendChild(h);
+        }
+        const size = document.createElement("div");
+        size.className = "hc-size";
+        size.textContent = Math.round(b.width) + " × " + Math.round(b.height);
+        size.style.left = (b.left + b.width / 2) + "px";
+        size.style.top = (b.bottom + 12) + "px";
+        overlay.appendChild(size);
+      }
+      reportRect();
+    }
     for (const el of picked) {
       const p = document.createElement("div");
       p.className = "hc-picked";
@@ -167,6 +200,124 @@
   document.addEventListener("submit", (e) => { if (picking) e.preventDefault(); }, true);
   document.addEventListener("keydown", (e) => { if (picking && e.key === "Escape") setPicking(false); }, true);
 
+  // ---- the canvas: select an element, edit its text, see style edits at once ----
+  // A quick press (released within HOLD ms, moved less than MOVE px) is a plain click: links and buttons work.
+  // Anything longer, a right-click, or a click on something that does nothing selects instead.
+  const HOLD = 200, MOVE = 4;
+  let sel = null; // the selected element
+  let editing = null; // the element whose text is being edited, and its text before
+  let before = "";
+  let press = null;
+  let swallow = false; // the click that ends a long press selects, it does not navigate
+  const INTERACTIVE = "a[href], button, input, select, textarea, label, summary, [contenteditable], [onclick], [role=button]";
+  const sourceOf = (t) => {
+    if (!(t instanceof Element)) return null;
+    const svg = t.closest("svg");
+    return (svg || t).closest("[data-hc-src]");
+  };
+  const STYLE = ["color", "backgroundColor", "fontSize", "fontWeight", "fontStyle", "textDecorationLine", "textAlign", "lineHeight", "borderRadius", "boxShadow", "fontFamily"];
+  const rectOfSel = () => {
+    const b = sel.getBoundingClientRect();
+    return { x: b.left, y: b.top, w: b.width, h: b.height };
+  };
+  let lastRect = "";
+  function reportRect() {
+    if (!sel) return;
+    const r = rectOfSel();
+    const key = [r.x, r.y, r.w, r.h].map(Math.round).join(",");
+    if (key !== lastRect) { lastRect = key; send({ type: "hc:rect", rect: r }); }
+  }
+  function select(el, menu) {
+    if (editing && editing !== el) finishEdit(true);
+    sel = el;
+    lastRect = "";
+    const cs = getComputedStyle(el);
+    const style = {};
+    for (const k of STYLE) style[k] = cs[k];
+    send({ type: "hc:select", src: el.dataset.hcSrc, tag: el.localName, text: (el.innerText || "").trim().slice(0, 200), rect: rectOfSel(), style, menu: !!menu });
+    redraw();
+  }
+  function deselect(tell) {
+    if (editing) finishEdit(true);
+    if (!sel) return;
+    sel = null;
+    redraw();
+    if (tell) send({ type: "hc:deselect" });
+  }
+  function startEdit(el) {
+    if (el.children.length && Array.from(el.children).some((c) => c.localName !== "br")) return;
+    editing = el;
+    before = el.innerText;
+    el.setAttribute("data-hc-editing", "");
+    el.contentEditable = "plaintext-only";
+    el.focus();
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    const s = getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
+    redraw();
+  }
+  function finishEdit(keep) {
+    const el = editing;
+    if (!el) return;
+    editing = null;
+    el.removeAttribute("data-hc-editing");
+    el.removeAttribute("contenteditable");
+    const text = el.innerText.replace(/\n$/, "");
+    if (!keep || text === before) { if (!keep) el.innerText = before; }
+    else send({ type: "hc:text", src: el.dataset.hcSrc, text });
+    redraw();
+  }
+  document.addEventListener("pointerdown", (e) => {
+    if (picking || e.button !== 0 || editing && editing.contains(e.target)) return;
+    press = { x: e.clientX, y: e.clientY, t: performance.now(), el: sourceOf(e.target), target: e.target };
+  }, true);
+  document.addEventListener("pointerup", (e) => {
+    const p = press;
+    press = null;
+    if (!p || !p.el) return;
+    const moved = Math.hypot(e.clientX - p.x, e.clientY - p.y) > MOVE;
+    const held = performance.now() - p.t > HOLD;
+    if (held || moved) { swallow = true; select(p.el); }
+  }, true);
+  document.addEventListener("click", (e) => {
+    if (picking) return;
+    if (swallow) { swallow = false; e.preventDefault(); e.stopPropagation(); return; }
+    if (editing && editing.contains(e.target)) return;
+    const el = sourceOf(e.target);
+    if (!el) return deselect(true);
+    if (e.target.closest(INTERACTIVE)) return; // a quick click on a link or button does what it does
+    e.preventDefault();
+    select(el);
+  }, true);
+  document.addEventListener("dblclick", (e) => {
+    if (picking) return;
+    const el = sourceOf(e.target);
+    if (!el || e.target.closest("input, select, textarea")) return;
+    e.preventDefault();
+    if (sel !== el) select(el);
+    startEdit(el);
+  }, true);
+  document.addEventListener("contextmenu", (e) => {
+    if (picking) return;
+    const el = sourceOf(e.target);
+    if (!el) return;
+    e.preventDefault();
+    select(el, true);
+  }, true);
+  document.addEventListener("keydown", (e) => {
+    if (editing) {
+      if (e.key === "Escape") { e.preventDefault(); finishEdit(false); }
+      else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); finishEdit(true); }
+      return;
+    }
+    if (picking || !sel) return;
+    if (e.key === "Escape") deselect(true);
+    else if (e.key === "Enter") { e.preventDefault(); startEdit(sel); }
+  }, true);
+  document.addEventListener("focusout", (e) => { if (editing && e.target === editing) finishEdit(true); }, true);
+
   // ---- messages from the admin ----
   window.addEventListener("message", (e) => {
     if (e.source !== window.parent || e.origin !== ORIGIN || !e.data || typeof e.data !== "object") return;
@@ -175,6 +326,13 @@
     else if (m.type === "hc:pick") setPicking(m.on);
     else if (m.type === "hc:back" && hist.i > 0) history.back();
     else if (m.type === "hc:forward" && hist.i < hist.stack.length - 1) history.forward();
+    else if (m.type === "hc:style" && typeof m.src === "string" && typeof m.prop === "string") {
+      for (const el of document.querySelectorAll(`[data-hc-src="${CSS.escape(m.src)}"]`)) {
+        if (m.value) el.style.setProperty(m.prop, String(m.value), "important");
+        else el.style.removeProperty(m.prop);
+      }
+      redraw();
+    } else if (m.type === "hc:deselect") deselect(false);
     else if (m.type === "hc:mark-color" && typeof m.color === "string" && CSS.supports("color", m.color)) {
       document.documentElement.style.setProperty("--mark", m.color);
     }

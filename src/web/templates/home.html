@@ -50,6 +50,44 @@
 <span class="nmk" aria-hidden="true"></span><span data-nav-text></span><span class="sep" aria-hidden="true"></span>
 <button type="button" aria-label="{{ '上一处'|t }}" data-nav-prev>{{ i.icon("caret-left", 13) }}</button><span class="pos" data-nav-pos></span><button type="button" aria-label="{{ '下一处'|t }}" data-nav-next>{{ i.icon("caret-right", 13) }}</button>
 </div>
+{% if version == "draft" and chat.builder -%}
+<div class="cbar" role="toolbar" aria-label="{{ '元素样式'|t }}" data-cbar hidden>
+<label class="cb size"><span class="sr">{{ "字号"|t }}</span><input type="number" min="6" max="400" step="1" data-c-size></label>
+<span class="cb-sep" aria-hidden="true"></span>
+<button type="button" class="cb" aria-label="{{ '粗体'|t }}" aria-pressed="false" data-c-toggle="font-weight" data-on="700" data-off="400"><b>B</b></button>
+<button type="button" class="cb" aria-label="{{ '斜体'|t }}" aria-pressed="false" data-c-toggle="font-style" data-on="italic" data-off="normal"><i>I</i></button>
+<button type="button" class="cb" aria-label="{{ '下划线'|t }}" aria-pressed="false" data-c-toggle="text-decoration-line" data-on="underline" data-off="none"><u>U</u></button>
+<span class="cb-sep" aria-hidden="true"></span>
+<label class="cb" aria-label="{{ '文字颜色'|t }}"><span class="cdot" data-c-dot="color"></span><input type="color" data-c-color="color"></label>
+<label class="cb" aria-label="{{ '背景颜色'|t }}"><span class="cdot sq" data-c-dot="background-color"></span><input type="color" data-c-color="background-color"></label>
+<button type="button" class="cb" aria-label="{{ '对齐方式'|t }}" data-c-align>{{ i.icon("text-align-left", 16) }}</button>
+<span class="cb-sep" aria-hidden="true"></span>
+<details class="cmenu" data-menu>
+<summary class="cb wide">{{ "风格"|t }}{{ i.icon("caret-down", 9) }}</summary>
+<div class="cpop" role="menu">
+<button type="button" role="menuitem" data-c-preset="plain"><span class="sw plain">Aa</span>{{ "原样"|t }}</button>
+<button type="button" role="menuitem" data-c-preset="dark"><span class="sw dark">Aa</span>{{ "深色"|t }}</button>
+<button type="button" role="menuitem" data-c-preset="light"><span class="sw light">Aa</span>{{ "浅色"|t }}</button>
+<button type="button" role="menuitem" data-c-preset="accent"><span class="sw accent">Aa</span>{{ "强调"|t }}</button>
+<button type="button" role="menuitem" data-c-preset="outline"><span class="sw outline">Aa</span>{{ "描边"|t }}</button>
+</div>
+</details>
+<details class="cmenu" data-menu>
+<summary class="cb" aria-label="{{ '更多样式'|t }}">{{ i.icon("dots-three", 16) }}</summary>
+<div class="cpop grid" role="menu">
+<span class="cap">{{ "圆角"|t }}</span>
+<button type="button" role="menuitem" data-c-set="border-radius" data-v="0px">0</button><button type="button" role="menuitem" data-c-set="border-radius" data-v="8px">8</button><button type="button" role="menuitem" data-c-set="border-radius" data-v="16px">16</button><button type="button" role="menuitem" data-c-set="border-radius" data-v="999px">{{ "圆"|t }}</button>
+<span class="cap">{{ "阴影"|t }}</span>
+<button type="button" role="menuitem" data-c-set="box-shadow" data-v="none">{{ "无"|t }}</button><button type="button" role="menuitem" data-c-set="box-shadow" data-v="0 1px 3px rgba(16,16,24,.12)">{{ "轻"|t }}</button><button type="button" role="menuitem" data-c-set="box-shadow" data-v="0 8px 24px -8px rgba(16,16,24,.25)">{{ "中"|t }}</button><button type="button" role="menuitem" data-c-set="box-shadow" data-v="0 24px 48px -16px rgba(16,16,24,.35)">{{ "重"|t }}</button>
+<span class="cap">{{ "内边距"|t }}</span>
+<button type="button" role="menuitem" data-c-set="padding" data-v="0px">0</button><button type="button" role="menuitem" data-c-set="padding" data-v="8px">8</button><button type="button" role="menuitem" data-c-set="padding" data-v="16px">16</button><button type="button" role="menuitem" data-c-set="padding" data-v="32px">32</button>
+</div>
+</details>
+<span class="cb-sep" aria-hidden="true"></span>
+<button type="button" class="cb wide" aria-pressed="false" data-c-tier data-tier="{{ width }}">{{ "所有宽度"|t }}</button>
+<button type="button" class="cb" aria-label="{{ '问 AI'|t }}" data-c-ai>{{ i.icon("sparkle", 16) }}</button>
+</div>
+{%- endif %}
 {% if published %}<div class="pubbed" role="status" data-published>{{ i.icon("check", 14) }}{{ "已发布，线上已经是最新的"|t }}<a href="{{ links.live|safe }}">{{ "看线上"|t }}</a></div>{% endif %}
 </div>
 {% endblock %}

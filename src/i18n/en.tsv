@@ -896,3 +896,40 @@ admin、api、uploads、account、mcp 开头的网址留给系统。	addresses s
 检查链接失败：{}	Could not check the links: {}
 {} 链接到 record:{}，它不在线上：请把它一起发布，或先去掉这个链接。	{} links to record:{}, which is not live: publish it too, or remove the link first.
 record:{} 还被 {} 链接着，删掉会留下死链：请先改掉那个链接，或一起发布。	record:{} is still linked from {}; removing it would leave a dead link. Change that link first, or publish both.
+元素样式	Element style
+字号	Font size
+粗体	Bold
+斜体	Italic
+下划线	Underline
+文字颜色	Text color
+背景颜色	Background
+对齐方式	Alignment
+风格	Style
+原样	As designed
+深色	Dark
+浅色	Light
+强调	Accent
+描边	Outline
+更多样式	More styles
+圆角	Corners
+圆	Round
+阴影	Shadow
+无	None
+轻	Soft
+中	Medium
+重	Strong
+内边距	Padding
+所有宽度	All widths
+问 AI	Ask AI
+网页上的手动调整	Hand edits on the page
+不认识这个元素：请刷新预览再选。	Unknown element: reload the preview and select it again.
+这个元素所在的文件已经不在了：请刷新预览。	The file this element is in is gone: reload the preview.
+这个元素已经不在文件里了：请刷新预览。	This element is no longer in its file: reload the preview.
+这个元素的文字不能在画板上改。	This element's text cannot be edited on the page.
+找不到这个元素的结尾：它的文字不能在画板上改。	This element has no end tag: its text cannot be edited on the page.
+这段文字来自数据或模板代码，不能在画板上直接改：请在对话里说，或去内容里改。	This text comes from data or template code, so it cannot be edited here: ask in the chat, or change it in the content.
+文字太长了（最多 5000 字）。	The text is too long (5000 characters at most).
+你的角色不能改网页。	Your role cannot change the site.
+不能在画板上改“{}”。	“{}” cannot be changed on the page.
+“{}”不能设成“{}”。	“{}” cannot be set to “{}”.
+宽度只能是 all、desktop、tablet 或 mobile，不是“{}”。	The width must be all, desktop, tablet or mobile, not “{}”.

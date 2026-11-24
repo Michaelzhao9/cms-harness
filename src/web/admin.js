@@ -481,6 +481,165 @@ if (pickBtn) {
   pickBtn.addEventListener('click', () => setPick(!pickOn));
 }
 
+// ---------- the canvas: the bar for the element selected in the preview ----------
+// The preview reports what was selected (hc:select) and text typed into it (hc:text). It shares its frame with
+// the site's own scripts, so nothing it says is trusted: this page sends each edit with its CSRF token and the
+// server checks it. Style edits show at once (hc:style) and are saved as drafts.
+
+const cbar = $('[data-cbar]');
+let csel = null; // {src, tag, text, rect, style}
+let tierOnly = false;
+
+function canvasTier() {
+  return tierOnly ? cbar.querySelector('[data-c-tier]').dataset.tier : 'all';
+}
+
+async function canvasSave(url, fields) {
+  const res = await fetch(url, { method: 'POST', body: form(fields), headers: { 'x-hc-fetch': '1' }, credentials: 'same-origin' });
+  if (!res.ok) throw new Error((await res.text()) || tr(`出错了（${res.status}）`, `Something went wrong (${res.status})`));
+  const out = await res.json();
+  setPending(out.pending);
+}
+
+function hex(rgb) {
+  const m = String(rgb).match(/\d+(\.\d+)?/g);
+  if (!m || m.length < 3) return '#000000';
+  if (m.length === 4 && Number(m[3]) === 0) return '#ffffff';
+  return '#' + m.slice(0, 3).map((n) => Math.round(Number(n)).toString(16).padStart(2, '0')).join('');
+}
+
+/** Sets one property: shown in the preview at once, saved as a draft. */
+async function canvasSet(prop, value) {
+  if (!csel) return;
+  post({ type: 'hc:style', src: csel.src, prop, value });
+  // The stylesheet gives a border width its solid style; the preview needs it too until it reloads.
+  if (prop === 'border-width') post({ type: 'hc:style', src: csel.src, prop: 'border-style', value: value ? 'solid' : '' });
+  try {
+    await canvasSave('/admin/canvas/style', { src: csel.src, tier: canvasTier(), prop, value });
+  } catch (err) {
+    toast(tr('没存上', 'Not saved'), err.message, true);
+  }
+}
+
+const PRESETS = {
+  plain: { color: '', 'background-color': '', 'border-width': '', 'border-color': '', 'box-shadow': '' },
+  dark: { color: '#ffffff', 'background-color': '#1d1d1f', 'border-width': '', 'box-shadow': '' },
+  light: { color: '#1d1d1f', 'background-color': '#f5f5f7', 'border-width': '', 'box-shadow': '' },
+  accent: { color: '#1d1d1f', 'background-color': '#f5b700', 'border-width': '', 'box-shadow': '' },
+  outline: { 'background-color': 'transparent', 'border-width': '1.5px', 'border-color': '#1d1d1f', 'box-shadow': '' },
+};
+const ALIGNS = ['left', 'center', 'right'];
+
+function placeBar() {
+  if (!cbar || !csel || !frame) return;
+  const fr = frame.getBoundingClientRect();
+  const st = stage.getBoundingClientRect();
+  const r = csel.rect;
+  const h = cbar.offsetHeight || 40;
+  const w = cbar.offsetWidth || 420;
+  let top = fr.top - st.top + r.y - h - 14;
+  if (top < 8) top = fr.top - st.top + r.y + r.h + 40;
+  const left = Math.max(8, Math.min(fr.left - st.left + r.x - 4, st.width - w - 8));
+  cbar.style.top = `${Math.round(top)}px`;
+  cbar.style.left = `${Math.round(left)}px`;
+}
+
+function fillBar() {
+  const s = csel.style;
+  $('[data-c-size]', cbar).value = parseInt(s.fontSize, 10) || '';
+  for (const b of $$('[data-c-toggle]', cbar)) {
+    const prop = b.dataset.cToggle;
+    const cur = prop === 'font-weight' ? (Number(s.fontWeight) >= 600 ? '700' : '400') : prop === 'font-style' ? s.fontStyle : s.textDecorationLine;
+    b.setAttribute('aria-pressed', String(cur === b.dataset.on));
+  }
+  for (const [prop, key] of [['color', 'color'], ['background-color', 'backgroundColor']]) {
+    $(`[data-c-dot="${prop}"]`, cbar).style.background = s[key];
+    $(`[data-c-color="${prop}"]`, cbar).value = hex(s[key]);
+  }
+  const tierBtn = $('[data-c-tier]', cbar);
+  const names = { desktop: tr('只改电脑', 'Desktop only'), tablet: tr('只改平板', 'Tablet only'), mobile: tr('只改手机', 'Phone only') };
+  tierBtn.textContent = tierOnly ? names[tierBtn.dataset.tier] : tr('所有宽度', 'All widths');
+  tierBtn.setAttribute('aria-pressed', String(tierOnly));
+}
+
+function closeBar() {
+  csel = null;
+  if (cbar) cbar.hidden = true;
+}
+
+if (cbar && frame) {
+  window.addEventListener('message', (e) => {
+    if (e.source !== frame.contentWindow || typeof e.data !== 'object' || !e.data) return;
+    const m = e.data;
+    if (m.type === 'hc:select' && typeof m.src === 'string') {
+      csel = { src: m.src, tag: String(m.tag || ''), text: String(m.text || ''), rect: m.rect || {}, style: m.style || {} };
+      fillBar();
+      cbar.hidden = false;
+      placeBar();
+    } else if (m.type === 'hc:rect' && csel && m.rect) {
+      csel.rect = m.rect;
+      placeBar();
+    } else if (m.type === 'hc:deselect' || m.type === 'hc:navigated' || m.type === 'hc:ready') {
+      closeBar();
+    } else if (m.type === 'hc:text' && typeof m.src === 'string' && typeof m.text === 'string') {
+      canvasSave('/admin/canvas/text', { src: m.src, text: m.text }).catch((err) => {
+        toast(tr('文字没改成', 'Text not changed'), err.message, true);
+        reloadFrames();
+      });
+    }
+  });
+  window.addEventListener('resize', placeBar);
+  $('[data-c-size]', cbar).addEventListener('change', (e) => {
+    const n = Number(e.target.value);
+    if (n >= 6 && n <= 400) canvasSet('font-size', `${n}px`);
+  });
+  for (const b of $$('[data-c-toggle]', cbar)) {
+    b.addEventListener('click', () => {
+      const on = b.getAttribute('aria-pressed') !== 'true';
+      b.setAttribute('aria-pressed', String(on));
+      canvasSet(b.dataset.cToggle, on ? b.dataset.on : b.dataset.off);
+    });
+  }
+  for (const input of $$('[data-c-color]', cbar)) {
+    input.addEventListener('input', () => { $(`[data-c-dot="${input.dataset.cColor}"]`, cbar).style.background = input.value; });
+    input.addEventListener('change', () => canvasSet(input.dataset.cColor, input.value));
+  }
+  $('[data-c-align]', cbar).addEventListener('click', () => {
+    const next = ALIGNS[(ALIGNS.indexOf(csel?.style.textAlign) + 1) % ALIGNS.length];
+    if (csel) csel.style.textAlign = next;
+    canvasSet('text-align', next);
+  });
+  for (const b of $$('[data-c-preset]', cbar)) {
+    b.addEventListener('click', async () => {
+      b.closest('details').removeAttribute('open');
+      for (const [prop, value] of Object.entries(PRESETS[b.dataset.cPreset])) await canvasSet(prop, value);
+    });
+  }
+  for (const b of $$('[data-c-set]', cbar)) {
+    b.addEventListener('click', () => {
+      b.closest('details').removeAttribute('open');
+      canvasSet(b.dataset.cSet, b.dataset.v);
+    });
+  }
+  $('[data-c-tier]', cbar).addEventListener('click', () => {
+    tierOnly = !tierOnly;
+    fillBar();
+  });
+  $('[data-c-ai]', cbar).addEventListener('click', () => {
+    if (!csel) return;
+    picked = [{ path: page.path || '/', selector: `[data-hc-src="${csel.src}"]`, text: csel.text, change: null }];
+    renderChips();
+    if (mode() === 'mini') setMode('floating', true);
+    else ask?.focus();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && csel && !e.target.closest?.('input, textarea')) {
+      post({ type: 'hc:deselect' });
+      closeBar();
+    }
+  });
+}
+
 // The publish toast and its query flag go away after a while.
 const pubbed = $('[data-published]');
 if (pubbed) {

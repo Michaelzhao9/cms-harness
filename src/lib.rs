@@ -16,6 +16,7 @@ pub mod members;
 pub mod access;
 pub mod backup;
 pub mod cache;
+pub mod canvas;
 pub mod export;
 pub mod i18n;
 pub mod routes;

@@ -350,6 +350,8 @@ struct Server<'c> {
     viewer: crate::access::Viewer,
     /// What the render read, for the page cache: `f:<path>`, `c:<collection>`, `records`.
     deps: std::collections::BTreeSet<String>,
+    /// Hand edits (`canvas`) as this render's mode sees them; loaded on first need.
+    canvas: Option<Value>,
 }
 
 impl Server<'_> {
@@ -380,6 +382,8 @@ impl Server<'_> {
                     return Ok(Answer::File(None));
                 }
                 let Some(source) = file(self.conn, self.mode, &path)? else { return Ok(Answer::File(None)) };
+                let canvas = self.canvas.get_or_insert_with(|| crate::changes::setting(self.conn, crate::canvas::KEY, self.mode == Mode::Preview));
+                let source = crate::canvas::annotate(&path, &source, canvas, self.mode == Mode::Preview);
                 let Some(n) = self.mark(&format!("file:{path}"))? else { return Ok(Answer::File(Some(source))) };
                 self.files_changed.push(n);
                 // A changed fragment is fenced so the finished page can show it as a region. The page itself,
@@ -640,7 +644,7 @@ pub struct Rendered {
 /// `conn`, the caller's connection, so a render inside the publish transaction sees what is about to go live.
 pub fn render(conn: &Connection, mode: Mode, page: &str, ctx: Value) -> Result<Rendered, String> {
     let viewer = ctx["member"]["id"].as_i64().map_or(crate::access::Viewer::Anon, crate::access::Viewer::Member);
-    let mut server = Server { conn, mode, page: page.to_string(), order: None, files_changed: vec![], asks: 0, viewer, deps: Default::default() };
+    let mut server = Server { conn, mode, page: page.to_string(), order: None, files_changed: vec![], asks: 0, viewer, deps: Default::default(), canvas: None };
     let (tx, rx) = mpsc::channel::<Line>();
     // minijinja functions must be 'static, so they cannot borrow the connection: the render runs on a scoped
     // thread and asks this one, which answers until the render drops its end of the channel.

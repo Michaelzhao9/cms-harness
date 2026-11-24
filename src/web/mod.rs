@@ -3,6 +3,7 @@
 pub mod address;
 pub mod members;
 pub mod admin;
+pub mod canvas;
 pub mod chat;
 pub mod content;
 pub mod session;
@@ -31,6 +32,8 @@ pub fn router(app: Shared) -> Router {
     Router::new()
         .route("/admin", get(chat::home))
         .route("/admin/prefs", post(admin::prefs))
+        .route("/admin/canvas/style", post(canvas::style))
+        .route("/admin/canvas/text", post(canvas::text))
         .route("/admin/chat", post(chat::post).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
         .route("/admin/chat/new", post(chat::new))
         .route("/admin/chat/stop", post(chat::stop))

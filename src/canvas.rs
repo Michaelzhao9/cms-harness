@@ -1,0 +1,390 @@
+//! Hand edits on the preview ("画板"): what an admin changes by pointing at the page instead of asking the chat.
+//!
+//! Every element of a site template is known by where it starts in its file: `<path>#<n>`, the n-th start tag
+//! (`src`). A preview render marks each one with `data-hc-src`, so a click names its source. Style edits are kept
+//! apart from the site files, in the drafted option `setting:canvas`, and reach the page as one stylesheet; the
+//! elements they apply to carry `data-hc="<id>"` in preview and live renders alike. An element in a shared
+//! template (a layout, an include, a record page's template) is the same element on every page that uses it.
+//!
+//! Each edit remembers a fingerprint of its element (tag and the text right after it). When the file changes
+//! above it and its position moves, the edit follows the one element with the same fingerprint, and applies to
+//! nothing when there is none, rather than to a wrong element.
+
+use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+
+/// The drafted option holding every hand edit.
+pub const KEY: &str = "canvas";
+
+/// Width tiers, with the media query each one's edits sit under (`all` has none).
+pub const TIERS: [(&str, &str); 4] = [
+    ("all", ""),
+    ("desktop", "(min-width: 1024px)"),
+    ("tablet", "(min-width: 600px) and (max-width: 1023.98px)"),
+    ("mobile", "(max-width: 599.98px)"),
+];
+
+/// Tags that are not drawn, or whose content is not markup: counted, never marked.
+const UNMARKED: [&str; 12] = ["html", "head", "body", "meta", "link", "title", "script", "style", "base", "noscript", "br", "wbr"];
+/// Elements whose content is raw text up to their closing tag.
+const RAW: [&str; 4] = ["script", "style", "textarea", "title"];
+
+/// One start tag of a template source.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tag {
+    /// 1-based position among the file's start tags.
+    pub n: usize,
+    pub name: String,
+    /// Byte offset of `<`.
+    pub start: usize,
+    /// Byte offset right after the tag name, where attributes may be inserted.
+    pub name_end: usize,
+    /// Byte offset right after `>`.
+    pub open_end: usize,
+}
+
+/// The start tags of an HTML template, skipping template blocks (`{{ }}`, `{% %}`, `{# #}`, `{% raw %}`),
+/// comments and raw-text elements.
+pub fn tags(src: &str) -> Vec<Tag> {
+    let b = src.as_bytes();
+    let mut out = vec![];
+    let mut i = 0;
+    while i < b.len() {
+        let rest = &src[i..];
+        if rest.starts_with("{%") && rest[2..].trim_start_matches('-').trim_start().starts_with("raw") {
+            i += rest.find("endraw").map_or(rest.len(), |e| e + 6);
+        } else if rest.starts_with("{{") {
+            i += rest.find("}}").map_or(rest.len(), |e| e + 2);
+        } else if rest.starts_with("{%") {
+            i += rest.find("%}").map_or(rest.len(), |e| e + 2);
+        } else if rest.starts_with("{#") {
+            i += rest.find("#}").map_or(rest.len(), |e| e + 2);
+        } else if rest.starts_with("<!--") {
+            i += rest.find("-->").map_or(rest.len(), |e| e + 3);
+        } else if b[i] == b'<' && b.get(i + 1).is_some_and(u8::is_ascii_alphabetic) {
+            let name_len = rest[1..].find(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).unwrap_or(rest.len() - 1);
+            let name = rest[1..1 + name_len].to_ascii_lowercase();
+            let open_end = i + tag_end(rest);
+            out.push(Tag { n: out.len() + 1, name: name.clone(), start: i, name_end: i + 1 + name_len, open_end });
+            i = open_end;
+            if RAW.contains(&name.as_str()) {
+                let lower = src[i..].to_ascii_lowercase();
+                i += lower.find(&format!("</{name}")).unwrap_or(lower.len());
+            }
+        } else {
+            i += rest.chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    out
+}
+
+/// Length of the start tag at the beginning of `s`, up to and including `>`: quotes and template blocks respected.
+fn tag_end(s: &str) -> usize {
+    let mut quote: Option<char> = None;
+    let mut it = s.char_indices().skip(1).peekable();
+    while let Some((j, c)) = it.next() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '{') if matches!(it.peek(), Some((_, '{' | '%' | '#'))) => {
+                let close = match it.peek() { Some((_, '{')) => "}}", Some((_, '%')) => "%}", _ => "#}" };
+                match s[j..].find(close) {
+                    Some(e) => while it.peek().is_some_and(|(k, _)| *k < j + e + 2) { it.next(); },
+                    None => return s.len(),
+                }
+            }
+            (None, '>') => return j + 1,
+            _ => {}
+        }
+    }
+    s.len()
+}
+
+/// What identifies an element besides its position: its tag and the first literal text after it.
+pub fn fingerprint(src: &str, tag: &Tag) -> String {
+    let after = &src[tag.open_end..];
+    let text: String = after.chars().take_while(|c| *c != '<' && *c != '{').collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
+    format!("{}|{}", tag.name, text.chars().take(32).collect::<String>())
+}
+
+/// The short id of an edited element, used in `data-hc` and the stylesheet.
+pub fn id(key: &str) -> String {
+    hex::encode(&Sha256::digest(key.as_bytes())[..5])
+}
+
+fn attr(s: &str) -> String {
+    s.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;")
+}
+
+/// Splits `src` (`<path>#<n>`) into its parts.
+pub fn parse_src(src: &str) -> Option<(&str, usize)> {
+    let (path, n) = src.rsplit_once('#')?;
+    let n: usize = n.parse().ok().filter(|n| *n > 0)?;
+    crate::site::check_path(path).ok()?;
+    Some((path, n))
+}
+
+/// Where each of `doc`'s edits for the file at `path` lands in `src` now: position → edit key. An edit whose
+/// element moved follows its fingerprint when exactly one element has it.
+pub fn resolve(doc: &Value, path: &str, src: &str, tags: &[Tag]) -> HashMap<usize, String> {
+    let mut out = HashMap::new();
+    let Some(els) = doc["els"].as_object() else { return out };
+    for (key, el) in els {
+        let Some((p, n)) = parse_src(key) else { continue };
+        if p != path {
+            continue;
+        }
+        let fp = el["fp"].as_str().unwrap_or_default();
+        let at = tags.get(n - 1).filter(|t| fingerprint(src, t) == fp).map(|t| t.n).or_else(|| {
+            let same: Vec<usize> = tags.iter().filter(|t| fingerprint(src, t) == fp).map(|t| t.n).collect();
+            (same.len() == 1).then(|| same[0])
+        });
+        if let Some(n) = at {
+            out.insert(n, key.clone());
+        }
+    }
+    out
+}
+
+/// A site template as a render loads it: in preview every drawn element names its source (`data-hc-src`); in
+/// both modes an element with hand edits carries its id (`data-hc`).
+pub fn annotate(path: &str, src: &str, doc: &Value, preview: bool) -> String {
+    if !path.ends_with(".html") {
+        return src.to_string();
+    }
+    let tags = tags(src);
+    let edited = resolve(doc, path, src, &tags);
+    if !preview && edited.is_empty() {
+        return src.to_string();
+    }
+    let mut out = String::with_capacity(src.len() + tags.len() * 24);
+    let mut from = 0;
+    for t in &tags {
+        if UNMARKED.contains(&t.name.as_str()) {
+            continue;
+        }
+        let mut add = String::new();
+        if preview {
+            add.push_str(&format!(" data-hc-src=\"{}#{}\"", attr(path), t.n));
+        }
+        if let Some(key) = edited.get(&t.n) {
+            add.push_str(&format!(" data-hc=\"{}\"", id(key)));
+        }
+        if add.is_empty() {
+            continue;
+        }
+        out.push_str(&src[from..t.name_end]);
+        out.push_str(&add);
+        from = t.name_end;
+    }
+    out.push_str(&src[from..]);
+    out
+}
+
+// ---- styles ----
+
+/// Shadow presets: the only shadows an edit may set.
+pub const SHADOWS: [&str; 4] = ["none", "0 1px 3px rgba(16,16,24,.12)", "0 8px 24px -8px rgba(16,16,24,.25)", "0 24px 48px -16px rgba(16,16,24,.35)"];
+fn number_in(v: &str, unit: &str, lo: f64, hi: f64) -> Option<String> {
+    let n: f64 = v.strip_suffix(unit)?.parse().ok()?;
+    (n.is_finite() && (lo..=hi).contains(&n)).then(|| format!("{}{unit}", (n * 100.0).round() / 100.0))
+}
+
+fn color(v: &str) -> Option<String> {
+    let v = v.trim().to_ascii_lowercase();
+    if v == "transparent" {
+        return Some(v);
+    }
+    let hex = v.strip_prefix('#')?;
+    ([3, 4, 6, 8].contains(&hex.len()) && hex.bytes().all(|b| b.is_ascii_hexdigit())).then_some(v)
+}
+
+/// The CSS properties a hand edit may set.
+pub const PROPS: [&str; 15] = [
+    "color", "background-color", "border-color", "font-size", "font-weight", "font-style", "text-decoration-line", "text-align",
+    "line-height", "letter-spacing", "border-radius", "border-width", "padding", "opacity", "box-shadow",
+];
+
+/// Each value a hand edit sets, checked against what that property may hold. The page
+/// is a site visitor's too: nothing but these values reaches its stylesheet.
+pub fn check(prop: &str, value: &str) -> Result<String, String> {
+    let v = value.trim();
+    let ok = match prop {
+        "color" | "background-color" | "border-color" => color(v),
+        "font-size" => number_in(v, "px", 6.0, 400.0),
+        "font-weight" => v.parse::<u16>().ok().filter(|w| (100..=900).contains(w) && w % 100 == 0).map(|w| w.to_string()),
+        "font-style" => ["normal", "italic"].contains(&v).then(|| v.to_string()),
+        "text-decoration-line" => ["none", "underline", "line-through"].contains(&v).then(|| v.to_string()),
+        "text-align" => ["left", "center", "right", "justify"].contains(&v).then(|| v.to_string()),
+        "line-height" => v.parse::<f64>().ok().filter(|n| (0.5..=4.0).contains(n)).map(|n| format!("{}", (n * 100.0).round() / 100.0)),
+        "letter-spacing" => number_in(v, "em", -0.2, 1.0),
+        "border-radius" => number_in(v, "px", 0.0, 999.0),
+        "border-width" => number_in(v, "px", 0.0, 20.0),
+        "padding" => number_in(v, "px", 0.0, 400.0),
+        "opacity" => v.parse::<f64>().ok().filter(|n| (0.0..=1.0).contains(n)).map(|n| format!("{}", (n * 100.0).round() / 100.0)),
+        "box-shadow" => SHADOWS.contains(&v).then(|| v.to_string()),
+        _ => return Err(format!("不能在画板上改“{prop}”。")),
+    };
+    ok.ok_or_else(|| format!("“{prop}”不能设成“{value}”。"))
+}
+
+/// Sets (`Some`) or clears (`None`) one property of the element at `key` for `tier`, with `fp` as its
+/// fingerprint. Returns the new document.
+pub fn set_style(doc: &Value, key: &str, fp: &str, tier: &str, prop: &str, value: Option<&str>) -> Result<Value, String> {
+    if !TIERS.iter().any(|(t, _)| *t == tier) {
+        return Err(format!("宽度只能是 all、desktop、tablet 或 mobile，不是“{tier}”。"));
+    }
+    if !PROPS.contains(&prop) {
+        return Err(format!("不能在画板上改“{prop}”。"));
+    }
+    let value = value.map(|v| check(prop, v)).transpose()?;
+    let mut doc = if doc.is_object() { doc.clone() } else { json!({}) };
+    if !doc["els"].is_object() {
+        doc["els"] = json!({});
+    }
+    let Some(els) = doc["els"].as_object_mut() else { unreachable!() };
+    let el = els.entry(key.to_string()).or_insert_with(|| json!({}));
+    if !el["style"].is_object() {
+        el["style"] = json!({});
+    }
+    el["fp"] = json!(fp);
+    let Some(style) = el["style"].as_object_mut() else { unreachable!() };
+    let props = style.entry(tier.to_string()).or_insert_with(|| json!({}));
+    if !props.is_object() {
+        *props = json!({});
+    }
+    match value {
+        Some(v) => props[prop] = json!(v),
+        None => {
+            props.as_object_mut().map(|m| m.remove(prop));
+        }
+    }
+    style.retain(|_, m| m.as_object().is_some_and(|m| !m.is_empty()));
+    if style.is_empty() {
+        els.remove(key);
+    }
+    Ok(doc)
+}
+
+/// The stylesheet of every hand edit, or `None` when there are none.
+pub fn css(doc: &Value) -> Option<String> {
+    let els: &Map<String, Value> = doc["els"].as_object()?;
+    let mut out = String::new();
+    for (tier, media) in TIERS {
+        let mut rules = String::new();
+        for (key, el) in els {
+            let Some(props) = el["style"][tier].as_object().filter(|m| !m.is_empty()) else { continue };
+            let decls: Vec<String> = props
+                .iter()
+                .filter_map(|(p, v)| v.as_str().and_then(|v| check(p, v).ok()).map(|v| format!("{p}:{v} !important")))
+                .collect();
+            if decls.is_empty() {
+                continue;
+            }
+            let extra = if props.contains_key("border-width") { ";border-style:solid !important" } else { "" };
+            rules.push_str(&format!("[data-hc=\"{}\"]{{{}{extra}}}", id(key), decls.join(";")));
+        }
+        if rules.is_empty() {
+            continue;
+        }
+        if media.is_empty() {
+            out.push_str(&rules);
+        } else {
+            out.push_str(&format!("@media {media}{{{rules}}}"));
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// Where the canvas stylesheet goes: right before `</head>`, after the page's own styles; else where injected
+/// tags go.
+pub fn head_end(html: &str) -> usize {
+    html.to_ascii_lowercase().find("</head").unwrap_or_else(|| crate::site::head_insert_at(html))
+}
+
+// ---- text ----
+
+/// Replaces the text inside the element at position `n` of `src` with `text`. Only an element whose content
+/// is plain text in the file (no tags but `<br>`, no template blocks) can be edited this way: anything else
+/// comes from data or markup the page builds.
+pub fn set_text(src: &str, n: usize, text: &str) -> Result<String, String> {
+    let all = tags(src);
+    let tag = all.get(n.wrapping_sub(1)).ok_or("这个元素已经不在文件里了：请刷新预览。")?;
+    if UNMARKED.contains(&tag.name.as_str()) || RAW.contains(&tag.name.as_str()) {
+        return Err("这个元素的文字不能在画板上改。".into());
+    }
+    let rest = &src[tag.open_end..];
+    let close = rest.to_ascii_lowercase().find(&format!("</{}", tag.name)).ok_or("找不到这个元素的结尾：它的文字不能在画板上改。")?;
+    let inner = &rest[..close];
+    let plain = inner.replace("<br>", "").replace("<br/>", "").replace("<br />", "");
+    if plain.contains('<') || plain.contains('{') {
+        return Err("这段文字来自数据或模板代码，不能在画板上直接改：请在对话里说，或去内容里改。".into());
+    }
+    if text.chars().count() > 5000 {
+        return Err("文字太长了（最多 5000 字）。".into());
+    }
+    let escaped = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('{', "&#123;").replace('\n', "<br>");
+    Ok(format!("{}{}{}", &src[..tag.open_end], escaped, &rest[close..]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PAGE: &str = "<!doctype html><html><head><title>t</title><style>a<b{}</style></head><body>\n<h1 class=\"{{ c }}\">春季 新品</h1>{% if x %}<p>{{ \"<i>\" }}</p>{% endif %}<script>let a = '<div>';</script><a href=\"/\">去</a></body></html>";
+
+    #[test]
+    fn tags_skip_template_and_raw_text() {
+        let names: Vec<String> = tags(PAGE).into_iter().map(|t| t.name).collect();
+        assert_eq!(names, ["html", "head", "title", "style", "body", "h1", "p", "script", "a"]);
+    }
+
+    #[test]
+    fn annotate_marks_drawn_elements_and_edited_ones() {
+        let out = annotate("index.html", PAGE, &json!({}), true);
+        assert!(out.contains("<h1 data-hc-src=\"index.html#6\" class=\"{{ c }}\">"));
+        assert!(out.contains("<a data-hc-src=\"index.html#9\" href"));
+        assert!(!out.contains("<body data-hc"));
+        assert_eq!(annotate("index.html", PAGE, &json!({}), false), PAGE);
+
+        let doc = set_style(&json!({}), "index.html#6", "h1|春季 新品", "all", "color", Some("#FFF")).unwrap();
+        let live = annotate("index.html", PAGE, &doc, false);
+        assert!(live.contains(&format!("<h1 data-hc=\"{}\" class", id("index.html#6"))));
+        assert_eq!(css(&doc).unwrap(), format!("[data-hc=\"{}\"]{{color:#fff !important}}", id("index.html#6")));
+    }
+
+    #[test]
+    fn an_edit_follows_its_element_or_applies_to_nothing() {
+        let doc = set_style(&json!({}), "index.html#6", "h1|春季 新品", "mobile", "font-size", Some("20px")).unwrap();
+        let moved = PAGE.replace("<body>", "<body><nav>x</nav>");
+        let src = tags(&moved);
+        assert_eq!(resolve(&doc, "index.html", &moved, &src).get(&7).map(String::as_str), Some("index.html#6"));
+        let gone = PAGE.replace("春季 新品", "冬季");
+        assert!(resolve(&doc, "index.html", &gone, &tags(&gone)).is_empty());
+        assert!(css(&doc).unwrap().starts_with("@media (max-width: 599.98px){"));
+    }
+
+    #[test]
+    fn values_are_checked() {
+        assert!(check("color", "red;}body{display:none").is_err());
+        assert!(check("position", "fixed").is_err());
+        assert_eq!(check("font-size", "54px").unwrap(), "54px");
+        assert!(check("font-size", "5000px").is_err());
+        assert!(check("box-shadow", "0 0 0 red").is_err());
+        let doc = set_style(&json!({}), "a.html#1", "p|", "all", "color", Some("#123")).unwrap();
+        let cleared = set_style(&doc, "a.html#1", "p|", "all", "color", None).unwrap();
+        assert_eq!(cleared, json!({ "els": {} }));
+        assert!(set_style(&doc, "a.html#1", "p|", "all", "position", None).is_err());
+    }
+
+    #[test]
+    fn text_edits_only_touch_plain_text() {
+        let out = set_text(PAGE, 6, "夏季<新品>\n第二行").unwrap();
+        assert!(out.contains(">夏季&lt;新品&gt;<br>第二行</h1>"));
+        assert!(set_text(PAGE, 7, "x").is_err());
+        assert!(set_text(PAGE, 8, "x").is_err());
+        assert!(set_text(PAGE, 99, "x").is_err());
+    }
+}

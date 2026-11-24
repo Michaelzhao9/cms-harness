@@ -13,3 +13,11 @@
 #hc-overlay .hc-hover { position: absolute; border-radius: 3px; box-shadow: 0 0 0 1.5px #0a84ff; background: rgba(10, 132, 255, .06); }
 #hc-overlay .hc-picked { position: absolute; border-radius: 3px; box-shadow: 0 0 0 2px #0a84ff; background: rgba(10, 132, 255, .1); }
 html.hc-picking, html.hc-picking * { cursor: crosshair !important; }
+/* The canvas: the selected element, its handles and size. Elements from the same template line (a loop) share a lighter box. */
+#hc-overlay .hc-sel { position: absolute; box-shadow: 0 0 0 1.5px #0a6cff; }
+#hc-overlay .hc-same { position: absolute; box-shadow: 0 0 0 1px rgba(10, 108, 255, .45); }
+#hc-overlay .hc-handle { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; box-sizing: border-box;
+  border: 1.5px solid #0a6cff; border-radius: 2px; background: #fff; }
+#hc-overlay .hc-size { position: absolute; padding: 3px 7px; border-radius: 5px; background: #0a6cff; color: #fff; transform: translateX(-50%);
+  font: 600 11px/1.2 -apple-system, BlinkMacSystemFont, sans-serif; font-variant-numeric: tabular-nums; white-space: nowrap; }
+[data-hc-editing] { outline: 1.5px solid #0a6cff !important; outline-offset: 2px; cursor: text !important; }
