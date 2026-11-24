@@ -54,8 +54,14 @@ pub fn verify_password(hash: &str, password: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Emails are compared trimmed and lowercased.
+pub fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
 pub fn create_admin(conn: &Connection, email: &str, role: &str, password: Option<&str>) -> Result<String, String> {
-    if email.trim().is_empty() {
+    let email = normalize_email(email);
+    if email.is_empty() {
         return Err("邮箱不能为空，请提供管理员邮箱。".into());
     }
     if role_scopes(role).is_empty() {
@@ -68,12 +74,14 @@ pub fn create_admin(conn: &Connection, email: &str, role: &str, password: Option
             (0..20).map(|_| CHARS[OsRng.gen_range(0..CHARS.len())] as char).collect()
         }
     };
-    conn.execute(
-        "INSERT INTO admins(email, password_hash, role) VALUES(?1, ?2, ?3)
-         ON CONFLICT(email) DO UPDATE SET password_hash = excluded.password_hash, role = excluded.role",
-        params![email, hash_password(&password), role],
-    )
-    .map_err(|e| format!("保存管理员「{email}」失败：{e}"))?;
+    let hash = hash_password(&password);
+    // A reset ends the admin's sessions. Older databases may hold mixed-case emails: reset that row
+    // rather than adding a second admin.
+    let saved = conn
+        .execute("DELETE FROM admin_sessions WHERE admin_id IN (SELECT id FROM admins WHERE lower(email) = ?1)", [&email])
+        .and_then(|_| conn.execute("UPDATE admins SET password_hash = ?2, role = ?3 WHERE lower(email) = ?1", params![email, hash, role]))
+        .and_then(|n| if n > 0 { Ok(n) } else { conn.execute("INSERT INTO admins(email, password_hash, role) VALUES(?1, ?2, ?3)", params![email, hash, role]) });
+    saved.map_err(|e| format!("保存管理员「{email}」失败：{e}"))?;
     Ok(password)
 }
 

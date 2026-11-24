@@ -27,7 +27,10 @@ pub fn router(app: Shared) -> Router {
         .route("/api/v1/media", post(upload).layer(DefaultBodyLimit::max(21 * 1024 * 1024)))
         .route("/uploads/{*path}", get(serve))
         .layer(DefaultBodyLimit::max(MIB))
-        .with_state(app)
+        .with_state(app.clone())
+        .merge(crate::web::router(app.clone()))
+        .layer(axum::middleware::from_fn_with_state(app.clone(), crate::web::guard))
+        .layer(axum::middleware::from_fn_with_state(app, crate::web::security_headers))
 }
 
 /// `{ "ok": false, "error": … }` with the given status.

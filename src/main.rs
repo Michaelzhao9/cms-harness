@@ -5,9 +5,11 @@
 //!   harness-cms key <name> [write] [structure] [publish] print a new API key once
 //!
 //! Settings come from the environment: HC_PORT (4200), HC_DATA (data), HC_DB (<HC_DATA>/harness.db),
-//! HC_ORIGIN (http://127.0.0.1:<port>), HC_SITE_NAME (harness-cms), HC_ADMIN_PASSWORD (for `admin`).
+//! HC_ORIGIN (http://127.0.0.1:<port>), HC_SITE_NAME (harness-cms), HC_ADMIN_PASSWORD (for `admin`),
+//! HC_TRUST_PROXY (set to 1 behind a reverse proxy so login rate limits use X-Forwarded-For).
 
 use harness_cms::{api, auth, changes, store, App};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -141,7 +143,7 @@ fn serve(conn: rusqlite::Connection, data: PathBuf, port: String) -> ExitCode {
             #[cfg(not(unix))]
             let _ = tokio::signal::ctrl_c().await;
         };
-        match axum::serve(listener, api::router(app)).with_graceful_shutdown(stop).await {
+        match axum::serve(listener, api::router(app).into_make_service_with_connect_info::<SocketAddr>()).with_graceful_shutdown(stop).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("服务出错：{e}");
