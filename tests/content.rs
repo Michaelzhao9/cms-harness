@@ -1,10 +1,10 @@
 mod common;
 use axum::http::StatusCode;
 use common::*;
-use harness_cms::auth::Scope;
+use cms_harness::auth::Scope;
 use serde_json::json;
 
-fn seed(app: &harness_cms::Shared, public: bool) {
+fn seed(app: &cms_harness::Shared, public: bool) {
     news(app);
     ok(app, &builder(), "update_collection", json!({ "name": "news", "note": "n", "public_read": public }));
     for (t, s, d, tag) in [("开业", "open", "2026-11-01", "公司"), ("展会", "expo", "2026-11-20", "行业")] {
@@ -82,7 +82,7 @@ async fn single_collections_return_one_object_and_expand_works() {
 
 #[test]
 fn filtered_reads_use_the_field_index() {
-    use harness_cms::{changes, query};
+    use cms_harness::{changes, query};
     let app = app();
     seed(&app, true);
     let conn = app.conn();
@@ -108,7 +108,7 @@ async fn expand_rejects_non_relations_and_unknown_operators() {
 fn indexes_follow_published_definitions() {
     let app = app();
     seed(&app, true);
-    let names = |app: &harness_cms::Shared| -> Vec<String> {
+    let names = |app: &cms_harness::Shared| -> Vec<String> {
         let conn = app.conn();
         let mut st = conn.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'hc:%' ORDER BY name").unwrap();
         st.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()

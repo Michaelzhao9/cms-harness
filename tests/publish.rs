@@ -2,7 +2,7 @@ mod common;
 use common::*;
 use serde_json::json;
 
-fn one(app: &harness_cms::Shared, title: &str, slug: &str) -> i64 {
+fn one(app: &cms_harness::Shared, title: &str, slug: &str) -> i64 {
     ok(app, &editor(), "create_record", json!({ "collection": "news", "note": "n", "data": { "title": title, "slug": slug } }))["id"].as_i64().unwrap()
 }
 

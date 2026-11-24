@@ -1,10 +1,10 @@
 mod common;
 use common::*;
-use harness_cms::changes::{status, Target};
+use cms_harness::changes::{status, Target};
 use serde_json::json;
 
-fn create(app: &harness_cms::Shared, note: &str) -> Result<serde_json::Value, String> {
-    harness_cms::tools::call(app, &builder(), "create_collection",
+fn create(app: &cms_harness::Shared, note: &str) -> Result<serde_json::Value, String> {
+    cms_harness::tools::call(app, &builder(), "create_collection",
         json!({ "name": "x", "title": "X", "fields": [], "note": note }))
 }
 
@@ -23,8 +23,8 @@ fn argument_errors_name_the_parameter() {
 #[test]
 fn every_listed_tool_is_implemented() {
     let app = app();
-    for spec in harness_cms::tools::specs() {
-        if let Err(e) = harness_cms::tools::call(&app, &builder(), spec.name, json!({})) {
+    for spec in cms_harness::tools::specs() {
+        if let Err(e) = cms_harness::tools::call(&app, &builder(), spec.name, json!({})) {
             assert!(!e.contains("尚未实现"), "{} has no implementation: {e}", spec.name);
         }
     }

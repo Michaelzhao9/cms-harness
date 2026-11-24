@@ -6,7 +6,7 @@ use crate::{changes, media, query, tools, Shared};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Multipart, Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
-use axum::response::{Html, IntoResponse, Response};
+use axum::response::{IntoResponse, Response};
 use axum::{routing::{get, post}, Json, Router};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -18,16 +18,19 @@ const MIB: usize = 1024 * 1024;
 
 pub fn router(app: Shared) -> Router {
     Router::new()
-        .route("/", get(home))
         .route("/api/v1/tools", get(list_tools))
         .route("/api/v1/tools/{name}", post(call_tool).layer(DefaultBodyLimit::max(8 * MIB)))
         .route("/mcp", post(mcp).layer(DefaultBodyLimit::max(8 * MIB)))
-        .route("/api/v1/content/{collection}", get(list))
+        .route("/api/v1/site/bundle", post(site_bundle).layer(DefaultBodyLimit::max(crate::site::MAX_BUNDLE_BYTES)))
+        .route("/api/v1/content/{collection}", get(list).post(submit).layer(DefaultBodyLimit::max(crate::access::MAX_SUBMIT_BYTES + 1024)))
         .route("/api/v1/content/{collection}/{id}", get(one))
-        .route("/api/v1/media", post(upload).layer(DefaultBodyLimit::max(21 * 1024 * 1024)))
+        .route("/api/v1/media", post(upload).layer(DefaultBodyLimit::max(media::UPLOAD_BODY_LIMIT)))
         .route("/uploads/{*path}", get(serve))
         .layer(DefaultBodyLimit::max(MIB))
-        .with_state(app)
+        .with_state(app.clone())
+        .merge(crate::web::router(app.clone()))
+        .layer(axum::middleware::from_fn_with_state(app.clone(), crate::web::guard))
+        .layer(axum::middleware::from_fn_with_state(app, crate::web::security_headers))
 }
 
 /// `{ "ok": false, "error": … }` with the given status.
@@ -47,20 +50,52 @@ fn db(e: impl std::fmt::Display) -> Fail {
 }
 
 async fn list(State(app): State<Shared>, Path(c): Path<String>, Query(p): Params, h: HeaderMap) -> Response {
-    read(app, c, None, p, bearer(&h)).await
+    read(app, c, None, p, &h).await
+}
+
+/// `POST /api/v1/content/<collection>`: a visitor or a logged-in member adds a record, when the collection's
+/// `create` rule allows it. It is live at once.
+async fn submit(State(app): State<Shared>, Path(c): Path<String>, peer: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>, h: HeaderMap, body: Bytes) -> Response {
+    let data: Value = match serde_json::from_slice(&body) {
+        Ok(Value::Object(o)) => Value::Object(o),
+        _ => return error_response(StatusCode::BAD_REQUEST, "请提交一个 JSON 对象，例如 {\"name\": \"小王\"}。".into()),
+    };
+    let trust = std::env::var("HC_TRUST_PROXY").is_ok_and(|v| v == "1");
+    let client = crate::web::client_key(&h, peer.map(|axum::Extension(axum::extract::ConnectInfo(a))| a), trust);
+    let token = crate::web::session::cookie_value(&h, crate::members::COOKIE);
+    let done = tokio::task::spawn_blocking(move || {
+        let conn = app.conn();
+        let who = match crate::access::viewer(&conn, None, token.as_deref()) {
+            crate::access::Viewer::Member(id) => crate::access::Submitter::Member(id),
+            _ => crate::access::Submitter::Public(client),
+        };
+        crate::access::submit(&conn, &c, &data, &who)
+    })
+    .await;
+    match done {
+        Ok(Ok(id)) => (StatusCode::CREATED, Json(json!({ "ok": true, "id": id }))).into_response(),
+        Ok(Err(e)) => {
+            let status = if e.contains("太频繁") { StatusCode::TOO_MANY_REQUESTS } else if e.contains("登录") { StatusCode::UNAUTHORIZED } else if e.contains("不接受") || e.starts_with("没有可以提交") { StatusCode::FORBIDDEN } else { StatusCode::BAD_REQUEST };
+            error_response(status, e)
+        }
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
 }
 
 async fn one(State(app): State<Shared>, Path((c, id)): Path<(String, String)>, Query(p): Params, h: HeaderMap) -> Response {
     match id.parse() {
-        Ok(id) => read(app, c, Some(id), p, bearer(&h)).await,
+        Ok(id) => read(app, c, Some(id), p, &h).await,
         Err(_) => error_response(StatusCode::NOT_FOUND, format!("记录“{id}”不存在：记录编号是整数。")),
     }
 }
 
-async fn read(app: Shared, collection: String, id: Option<i64>, params: Vec<(String, String)>, key: Option<String>) -> Response {
+async fn read(app: Shared, collection: String, id: Option<i64>, params: Vec<(String, String)>, h: &HeaderMap) -> Response {
+    let key = bearer(h);
+    let token = crate::web::session::cookie_value(h, crate::members::COOKIE);
     let done = tokio::task::spawn_blocking(move || {
         let conn = app.conn();
-        read_blocking(&conn, &collection, id, &params, key.as_deref())
+        let viewer = crate::access::viewer(&conn, key.as_deref(), token.as_deref());
+        read_blocking(&conn, &collection, id, &params, viewer)
     })
     .await;
     let (public, result) = match done {
@@ -78,18 +113,22 @@ async fn read(app: Shared, collection: String, id: Option<i64>, params: Vec<(Str
 }
 
 /// (collection is public, result)
-fn read_blocking(conn: &Connection, name: &str, id: Option<i64>, params: &[(String, String)], key: Option<&str>) -> (bool, Result<Value, Fail>) {
+fn read_blocking(conn: &Connection, name: &str, id: Option<i64>, params: &[(String, String)], viewer: crate::access::Viewer) -> (bool, Result<Value, Fail>) {
     let def = match changes::live_def(conn, name) {
         Ok(d) => d,
         Err(e) => return (false, Err((StatusCode::NOT_FOUND, e))),
     };
-    let public = def.access.public_read;
-    let authed = key.is_some_and(|k| actor_from_key(conn, k).is_some());
-    if !public && !authed {
-        return (false, Err((StatusCode::UNAUTHORIZED, format!("集合“{name}”不是公开的：请在 Authorization 头里带上有效的 Bearer 密钥。"))));
-    }
+    let public = def.access.is_public();
+    let Some(owner) = crate::access::read_filter(&def.access, viewer) else {
+        let why = match def.access.read {
+            crate::schema::Read::Members | crate::schema::Read::Owner => "只有登录的会员能看",
+            _ => "不是公开的",
+        };
+        return (false, Err((StatusCode::UNAUTHORIZED, format!("集合“{name}”{why}：请登录，或在 Authorization 头里带上有效的 Bearer 密钥。"))));
+    };
     let run = || -> Result<Value, Fail> {
         let (mut q, expand) = query::parse_params(&def, params).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+        q.owner = owner;
         if let Some(id) = id {
             q.filters.push(("id".into(), query::Op::Eq, json!(id)));
         } else if def.single {
@@ -100,7 +139,7 @@ fn read_blocking(conn: &Connection, name: &str, id: Option<i64>, params: &[(Stri
         for r in rows {
             let mut item = r.doc;
             item["id"] = json!(r.id);
-            expand_item(conn, &def, &mut item, &expand, authed).map_err(db)?;
+            expand_item(conn, &def, &mut item, &expand, viewer).map_err(db)?;
             items.push(item);
         }
         let not_found = |m: String| (StatusCode::NOT_FOUND, m);
@@ -117,11 +156,12 @@ fn read_blocking(conn: &Connection, name: &str, id: Option<i64>, params: &[(Stri
 
 /// Replaces relation values with the target's live record, one level deep.
 /// Targets in a private collection are only expanded for a request that carries a valid key.
-fn expand_item(conn: &Connection, def: &crate::schema::CollectionDef, item: &mut Value, expand: &[String], authed: bool) -> Result<(), rusqlite::Error> {
+fn expand_item(conn: &Connection, def: &crate::schema::CollectionDef, item: &mut Value, expand: &[String], viewer: crate::access::Viewer) -> Result<(), rusqlite::Error> {
     for name in expand {
         let Some(target) = def.field(name).and_then(|f| f.target.as_deref()) else { continue };
         let Ok(tdef) = changes::live_def(conn, target) else { continue };
-        if !tdef.access.public_read && !authed {
+        // Owner-only targets are expanded only for keys: a member could otherwise see others' records through a relation.
+        if crate::access::read_filter(&tdef.access, viewer) != Some(None) {
             continue;
         }
         let mut fetch = |v: &Value| -> Result<Value, rusqlite::Error> {
@@ -256,6 +296,23 @@ async fn call_tool(State(app): State<Shared>, Path(name): Path<String>, headers:
     }
 }
 
+/// `POST /api/v1/site/bundle?note=…&replace=1`: a zip as the raw body, for bundles too large for a tool call.
+/// The same tool, the same rules and scope check as `upload_site_bundle`.
+async fn site_bundle(State(app): State<Shared>, Query(p): Params, headers: HeaderMap, body: Bytes) -> Response {
+    use base64::Engine;
+    let actor = match actor(&app, &headers).await {
+        Ok(a) => a,
+        Err(r) => return *r,
+    };
+    let param = |k: &str| p.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()).unwrap_or_default();
+    let replace = matches!(param("replace").as_str(), "1" | "true");
+    let args = json!({ "zip_base64": base64::engine::general_purpose::STANDARD.encode(&body), "note": param("note"), "replace": replace });
+    match run_tool(&app, actor, "upload_site_bundle".into(), args).await {
+        Ok(result) => Json(json!({ "ok": true, "result": result })).into_response(),
+        Err(e) => error_response(StatusCode::BAD_REQUEST, e),
+    }
+}
+
 // Protocol revisions checked against https://modelcontextprotocol.io/docs/2026-07-28/learn/versioning on 2026-11-23.
 // 2026-07-28 has no initialize handshake: clients send tools/list and tools/call directly, which this stateless
 // endpoint accepts. Older clients open with initialize and one of the handshake revisions.
@@ -287,7 +344,7 @@ async fn mcp(State(app): State<Shared>, headers: HeaderMap, body: Bytes) -> Resp
         return StatusCode::ACCEPTED.into_response();
     };
     let params = req.get("params").cloned().unwrap_or(Value::Null);
-    let info = json!({ "name": "harness-cms", "version": env!("CARGO_PKG_VERSION") });
+    let info = json!({ "name": "cms-harness", "version": env!("CARGO_PKG_VERSION") });
     match req["method"].as_str().unwrap_or_default() {
         "initialize" => {
             let asked = params["protocolVersion"].as_str().unwrap_or_default();
@@ -327,41 +384,3 @@ async fn mcp(State(app): State<Shared>, headers: HeaderMap, body: Bytes) -> Resp
     }
 }
 
-// ---- placeholder front page ----
-
-fn escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
-}
-
-async fn home(State(app): State<Shared>) -> Html<String> {
-    let name = escape(&app.site_name);
-    let api = escape(&format!("{}/api/v1/content/", app.origin));
-    Html(format!(
-        r#"<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{name}</title>
-<style>
-:root {{ color-scheme: light dark; }}
-body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: #fcfcfd; color: #1d1d1f;
-  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif; }}
-main {{ max-width: 34em; padding: 32px 24px; }}
-h1 {{ margin: 0 0 8px; font-size: 32px; letter-spacing: -0.02em; }}
-p {{ margin: 0 0 6px; color: #424245; }}
-code {{ font: 14px ui-monospace, "SF Mono", Menlo, monospace; }}
-@media (prefers-color-scheme: dark) {{ body {{ background: #111113; color: #f2f2f4; }} p {{ color: #b8b8bf; }} }}
-</style>
-</head>
-<body>
-<main>
-<h1>{name}</h1>
-<p>后台已就绪。</p>
-<p>前台通过内容接口读取已发布的内容：<code>{api}</code></p>
-</main>
-</body>
-</html>
-"#
-    ))
-}

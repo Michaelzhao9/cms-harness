@@ -1,4 +1,4 @@
-use harness_cms::schema::*;
+use cms_harness::schema::*;
 use serde_json::{json, Value};
 
 fn news() -> CollectionDef {

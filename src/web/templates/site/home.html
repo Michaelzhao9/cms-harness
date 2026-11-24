@@ -1,0 +1,11 @@
+{% extends "_hc/layout.html" %}
+{% block main %}
+<h1>{{ site.name }}</h1>
+{% if collections %}
+<ul class="list">
+{% for c in collections %}<li><a href="/{{ c.name }}">{{ c.title }}</a></li>
+{% endfor %}</ul>
+{% else %}
+<p class="empty">网站还没有内容。</p>
+{% endif %}
+{% endblock %}

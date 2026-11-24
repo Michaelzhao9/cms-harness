@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }}{% endblock %}
+{% block main %}
+{%- import "icons.html" as i %}
+<div class="content">
+<section class="records" aria-label="{{ heading }}">
+<header class="head">
+<h1>{{ heading }}</h1>
+<span class="sum">{{ summary }}</span>
+</header>
+{% if not live %}<p class="note">会员登录还是草稿：发布之后，访客才能在网站上注册和登录。</p>{% endif %}
+<nav class="tabs" aria-label="按状态筛选">
+{% for t in tabs %}<a href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.label }}</a>
+{% endfor -%}
+</nav>
+<form class="filters" method="get">
+{% if tab %}<input type="hidden" name="status" value="{{ tab }}">{% endif %}
+<div class="fd"><label class="lb" for="q-members">邮箱或名字</label><input class="in" id="q-members" type="text" name="q" value="{{ q }}"></div>
+<button type="submit" class="btn2">{{ i.icon("funnel", 16) }}筛选</button>
+</form>
+{% if error %}<p class="note bad" role="alert">{{ error }}</p>{% endif %}
+<div class="scroll">
+<table class="table">
+<thead><tr>{% for c in columns %}<th scope="col">{{ c.title }}</th>{% endfor %}<th><span class="sr">操作</span></th></tr></thead>
+<tbody>
+{% for r in rows -%}
+<tr class="row">
+{%- for c in r.cells %}<td{% if loop.first %} class="lead"{% endif %}>{% if c %}{{ c }}{% else %}<span class="muted">未填</span>{% endif %}</td>{% endfor %}
+<td class="end"><form method="post" action="/admin/members/{{ r.id }}/status"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="status" value="{{ 'active' if r.disabled else 'disabled' }}"><button type="submit" class="txt">{{ "恢复" if r.disabled else "停用" }}</button></form></td>
+</tr>
+{% else -%}
+<tr><td class="empty" colspan="{{ columns|length + 1 }}">{{ "没有符合条件的用户。" if (tab or q) else "还没有人注册。" }}</td></tr>
+{% endfor -%}
+</tbody>
+</table>
+</div>
+{% if pager -%}
+<nav class="pager" aria-label="分页">
+{% if pager.prev %}<a href="{{ pager.prev }}">上一页</a>{% endif %}
+<span>第 {{ pager.page }} / {{ pager.pages }} 页</span>
+{% if pager.next %}<a href="{{ pager.next }}">下一页</a>{% endif %}
+</nav>
+{% endif -%}
+</section>
+</div>
+{% endblock %}

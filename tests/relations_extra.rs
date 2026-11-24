@@ -2,11 +2,11 @@ mod common;
 use common::*;
 use serde_json::json;
 
-fn coll(app: &harness_cms::Shared, name: &str, fields: serde_json::Value) {
+fn coll(app: &cms_harness::Shared, name: &str, fields: serde_json::Value) {
     ok(app, &builder(), "create_collection", json!({ "name": name, "title": name, "note": "n", "fields": fields }));
 }
 
-fn rec(app: &harness_cms::Shared, collection: &str, data: serde_json::Value) -> i64 {
+fn rec(app: &cms_harness::Shared, collection: &str, data: serde_json::Value) -> i64 {
     ok(app, &editor(), "create_record", json!({ "collection": collection, "note": "n", "data": data }))["id"].as_i64().unwrap()
 }
 

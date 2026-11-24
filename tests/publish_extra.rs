@@ -2,13 +2,13 @@ mod common;
 use common::*;
 use serde_json::json;
 
-fn one(app: &harness_cms::Shared, title: &str, slug: &str) -> i64 {
+fn one(app: &cms_harness::Shared, title: &str, slug: &str) -> i64 {
     ok(app, &editor(), "create_record", json!({ "collection": "news", "note": "新建", "data": { "title": title, "slug": slug } }))["id"]
         .as_i64()
         .unwrap()
 }
 
-fn count(app: &harness_cms::Shared, table: &str) -> i64 {
+fn count(app: &cms_harness::Shared, table: &str) -> i64 {
     app.conn().query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).unwrap()
 }
 
@@ -128,8 +128,8 @@ fn a_deleted_record_stays_restorable_whatever_is_done_to_its_tombstone() {
     ok(&app, &editor(), "delete_record", json!({ "id": a, "note": "删" }));
     publish_all(&app);
     let target = format!("record:{a}");
-    let live = |app: &harness_cms::Shared| ok(app, &reader(), "list_versions", json!({ "target": format!("record:{a}") }))[1]["id"].clone();
-    let rows = |app: &harness_cms::Shared| -> i64 { app.conn().query_row("SELECT count(*) FROM records WHERE id = ?1", [a], |r| r.get(0)).unwrap() };
+    let live = |app: &cms_harness::Shared| ok(app, &reader(), "list_versions", json!({ "target": format!("record:{a}") }))[1]["id"].clone();
+    let rows = |app: &cms_harness::Shared| -> i64 { app.conn().query_row("SELECT count(*) FROM records WHERE id = ?1", [a], |r| r.get(0)).unwrap() };
 
     // Discarding on a bare tombstone keeps the row.
     assert_eq!(ok(&app, &editor(), "discard_draft", json!({ "target": target }))["status"], "deleted");

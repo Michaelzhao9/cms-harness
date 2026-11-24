@@ -1,9 +1,9 @@
 #![allow(dead_code)]
-use harness_cms::{store, App, Shared};
+use cms_harness::{store, App, Shared};
 use rand::Rng;
 
 pub fn app() -> Shared {
-    let dir = std::env::temp_dir().join(format!("harness-cms-test-{:016x}", rand::thread_rng().gen::<u64>()));
+    let dir = std::env::temp_dir().join(format!("cms-harness-test-{:016x}", rand::thread_rng().gen::<u64>()));
     std::fs::create_dir_all(&dir).unwrap();
     App::new(
         store::open(":memory:").unwrap(),
@@ -13,7 +13,7 @@ pub fn app() -> Shared {
     )
 }
 
-use harness_cms::auth::{Actor, Scope};
+use cms_harness::auth::{Actor, Scope};
 use serde_json::{json, Value};
 
 pub fn builder() -> Actor {
@@ -29,11 +29,11 @@ pub fn reader() -> Actor {
 }
 
 pub fn ok(app: &Shared, who: &Actor, tool: &str, args: Value) -> Value {
-    harness_cms::tools::call(app, who, tool, args).unwrap_or_else(|e| panic!("{tool} failed: {e}"))
+    cms_harness::tools::call(app, who, tool, args).unwrap_or_else(|e| panic!("{tool} failed: {e}"))
 }
 
 pub fn err(app: &Shared, who: &Actor, tool: &str, args: Value) -> String {
-    match harness_cms::tools::call(app, who, tool, args) {
+    match cms_harness::tools::call(app, who, tool, args) {
         Ok(v) => panic!("{tool} should have failed but returned {v}"),
         Err(e) => e,
     }
@@ -65,7 +65,7 @@ async fn send(app: &Shared, req: axum::http::request::Builder, key: Option<&str>
         Some(k) => req.header(header::AUTHORIZATION, format!("Bearer {k}")),
         None => req,
     };
-    let resp = harness_cms::api::router(app.clone()).oneshot(req.body(body).unwrap()).await.unwrap();
+    let resp = cms_harness::api::router(app.clone()).oneshot(req.body(body).unwrap()).await.unwrap();
     let (status, headers) = (resp.status(), resp.headers().clone());
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     (status, headers, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
@@ -82,7 +82,7 @@ pub async fn post_json(app: &Shared, path: &str, key: Option<&str>, body: Value)
 }
 
 pub fn key(app: &Shared, scopes: &[Scope]) -> String {
-    harness_cms::auth::create_key(&app.conn(), "test", scopes).unwrap()
+    cms_harness::auth::create_key(&app.conn(), "test", scopes).unwrap()
 }
 
 pub async fn post_raw(app: &Shared, path: &str, key: Option<&str>, body: &str) -> (StatusCode, Value) {
@@ -93,6 +93,90 @@ pub async fn post_raw(app: &Shared, path: &str, key: Option<&str>, body: &str) -
 
 /// The body of a GET as text.
 pub async fn get_text(app: &Shared, path: &str) -> String {
-    let resp = harness_cms::api::router(app.clone()).oneshot(Request::get(path).body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    let resp = cms_harness::api::router(app.clone()).oneshot(Request::get(path).body(axum::body::Body::empty()).unwrap()).await.unwrap();
     String::from_utf8(resp.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap()
+}
+
+// ---- admin UI helpers ----
+
+async fn send_text(app: &Shared, req: Request<axum::body::Body>) -> (StatusCode, HeaderMap, String) {
+    let resp = cms_harness::api::router(app.clone()).oneshot(req).await.unwrap();
+    let (status, headers) = (resp.status(), resp.headers().clone());
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    (status, headers, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Creates an admin `<role>@test` with password `secret-pass` and logs in through the route.
+/// Returns the `hc_admin=<token>` cookie pair and the session's CSRF token.
+pub async fn admin_session(app: &Shared, role: &str) -> (String, String) {
+    let email = format!("{role}@test");
+    cms_harness::auth::create_admin(&app.conn(), &email, role, Some("secret-pass")).unwrap();
+    let (status, headers, body) = post_form(app, "/admin/login", None, &[("email", &email), ("password", "secret-pass")]).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "login failed: {body}");
+    let cookie = headers[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_string();
+    let mut h = HeaderMap::new();
+    h.insert(header::COOKIE, cookie.parse().unwrap());
+    let csrf = cms_harness::web::session::from_cookie(&app.conn(), &h).unwrap().csrf;
+    (cookie, csrf)
+}
+
+/// GET with an optional `Cookie` header; the body as text.
+pub async fn get_with(app: &Shared, path: &str, cookie: Option<&str>) -> (StatusCode, HeaderMap, String) {
+    let mut req = Request::get(path);
+    if let Some(c) = cookie {
+        req = req.header(header::COOKIE, c);
+    }
+    send_text(app, req.body(axum::body::Body::empty()).unwrap()).await
+}
+
+fn form_encode(fields: &[(&str, &str)]) -> String {
+    let enc = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
+    fields.iter().map(|(k, v)| format!("{}={}", enc(k), enc(v))).collect::<Vec<_>>().join("&")
+}
+
+/// A form-urlencoded POST. `session` is `(cookie, csrf)` from `admin_session`: it sends the cookie and adds a `csrf` field.
+pub async fn post_form(app: &Shared, path: &str, session: Option<&(String, String)>, fields: &[(&str, &str)]) -> (StatusCode, HeaderMap, String) {
+    post_form_with(app, path, session, fields, &[]).await
+}
+
+/// `post_form` with extra request headers.
+pub async fn post_form_with(app: &Shared, path: &str, session: Option<&(String, String)>, fields: &[(&str, &str)], extra: &[(&str, &str)]) -> (StatusCode, HeaderMap, String) {
+    let mut all = fields.to_vec();
+    let mut req = Request::post(path).header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    if let Some((cookie, csrf)) = session {
+        req = req.header(header::COOKIE, cookie.as_str());
+        all.push(("csrf", csrf.as_str()));
+    }
+    for (k, v) in extra {
+        req = req.header(*k, *v);
+    }
+    send_text(app, req.body(axum::body::Body::from(form_encode(&all))).unwrap()).await
+}
+
+/// The `src` of the workbench iframe marked `data-frame="<which>"` (`draft` or `live`).
+pub fn frame_src(page: &str, which: &str) -> String {
+    let at = page.find(&format!("data-frame=\"{which}\"")).unwrap_or_else(|| panic!("no {which} frame: {page}"));
+    let tag = &page[page[..at].rfind("<iframe").unwrap()..at];
+    let s = tag.find("src=\"").unwrap() + 5;
+    tag[s..s + tag[s..].find('"').unwrap()].to_string()
+}
+
+/// The workbench's preview prefix (`/_hc/preview/<token>`) for this admin session, as the page hands it out.
+pub async fn preview_base(app: &Shared, cookie: &str) -> String {
+    let (_, _, page) = get_with(app, "/admin", Some(cookie)).await;
+    let at = page.find("data-preview=\"").unwrap_or_else(|| panic!("no preview base: {page}")) + "data-preview=\"".len();
+    page[at..at + page[at..].find('"').unwrap()].to_string()
+}
+
+/// Every `<script` on an admin page is the one external `admin.js`, with nothing inside; no inline styles.
+pub fn assert_only_admin_js(page: &str) {
+    for (i, _) in page.match_indices("<script") {
+        let rest = &page[i..];
+        assert!(rest.starts_with("<script type=\"module\" src=\"/admin/static/admin.js?v="), "unexpected script: {}", &rest[..rest.len().min(160)]);
+        let end = rest.find('>').unwrap();
+        assert!(rest[end + 1..].starts_with("</script>"), "script with content: {}", &rest[..rest.len().min(160)]);
+    }
+    for bad in ["<style", "style="] {
+        assert!(!page.contains(bad), "page contains {bad}: {page}");
+    }
 }

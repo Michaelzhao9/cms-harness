@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }}{% endblock %}
+{% block main %}
+<div class="page">
+<section class="confirm" aria-labelledby="confirm-h">
+<h1 id="confirm-h">{{ heading }}</h1>
+<p>{{ message }}</p>
+<form method="post" action="{{ action|safe }}">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="confirm" value="1">
+{% if note %}<input type="hidden" name="note" value="{{ note }}">{% endif %}
+<div class="actions"><button type="submit" class="btn danger">{{ button }}</button><a class="txt" href="{{ back|safe }}">取消</a></div>
+</form>
+</section>
+</div>
+{% endblock %}

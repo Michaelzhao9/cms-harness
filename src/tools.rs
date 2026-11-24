@@ -33,13 +33,13 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<NoArgs>("list_collections", Scope::Read, "列出所有集合（不含已删除的），带状态和记录数。"),
             spec::<NameArgs>("get_collection", Scope::Read, "查看一个集合的定义（有草稿时返回草稿）、状态和记录数。"),
             spec::<CreateCollection>("create_collection", Scope::Structure, "新建集合草稿：名字、标题和字段列表。发布后才对外生效。"),
-            spec::<UpdateCollection>("update_collection", Scope::Structure, "修改集合草稿：标题、公开读取、增加/修改/删除字段。"),
+            spec::<UpdateCollection>("update_collection", Scope::Structure, "修改集合草稿：标题、谁能看（read：public 公开 / members 登录会员 / owner 每个会员只看自己的 / private 仅后台）、谁能从网站提交（create：none / members / public，提交即上线并记下提交人）、增加/修改/删除字段。会员相关的规则要先用 set_member_login 打开会员登录。"),
             spec::<DeleteCollection>("delete_collection", Scope::Structure, "删除集合草稿；从未发布的集合直接消失，已发布的待发布时才真正删除。"),
             spec::<CreateRecord>("create_record", Scope::Write, "新建记录草稿：集合名和字段值（data）。发布后才对外生效。"),
             spec::<UpdateRecord>("update_record", Scope::Write, "修改记录草稿：只需传要改的字段，null 表示清空该字段。"),
             spec::<DeleteRecord>("delete_record", Scope::Write, "删除记录；从未发布的记录直接消失，已发布的待发布时才真正删除。"),
             spec::<GetRecord>("get_record", Scope::Read, "按编号读取一条记录（有草稿时返回草稿）和状态。"),
-            spec::<QueryRecords>("query_records", Scope::Read, "查询集合的记录（草稿视图）。filter 与 sort 只能用 id 或设置了 index/unique 的字段。"),
+            spec::<QueryRecords>("query_records", Scope::Read, "查询集合的记录（草稿视图）。filter 与 sort 只能用 id 或设置了 index/unique 的字段；status 可只看某几种状态的记录。"),
             spec::<NoArgs>("list_pending", Scope::Read, "列出所有待发布的改动：改了什么、谁改的、波及多少记录。"),
             spec::<Publish>("publish", Scope::Publish, "把待发布的改动发布上线：全部，或只发 targets 里列出的几项。发布前整体检查，不通过就什么都不上线。"),
             spec::<TargetArgs>("list_versions", Scope::Read, "列出一个对象的发布历史（最近 30 个版本）。target 形如 record:12、collection:news。"),
@@ -50,7 +50,17 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<DeleteView>("delete_view", Scope::Structure, "删除界面草稿；从未发布的界面直接消失，已发布的待发布时才真正删除。"),
             spec::<NoArgs>("get_site_notes", Scope::Read, "读取站点说明（有草稿时返回草稿）和状态。"),
             spec::<SetSiteNotes>("set_site_notes", Scope::Structure, "修改站点说明草稿：一段给对话模型看的文字，最多 20000 个字符。发布后才生效。"),
+            spec::<NoArgs>("get_site_settings", Scope::Read, "读取网站的前端设置：import_map（浏览器里 import 的包从哪个网址加载）和 script_origins（网站允许加载脚本的其他来源，默认 https://esm.sh）。"),
+            spec::<SetSiteSettings>("set_site_settings", Scope::Structure, "修改网站的前端设置（草稿，发布后生效）。只传要改的项，传 null 恢复默认。例：用 React 时 import_map 设为 {\"imports\": {\"react\": \"https://esm.sh/react@19\", \"react/jsx-runtime\": \"https://esm.sh/react@19/jsx-runtime\", \"react-dom/client\": \"https://esm.sh/react-dom@19/client\"}}。"),
+            spec::<SetMemberLogin>("set_member_login", Scope::Structure, "打开或关闭网站的会员注册和登录（草稿，发布后生效）。打开后网站有 /account/signup、/account/login、/account/logout 页面和 /api/v1/members/* 接口，模板里 member 是当前登录的会员；后台左边会自动出现「用户管理」，关闭后它自动消失；要改它的样子，用 set_view 并写 collection: \"_members\"（字段 email、name、status、created_at、last_login）。网站要做登录功能时用它，不要自己建会员集合。"),
+            spec::<ListMembers>("list_members", Scope::Read, "列出网站的注册会员（不含密码）：可按状态 active/disabled 和关键词筛选。"),
+            spec::<SetMemberStatus>("set_member_status", Scope::Write, "停用或恢复一个会员（立即生效）：停用后他不能登录，已登录的会话也会失效。"),
             spec::<UploadMedia>("upload_media", Scope::Write, "上传图片或 PDF（base64，最大 5 MB）：返回 /uploads/ 路径，可填进 media 字段。"),
+            spec::<NoArgs>("list_site_files", Scope::Read, "列出网站的源文件：状态、字节数和行数（有草稿时按草稿）。不含内容，读内容用 get_site_file。"),
+            spec::<PathArgs>("get_site_file", Scope::Read, "按路径读一个网站文件：内容（有草稿时返回草稿）和状态。"),
+            spec::<WriteSiteFile>("write_site_file", Scope::Structure, "新建或替换一个网站文件的草稿，发布后上线。最多 2000 个文件。路径：相对路径，字母（区分大小写）、数字和 . _ / -，不能有 ..，最长 200 个字符，不能在 admin/ api/ uploads/ _hc/ 下，也不能叫 mcp。文本文件（html css js mjs jsx ts tsx json svg txt md xml webmanifest map）：content 是文字，最大 1 MB。二进制文件（png jpg jpeg gif webp avif ico woff woff2 ttf otf mp4 webm）：content 是标准 base64，解码后最大 5 MB。`.html` 是 minijinja 模板，按路径访问（/about 对应 about.html 或 about/index.html），可以 extends 或 include 其他文件，用 collection(名字, filter?, sort?, limit?, offset?) 和 record(集合, 编号) 读线上内容，还有 site、request、member。`.jsx/.ts/.tsx` 会转换后提供（去掉 TypeScript，JSX 走 react/jsx-runtime）。写入时检查语法。"),
+            spec::<DeleteSiteFile>("delete_site_file", Scope::Structure, "删除一个网站文件：从没发布过的立刻消失，已上线的在发布删除后才消失。"),
+            spec::<UploadSiteBundle>("upload_site_bundle", Scope::Structure, "一次上传一个网站文件的 zip（比如 Vite、Next 导出的静态网站，图片和字体一起）作为草稿：每个文件都按 write_site_file 的规则检查，解压后最大 50 MB。有一个文件不合格，整个包都不收，并列出所有问题。replace: true 时，线上有而包里没有的文件会同时标记为待删除；否则保持不变。只有一层顶层文件夹且里面有 index.html 时会去掉这层；目录和 macOS 元数据会跳过。大包也可以把 zip 原样 POST 到 /api/v1/site/bundle?note=...&replace=1。"),
         ]
     })
 }
@@ -140,7 +150,27 @@ fn dispatch(app: &App, conn: &Connection, actor: &Actor, name: &str, args: Value
         "delete_view" => delete_view(conn, actor, parse(name, args)?),
         "get_site_notes" => parse::<NoArgs>(name, args).and_then(|_| get_site_notes(conn)),
         "set_site_notes" => set_site_notes(conn, actor, parse(name, args)?),
+        "set_member_login" => {
+            let a: SetMemberLogin = parse(name, args)?;
+            crate::members::set_login(conn, actor, a.enabled, check_note(&a.note)?)
+        }
+        "list_members" => {
+            let a: ListMembers = parse(name, args)?;
+            crate::members::list(conn, a.status.as_deref(), a.query.as_deref(), a.limit.unwrap_or(50), a.offset.unwrap_or(0))
+        }
+        "set_member_status" => {
+            let a: SetMemberStatus = parse(name, args)?;
+            check_note(&a.note)?;
+            crate::members::set_status(conn, a.id, &a.status)
+        }
+        "get_site_settings" => parse::<NoArgs>(name, args).and_then(|_| get_site_settings(conn)),
+        "set_site_settings" => set_site_settings(conn, actor, parse(name, args)?),
         "upload_media" => upload_media(app, parse(name, args)?),
+        "list_site_files" => parse::<NoArgs>(name, args).and_then(|_| list_site_files(conn)),
+        "get_site_file" => get_site_file(conn, parse(name, args)?),
+        "write_site_file" => write_site_file(conn, actor, parse(name, args)?),
+        "delete_site_file" => delete_site_file(conn, actor, parse(name, args)?),
+        "upload_site_bundle" => upload_site_bundle(conn, actor, parse(name, args)?),
         _ => Err(format!("工具“{name}”{NOT_IMPLEMENTED}：它出现在工具列表里却没有处理逻辑，请联系开发者。")),
     }
 }
@@ -180,8 +210,13 @@ struct CreateCollection {
     title: String,
     #[serde(default)]
     single: bool,
+    /// Old form of `read: public`.
     #[serde(default)]
     public_read: bool,
+    /// Who may read live records: public, members (logged-in members), owner (each member their own), private (default).
+    read: Option<crate::schema::Read>,
+    /// Who may add records from the site, live at once: none (default), members, public.
+    create: Option<crate::schema::Create>,
     fields: Vec<FieldDef>,
     note: String,
 }
@@ -211,7 +246,12 @@ struct FieldChange {
 struct UpdateCollection {
     name: String,
     title: Option<String>,
+    /// Old form of `read`: true means public, false private.
     public_read: Option<bool>,
+    /// public, members, owner or private.
+    read: Option<crate::schema::Read>,
+    /// none, members or public.
+    create: Option<crate::schema::Create>,
     add_fields: Option<Vec<FieldDef>>,
     change_fields: Option<Vec<FieldChange>>,
     remove_fields: Option<Vec<String>>,
@@ -296,7 +336,10 @@ fn create_collection(conn: &Connection, actor: &Actor, a: CreateCollection) -> R
         name: a.name,
         title: a.title,
         single: a.single,
-        access: crate::schema::Access { public_read: a.public_read },
+        access: crate::schema::Access {
+            read: a.read.unwrap_or(if a.public_read { crate::schema::Read::Public } else { crate::schema::Read::Private }),
+            create: a.create.unwrap_or_default(),
+        },
         fields: a.fields,
     };
     let taken = conn
@@ -327,7 +370,13 @@ fn update_collection(conn: &Connection, actor: &Actor, a: UpdateCollection) -> R
         def.title = t;
     }
     if let Some(p) = a.public_read {
-        def.access.public_read = p;
+        def.access.read = if p { crate::schema::Read::Public } else { crate::schema::Read::Private };
+    }
+    if let Some(r) = a.read {
+        def.access.read = r;
+    }
+    if let Some(c) = a.create {
+        def.access.create = c;
     }
     for f in a.add_fields.unwrap_or_default() {
         if def.field(&f.name).is_some() {
@@ -425,6 +474,8 @@ struct QueryRecords {
     collection: String,
     /// `{"field": value}` or `{"field": {"gte": value}}`; operators: eq ne gt gte lt lte contains.
     filter: Option<Value>,
+    /// Keep only records in these states (draft, changed, deleting, published); leave out for all.
+    status: Option<Vec<query::Status>>,
     /// Field name, or `-field` for descending. Default: newest first.
     sort: Option<String>,
     /// 1 to 100, default 20.
@@ -539,12 +590,14 @@ fn query_records(conn: &Connection, a: QueryRecords) -> Result<Value, String> {
     let def = collection_def_for_read(conn, &a.collection)?;
     let q = Query {
         filters: a.filter.as_ref().map(|f| query::parse_filter(&def, f)).transpose()?.unwrap_or_default(),
+        status: a.status.unwrap_or_default(),
         sort: a.sort.map(|s| match s.strip_prefix('-') {
             Some(f) => (f.to_string(), true),
             None => (s, false),
         }),
         limit: a.limit.unwrap_or(20),
         offset: a.offset.unwrap_or(0),
+        owner: None,
     };
     let (rows, total) = query::run(conn, &def, &q, false)?;
     let items: Vec<Value> = rows.into_iter().map(|r| json!({ "id": r.id, "status": r.status, "data": r.doc })).collect();
@@ -556,7 +609,7 @@ fn query_records(conn: &Connection, a: QueryRecords) -> Result<Value, String> {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct TargetArgs {
-    /// `collection:<name>`, `record:<id>`, `view:<name>` or `notes`.
+    /// `collection:<name>`, `record:<id>`, `view:<name>`, `file:<path>` or `notes`.
     target: String,
 }
 
@@ -625,6 +678,19 @@ struct SetView {
     sort: Option<String>,
     #[serde(default)]
     actions: Vec<Action>,
+    /// table (default), cards (a grid with picture, title, subtitle) or list.
+    #[serde(default)]
+    layout: crate::schema::Layout,
+    /// Cards and lists: the field used as each item's title (default: the first column).
+    title_field: Option<String>,
+    subtitle_field: Option<String>,
+    /// Cards: a media field shown as the picture.
+    image_field: Option<String>,
+    /// comfortable (default) or compact.
+    #[serde(default)]
+    density: crate::schema::Density,
+    /// An indexed select field: one section per option.
+    group_by: Option<String>,
     note: String,
 }
 
@@ -633,6 +699,100 @@ struct SetView {
 struct DeleteView {
     name: String,
     note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SetMemberLogin {
+    enabled: bool,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ListMembers {
+    /// active or disabled
+    status: Option<String>,
+    /// Matches email or name.
+    query: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SetMemberStatus {
+    id: i64,
+    /// active or disabled
+    status: String,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SetSiteSettings {
+    /// An import map object ({"imports": {...}}), or null for none. Leave out to keep it.
+    #[serde(default, deserialize_with = "present")]
+    import_map: Option<Option<Value>>,
+    /// Origins scripts may load from, like ["https://esm.sh"]; null for the default. Leave out to keep it.
+    #[serde(default, deserialize_with = "present")]
+    script_origins: Option<Option<Value>>,
+    note: String,
+}
+
+/// The site's front-end options as drafts see them (the draft if there is one), with each one's status.
+fn get_site_settings(conn: &Connection) -> Result<Value, String> {
+    let get = |k: &str| -> Result<Value, String> {
+        let target = Target::Setting(k.into());
+        Ok(json!({ "value": changes::setting(conn, k, true), "status": changes::target_status(conn, &target)? }))
+    };
+    Ok(json!({ "import_map": get("import_map")?, "script_origins": get("script_origins")? }))
+}
+
+fn set_site_settings(conn: &Connection, actor: &Actor, a: SetSiteSettings) -> Result<Value, String> {
+    let note = check_note(&a.note)?;
+    let origin_ok = |o: &str| {
+        let rest = o.strip_prefix("https://").or_else(|| o.strip_prefix("http://"));
+        rest.is_some_and(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_alphanumeric() || b".-:".contains(&b)))
+    };
+    let mut writes: Vec<(&str, Option<String>)> = vec![];
+    if let Some(m) = a.import_map {
+        let m = m.unwrap_or(Value::Null);
+        match m {
+            Value::Null => writes.push(("import_map", None)),
+            Value::Object(ref o) if o.get("imports").is_none_or(Value::is_object) && o.get("scopes").is_none_or(Value::is_object) => {
+                writes.push(("import_map", Some(m.to_string())))
+            }
+            _ => return Err("import_map 要形如 {\"imports\": {\"react\": \"https://esm.sh/react@19\"}}。".into()),
+        }
+    }
+    if let Some(l) = a.script_origins {
+        match l.unwrap_or(Value::Null) {
+            Value::Null => writes.push(("script_origins", None)),
+            Value::Array(items) => {
+                let mut list = vec![];
+                for o in items {
+                    let s = o.as_str().unwrap_or("").trim().trim_end_matches('/').to_string();
+                    if !origin_ok(&s) {
+                        return Err(format!("script_origins 里的 {o} 不是来源网址：要形如 https://esm.sh，不带路径。"));
+                    }
+                    list.push(s);
+                }
+                writes.push(("script_origins", Some(json!(list).to_string())));
+            }
+            _ => return Err("script_origins 要是一组网址，比如 [\"https://esm.sh\"]。".into()),
+        }
+    }
+    // Drafts like everything else: the live site changes only when a person publishes.
+    for (k, v) in writes {
+        let target = Target::Setting(k.into());
+        match v {
+            Some(v) => changes::save_draft(conn, actor, &target, &serde_json::from_str::<Value>(&v).map_err(|e| e.to_string())?, note)?,
+            None if changes::target_status(conn, &target)? != "deleted" => changes::mark_deleted(conn, actor, &target, note)?,
+            None => {}
+        }
+    }
+    get_site_settings(conn)
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -661,7 +821,21 @@ fn list_views(conn: &Connection) -> Result<Value, String> {
 
 fn set_view(conn: &Connection, actor: &Actor, a: SetView) -> Result<Value, String> {
     let note = check_note(&a.note)?;
-    let view = ViewDef { name: a.name, title: a.title, collection: a.collection, columns: a.columns, filters: a.filters, sort: a.sort, actions: a.actions };
+    let view = ViewDef {
+        name: a.name,
+        title: a.title,
+        collection: a.collection,
+        columns: a.columns,
+        filters: a.filters,
+        sort: a.sort,
+        actions: a.actions,
+        layout: a.layout,
+        title_field: a.title_field,
+        subtitle_field: a.subtitle_field,
+        image_field: a.image_field,
+        density: a.density,
+        group_by: a.group_by,
+    };
     let def = changes::effective_def(conn, &view.collection)?;
     check_view(&view, &def)?;
     let target = Target::View(view.name.clone());
@@ -731,4 +905,137 @@ fn upload_media(app: &App, a: UploadMedia) -> Result<Value, String> {
         return Err(format!("“{}”太大：通过工具上传最大 {} MB，更大的文件请用 POST /api/v1/media。", a.filename, crate::media::MAX_BYTES_INLINE >> 20));
     }
     Ok(json!({ "path": crate::media::store_upload(app, &a.filename, &bytes)? }))
+}
+
+// ---- site files ----
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct PathArgs {
+    path: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct WriteSiteFile {
+    path: String,
+    content: String,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeleteSiteFile {
+    path: String,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct UploadSiteBundle {
+    zip_base64: String,
+    note: String,
+    /// Also delete live files that are not in the bundle.
+    #[serde(default)]
+    replace: bool,
+}
+
+/// (status, current content) of a site file that exists; the draft copy when there is one.
+fn site_file(conn: &Connection, path: &str) -> Result<Option<(&'static str, String)>, String> {
+    let row: Option<(Option<String>, Option<String>, bool)> = conn
+        .query_row("SELECT published, draft, draft_deleted FROM site_files WHERE path = ?1", [path], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .optional()
+        .map_err(|e| format!("读取站点文件“{path}”失败：{e}"))?;
+    let Some((published, draft, deleting)) = row.filter(|(p, d, _)| p.is_some() || d.is_some()) else { return Ok(None) };
+    let status = changes::status(published.is_some(), draft.is_some(), deleting);
+    let json = draft.or(published).unwrap_or_default();
+    let content = serde_json::from_str(&json).map_err(|e| format!("站点文件“{path}”已损坏：{e}"))?;
+    Ok(Some((status, content)))
+}
+
+fn no_file(path: &str) -> String {
+    format!("站点文件“{path}”不存在或已删除，请先用 list_site_files 查看现有文件。")
+}
+
+fn list_site_files(conn: &Connection) -> Result<Value, String> {
+    let fail = |e: rusqlite::Error| format!("读取站点文件失败：{e}");
+    let mut stmt = conn.prepare("SELECT path FROM site_files WHERE published IS NOT NULL OR draft IS NOT NULL ORDER BY path").map_err(fail)?;
+    let paths: Vec<String> = stmt.query_map([], |r| r.get(0)).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;
+    let mut out = vec![];
+    for path in paths {
+        let Some((status, content)) = site_file(conn, &path)? else { continue };
+        if crate::site::is_binary(&path) {
+            let bytes = crate::site::decode_binary(&content).map_or(0, |b| b.len());
+            out.push(json!({ "path": path, "status": status, "bytes": bytes, "binary": true }));
+        } else {
+            out.push(json!({ "path": path, "status": status, "bytes": content.len(), "lines": content.lines().count() }));
+        }
+    }
+    Ok(Value::Array(out))
+}
+
+fn get_site_file(conn: &Connection, a: PathArgs) -> Result<Value, String> {
+    crate::site::check_path(&a.path)?;
+    let (status, content) = site_file(conn, &a.path)?.ok_or_else(|| no_file(&a.path))?;
+    Ok(json!({ "path": a.path, "status": status, "content": content, "binary": crate::site::is_binary(&a.path) }))
+}
+
+fn file_status(conn: &Connection, path: &str) -> Result<&'static str, String> {
+    changes::target_status(conn, &Target::File(path.to_string()))
+}
+
+fn write_site_file(conn: &Connection, actor: &Actor, a: WriteSiteFile) -> Result<Value, String> {
+    let note = check_note(&a.note)?;
+    // Base64 may arrive wrapped in lines; it is stored as one.
+    let content = if crate::site::is_binary(&a.path) { a.content.split_whitespace().collect() } else { a.content };
+    crate::site::check_file(&a.path, &content)?;
+    changes::check_file_count(conn, std::slice::from_ref(&a.path))?;
+    changes::stage_file(conn, actor, &a.path, &content, note)?;
+    Ok(json!({ "path": a.path, "status": file_status(conn, &a.path)? }))
+}
+
+fn delete_site_file(conn: &Connection, actor: &Actor, a: DeleteSiteFile) -> Result<Value, String> {
+    let note = check_note(&a.note)?;
+    crate::site::check_path(&a.path)?;
+    if site_file(conn, &a.path)?.is_none() || file_status(conn, &a.path)? == "deleting" {
+        return Err(no_file(&a.path));
+    }
+    changes::mark_deleted(conn, actor, &Target::File(a.path.clone()), note)?;
+    Ok(json!({ "path": a.path, "status": file_status(conn, &a.path)? }))
+}
+
+fn upload_site_bundle(conn: &Connection, actor: &Actor, a: UploadSiteBundle) -> Result<Value, String> {
+    use base64::Engine;
+    let note = check_note(&a.note)?;
+    let data: String = a.zip_base64.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    // The archive itself can be no bigger than what it may unpack to.
+    if data.len() > crate::site::MAX_BUNDLE_BYTES / 3 * 4 + 8 {
+        return Err("压缩包太大：最多 50 MB。".into());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(&data).map_err(|e| format!("zip_base64 不是有效的 base64：{e}。"))?;
+    let files = crate::site::read_bundle(&bytes)?;
+    if files.is_empty() {
+        return Err("压缩包里没有文件。".into());
+    }
+    let paths: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
+    let fail = |e: rusqlite::Error| format!("写入站点文件失败：{e}");
+    let tx = conn.unchecked_transaction().map_err(fail)?;
+    let mut deleted = 0;
+    if a.replace {
+        let live: Vec<String> = tx
+            .prepare("SELECT path FROM site_files WHERE published IS NOT NULL AND draft_deleted = 0")
+            .and_then(|mut s| s.query_map([], |r| r.get(0))?.collect())
+            .map_err(fail)?;
+        for path in live.into_iter().filter(|p| !paths.contains(p)) {
+            changes::mark_deleted_in(&tx, actor, &Target::File(path), note)?;
+            deleted += 1;
+        }
+    }
+    changes::check_file_count(&tx, &paths)?;
+    let mut written = 0;
+    for (path, content) in &files {
+        written += changes::stage_file(&tx, actor, path, content, note)? as usize;
+    }
+    tx.commit().map_err(fail)?;
+    Ok(json!({ "files": files.len(), "written": written, "unchanged": files.len() - written, "deleted": deleted }))
 }

@@ -20,7 +20,7 @@ fn create_read_update_discard() {
 
     assert_eq!(ok(&app, &reader(), "list_collections", json!({})).as_array().unwrap().len(), 1);
     // The discard_draft tool arrives in Task 7; until then call the function it will wrap.
-    harness_cms::changes::discard(&app.conn(), &harness_cms::changes::Target::Collection("news".into())).unwrap();
+    cms_harness::changes::discard(&app.conn(), &cms_harness::changes::Target::Collection("news".into())).unwrap();
     assert_eq!(ok(&app, &reader(), "list_collections", json!({})), json!([])); // never published: the row is gone
 }
 
@@ -44,7 +44,7 @@ fn rules_are_enforced() {
 
 #[test]
 fn every_tool_has_an_object_schema() {
-    for spec in harness_cms::tools::specs() {
+    for spec in cms_harness::tools::specs() {
         assert_eq!(spec.schema["type"], "object", "{}", spec.name);
         assert_eq!(spec.schema["additionalProperties"], false, "{}", spec.name);
     }

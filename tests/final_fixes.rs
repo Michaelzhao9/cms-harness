@@ -2,18 +2,18 @@
 mod common;
 use base64::Engine;
 use common::*;
-use harness_cms::auth::Scope;
+use cms_harness::auth::Scope;
 use serde_json::{json, Value};
 
-fn items(app: &harness_cms::Shared, fields: Value) {
+fn items(app: &cms_harness::Shared, fields: Value) {
     ok(app, &builder(), "create_collection", json!({ "name": "items", "title": "条目", "public_read": true, "note": "n", "fields": fields }));
 }
 
-fn item(app: &harness_cms::Shared, data: Value) -> i64 {
+fn item(app: &cms_harness::Shared, data: Value) -> i64 {
     ok(app, &editor(), "create_record", json!({ "collection": "items", "note": "n", "data": data }))["id"].as_i64().unwrap()
 }
 
-fn live(app: &harness_cms::Shared, id: i64) -> Value {
+fn live(app: &cms_harness::Shared, id: i64) -> Value {
     let json: String = app.conn().query_row("SELECT published FROM records WHERE id = ?1", [id], |r| r.get(0)).unwrap();
     serde_json::from_str(&json).unwrap()
 }
@@ -186,7 +186,7 @@ async fn mcp_rejects_batches_and_accepts_a_lowercase_scheme() {
     let k = key(&app, &[Scope::Write]);
     let (status, body) = post_json(&app, "/mcp", Some(&k), json!([{ "jsonrpc": "2.0", "id": 1, "method": "ping" }])).await;
     assert_eq!((status.as_u16(), body["error"]["code"].as_i64()), (200, Some(-32600)));
-    let resp = harness_cms::api::router(app.clone())
+    let resp = cms_harness::api::router(app.clone())
         .oneshot(
             axum::http::Request::get("/api/v1/tools")
                 .header("authorization", format!("bearer {k}"))
@@ -202,7 +202,7 @@ use tower::ServiceExt;
 
 // ---- found by the re-review of the fix wave ----
 
-fn draft(app: &harness_cms::Shared, id: i64) -> Value {
+fn draft(app: &cms_harness::Shared, id: i64) -> Value {
     let json: String = app.conn().query_row("SELECT coalesce(draft, published) FROM records WHERE id = ?1", [id], |r| r.get(0)).unwrap();
     serde_json::from_str(&json).unwrap()
 }

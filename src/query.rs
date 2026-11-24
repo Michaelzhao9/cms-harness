@@ -9,12 +9,33 @@ use serde_json::Value;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op { Eq, Ne, Gt, Gte, Lt, Lte, Contains }
 
+/// A record's state in the draft view, as `changes::status` names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Status { Draft, Changed, Deleting, Published }
+
+impl Status {
+    /// The same rule as `changes::status`, as SQL over the row's own columns.
+    fn sql(self) -> &'static str {
+        match self {
+            Status::Draft => "(published IS NULL AND draft IS NOT NULL)",
+            Status::Changed => "(published IS NOT NULL AND draft IS NOT NULL AND draft_deleted = 0)",
+            Status::Deleting => "(published IS NOT NULL AND draft_deleted = 1)",
+            Status::Published => "(published IS NOT NULL AND draft IS NULL AND draft_deleted = 0)",
+        }
+    }
+}
+
 pub struct Query {
     pub filters: Vec<(String, Op, Value)>,
+    /// Keep only records in one of these states; empty keeps all.
+    pub status: Vec<Status>,
     /// (field, descending)
     pub sort: Option<(String, bool)>,
     pub limit: i64,
     pub offset: i64,
+    /// Only records this member owns (access rule `owner`).
+    pub owner: Option<i64>,
 }
 
 pub struct Row {
@@ -139,6 +160,13 @@ fn build(def: &CollectionDef, q: &Query, live: bool) -> Result<(&'static str, St
         wh.push_str(&format!(" AND {e} {sql} ?{}", if *op == Op::Contains { " ESCAPE '\\'" } else { "" }));
         params.push(p);
     }
+    if let Some(owner) = q.owner {
+        wh.push_str(" AND owner = ?");
+        params.push(Sql::Integer(owner));
+    }
+    if !q.status.is_empty() {
+        wh.push_str(&format!(" AND ({})", q.status.iter().map(|s| s.sql()).collect::<Vec<_>>().join(" OR ")));
+    }
     Ok((col, wh, params))
 }
 
@@ -211,7 +239,7 @@ fn check_page(q: &Query) -> Result<(), String> {
 /// Query-string parameters to a checked `Query` plus the `expand` field names.
 /// `field=v` is equality, `field__ne|gt|gte|lt|lte|contains=v` the other operators; values are read by field type.
 pub fn parse_params(def: &CollectionDef, params: &[(String, String)]) -> Result<(Query, Vec<String>), String> {
-    let mut q = Query { filters: vec![], sort: None, limit: 20, offset: 0 };
+    let mut q = Query { filters: vec![], status: vec![], sort: None, limit: 20, offset: 0, owner: None };
     let mut expand = vec![];
     let int = |name: &str, v: &str| v.parse::<i64>().map_err(|_| format!("参数“{name}”必须是整数，收到“{v}”：请改成数字。"));
     for (name, v) in params {

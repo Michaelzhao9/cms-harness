@@ -1,6 +1,6 @@
 mod common;
 use common::*;
-use harness_cms::Shared;
+use cms_harness::Shared;
 use serde_json::{json, Value};
 
 fn items(q: &Value) -> Vec<String> {
@@ -26,7 +26,7 @@ fn add(app: &Shared, data: Value) -> i64 {
 }
 
 fn q(app: &Shared, args: Value) -> Result<Value, String> {
-    harness_cms::tools::call(app, &reader(), "query_records", args)
+    cms_harness::tools::call(app, &reader(), "query_records", args)
 }
 
 #[test]

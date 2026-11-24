@@ -31,11 +31,61 @@ pub struct FieldDef {
     pub target: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, Clone, Default, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
+/// Who may read a collection's live records (content API and built-in site).
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Read {
+    /// Anyone.
+    Public,
+    /// Logged-in members (and API keys).
+    Members,
+    /// Each member their own records (API keys see all).
+    Owner,
+    /// API keys and the admin only.
+    #[default]
+    Private,
+}
+
+/// Who may add records from the site: they go live at once, stamped with their owner.
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Create {
+    #[default]
+    None,
+    Members,
+    Public,
+}
+
+#[derive(Serialize, JsonSchema, Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Access {
     #[serde(default)]
-    pub public_read: bool,
+    pub read: Read,
+    #[serde(default)]
+    pub create: Create,
+}
+
+impl<'de> Deserialize<'de> for Access {
+    /// Also reads the old `{ "public_read": true }` form as `read: public`.
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Raw {
+            read: Option<Read>,
+            #[serde(default)]
+            create: Create,
+            #[serde(default)]
+            public_read: bool,
+        }
+        let r = Raw::deserialize(d)?;
+        let read = r.read.unwrap_or(if r.public_read { Read::Public } else { Read::Private });
+        Ok(Access { read, create: r.create })
+    }
+}
+
+impl Access {
+    pub fn is_public(&self) -> bool {
+        self.read == Read::Public
+    }
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug)]
@@ -269,7 +319,7 @@ pub fn project(def: &CollectionDef, doc: &Value) -> Value {
     Value::Object(out)
 }
 
-fn strip_tags(html: &str) -> String {
+pub fn strip_tags(html: &str) -> String {
     let mut out = String::new();
     let mut in_tag = false;
     for c in html.chars() {
@@ -400,6 +450,43 @@ pub struct ViewDef {
     pub sort: Option<String>,
     #[serde(default)]
     pub actions: Vec<Action>,
+    /// How rows are drawn: a table (default), a grid of cards, or a plain list.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub layout: Layout,
+    /// Cards and lists: the field shown as each item's title (default: the first column).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle_field: Option<String>,
+    /// Cards: a media field shown as the picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_field: Option<String>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub density: Density,
+    /// An indexed select field: one section per option, in the options' order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_by: Option<String>,
+}
+
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == T::default()
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Layout {
+    #[default]
+    Table,
+    Cards,
+    List,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Density {
+    #[default]
+    Comfortable,
+    Compact,
 }
 
 pub fn check_view(view: &ViewDef, def: &CollectionDef) -> Result<(), String> {
@@ -434,6 +521,22 @@ pub fn check_view(view: &ViewDef, def: &CollectionDef) -> Result<(), String> {
     for (f, label) in view.filters.iter().map(|f| (f.as_str(), "filters")).chain(sort.map(|s| (s, "sort"))) {
         if !indexed(f) {
             return Err(format!("界面“{name}”的 {label} 里的“{f}”不能用：只有 id 和设置了 index 或 unique 的字段可以过滤、排序，请先给字段加上 index。"));
+        }
+    }
+    for (f, label) in [(&view.title_field, "title_field"), (&view.subtitle_field, "subtitle_field")] {
+        if let Some(f) = f.as_deref().filter(|f| !known(f)) {
+            return Err(format!("界面“{name}”的 {label}“{f}”不是集合“{}”的字段。", def.name));
+        }
+    }
+    if let Some(f) = view.image_field.as_deref() {
+        if def.field(f).map(|d| d.kind) != Some(FieldType::Media) {
+            return Err(format!("界面“{name}”的 image_field“{f}”要是集合“{}”里的 media（图片）字段。", def.name));
+        }
+    }
+    if let Some(f) = view.group_by.as_deref() {
+        let ok = def.field(f).is_some_and(|d| d.kind == FieldType::Select && (d.index || d.unique) && !d.multiple);
+        if !ok {
+            return Err(format!("界面“{name}”的 group_by“{f}”要是一个设置了 index 的单选（select）字段。"));
         }
     }
     Ok(())

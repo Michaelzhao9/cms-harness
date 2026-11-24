@@ -12,11 +12,18 @@ pub enum Target {
     Record(i64),
     View(String),
     Notes,
+    /// A site file, by path.
+    File(String),
+    /// A site option that goes live on publish, like `member_login`.
+    Setting(String),
 }
+
+/// Site options that are drafted and published like everything else.
+pub const SETTINGS: &[(&str, &str)] = &[("member_login", "会员登录"), ("import_map", "网站的 import map"), ("script_origins", "网站允许的脚本来源")];
 
 impl Target {
     pub fn parse(s: &str) -> Result<Target, String> {
-        let bad = || format!("对象标识“{s}”不合法：请使用 collection:<名字>、record:<编号>、view:<名字> 或 notes。");
+        let bad = || format!("对象标识“{s}”不合法：请使用 collection:<名字>、record:<编号>、view:<名字>、file:<路径>、setting:<名字> 或 notes。");
         if s == "notes" {
             return Ok(Target::Notes);
         }
@@ -24,6 +31,8 @@ impl Target {
             ("collection", n) if crate::schema::valid_name(n) => Ok(Target::Collection(n.into())),
             ("view", n) if crate::schema::valid_name(n) => Ok(Target::View(n.into())),
             ("record", n) => n.parse().map(Target::Record).map_err(|_| bad()),
+            ("file", p) if crate::site::check_path(p).is_ok() => Ok(Target::File(p.into())),
+            ("setting", k) if SETTINGS.iter().any(|(n, _)| *n == k) => Ok(Target::Setting(k.into())),
             _ => Err(bad()),
         }
     }
@@ -35,6 +44,8 @@ impl Target {
             Target::Record(id) => ("records", "id", Sql::Integer(*id), true),
             Target::View(n) => ("views", "name", Sql::Text(n.clone()), true),
             Target::Notes => ("notes", "id", Sql::Integer(1), false),
+            Target::File(p) => ("site_files", "path", Sql::Text(p.clone()), true),
+            Target::Setting(k) => ("options", "key", Sql::Text(k.clone()), true),
         }
     }
 }
@@ -46,6 +57,8 @@ impl fmt::Display for Target {
             Target::Record(id) => write!(f, "record:{id}"),
             Target::View(n) => write!(f, "view:{n}"),
             Target::Notes => write!(f, "notes"),
+            Target::File(p) => write!(f, "file:{p}"),
+            Target::Setting(k) => write!(f, "setting:{k}"),
         }
     }
 }
@@ -135,21 +148,27 @@ fn remove_row(conn: &Connection, target: &Target) -> Result<(), String> {
 }
 
 pub fn mark_deleted(conn: &Connection, actor: &Actor, target: &Target, note: &str) -> Result<(), String> {
+    let tx = conn.unchecked_transaction().map_err(|e| db(target, e))?;
+    mark_deleted_in(&tx, actor, target, note)?;
+    tx.commit().map_err(|e| db(target, e))
+}
+
+/// `mark_deleted` inside a transaction the caller holds.
+pub fn mark_deleted_in(tx: &Connection, actor: &Actor, target: &Target, note: &str) -> Result<(), String> {
     if matches!(target, Target::Notes) {
         return Err("说明不能删除，请直接修改它的内容。".into());
     }
-    let tx = conn.unchecked_transaction().map_err(|e| db(target, e))?;
-    let (live, ever) = liveness(&tx, target)?;
+    let (live, ever) = liveness(tx, target)?;
     if !ever {
-        remove_row(&tx, target)?;
+        remove_row(tx, target)?;
     } else if !live {
         // A tombstone whose restored draft is being dropped again: back to the tombstone.
-        clear_draft(&tx, target)?;
+        clear_draft(tx, target)?;
     } else {
         if let Target::Collection(name) = target {
             // The deletion replaces any pending definition: record drafts go back to the live definition first,
             // so restoring the collection later starts from a consistent state.
-            back_to_live(&tx, name, "删除集合")?;
+            back_to_live(tx, name, "删除集合")?;
         }
         let (table, key, val, _) = target.row();
         // For a collection the deletion replaces its pending definition, which was just undone above.
@@ -160,7 +179,7 @@ pub fn mark_deleted(conn: &Connection, actor: &Actor, target: &Target, note: &st
         )
         .map_err(|e| db(target, e))?;
     }
-    tx.commit().map_err(|e| db(target, e))
+    Ok(())
 }
 
 pub fn discard(conn: &Connection, target: &Target) -> Result<(), String> {
@@ -211,6 +230,9 @@ fn parse_def(name: &str, json: &str) -> Result<CollectionDef, String> {
 
 /// Draft definition if there is one, else the published one; errors if the collection is gone or pending deletion.
 pub fn effective_def(conn: &Connection, name: &str) -> Result<CollectionDef, String> {
+    if name == crate::members::MEMBERS {
+        return Ok(crate::members::members_def());
+    }
     let r = coll_row_required(conn, name)?;
     if r.deleted {
         return Err(format!("集合“{name}”已被删除。"));
@@ -519,12 +541,14 @@ fn names(conn: &Connection, sql: &str) -> Result<Vec<String>, String> {
     rows.collect::<Result<_, _>>().map_err(|e| format!("读取待发布清单失败：{e}"))
 }
 
-/// Every object with a draft or a pending deletion, in release order: collections, views, notes, records.
+/// Every object with a draft or a pending deletion, in release order: collections, views, site files, notes, records.
 fn pending_targets(conn: &Connection) -> Result<Vec<Target>, String> {
     let mut out: Vec<Target> = vec![];
     let waiting = "draft IS NOT NULL OR draft_deleted = 1";
     out.extend(names(conn, &format!("SELECT name FROM collections WHERE {waiting} ORDER BY name"))?.into_iter().map(Target::Collection));
     out.extend(names(conn, &format!("SELECT name FROM views WHERE {waiting} ORDER BY name"))?.into_iter().map(Target::View));
+    out.extend(names(conn, &format!("SELECT path FROM site_files WHERE {waiting} ORDER BY path"))?.into_iter().map(Target::File));
+    out.extend(names(conn, &format!("SELECT key FROM options WHERE {waiting} ORDER BY key"))?.into_iter().map(Target::Setting));
     if !names(conn, "SELECT 'notes' FROM notes WHERE draft IS NOT NULL")?.is_empty() {
         out.push(Target::Notes);
     }
@@ -536,6 +560,11 @@ fn pending_targets(conn: &Connection) -> Result<Vec<Target>, String> {
         out.push(Target::Record(id.map_err(|e| format!("读取待发布清单失败：{e}"))?));
     }
     Ok(out)
+}
+
+/// Pending targets as `list_pending` lists them: the preview numbers its change marks by this order.
+pub fn pending_order(conn: &Connection) -> Result<Vec<String>, String> {
+    Ok(pending_targets(conn)?.iter().map(ToString::to_string).collect())
 }
 
 fn parse_doc(json: &Option<String>) -> Value {
@@ -573,6 +602,9 @@ pub struct Pending {
     pub note: String,
     /// For a collection: how many records it holds. Otherwise 1.
     pub affected: i64,
+    /// For a text site file: line counts of the live copy and the draft (0 when there is none).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lines: Option<[usize; 2]>,
 }
 
 pub fn pending(conn: &Connection) -> Result<Vec<Pending>, String> {
@@ -588,6 +620,8 @@ pub fn pending(conn: &Connection) -> Result<Vec<Pending>, String> {
                 .find_map(|k| shown.get(*k).and_then(Value::as_str))
                 .map_or_else(|| format!("记录 {id}"), String::from),
             Target::Collection(n) | Target::View(n) => shown.get("title").and_then(Value::as_str).unwrap_or(n).to_string(),
+            Target::File(p) => p.clone(),
+            Target::Setting(k) => setting_title(k).to_string(),
         };
         let kind = if s.draft_deleted { "deleted" } else if s.published.is_none() { "created" } else { "changed" };
         out.push(Pending {
@@ -598,6 +632,10 @@ pub fn pending(conn: &Connection) -> Result<Vec<Pending>, String> {
             actor: s.actor.unwrap_or_default(),
             note: s.note.unwrap_or_default(),
             affected: if let Target::Collection(n) = &target { record_count(conn, n)? } else { 1 },
+            lines: matches!(&target, Target::File(p) if !crate::site::is_binary(p)).then(|| {
+                let count = |v: &Value| v.as_str().map_or(0, |s| s.lines().count());
+                [count(&old), if s.draft_deleted { 0 } else { count(&new) }]
+            }),
         });
     }
     Ok(out)
@@ -617,7 +655,7 @@ pub fn own_scope(target: &Target) -> crate::auth::Scope {
     if matches!(target, Target::Record(_)) { Scope::Write } else { Scope::Structure }
 }
 
-fn may_publish(actor: &Actor, target: &Target) -> bool {
+pub fn may_publish(actor: &Actor, target: &Target) -> bool {
     actor.can(crate::auth::Scope::Publish) && actor.can(own_scope(target))
 }
 
@@ -625,11 +663,11 @@ fn may_publish(actor: &Actor, target: &Target) -> bool {
 fn rank(target: &Target, deleting: bool) -> u8 {
     match (target, deleting) {
         (Target::Collection(_), false) => 0,
-        (Target::View(_), false) => 1,
+        (Target::View(_) | Target::File(_) | Target::Setting(_), false) => 1,
         (Target::Notes, _) => 2,
         (Target::Record(_), false) => 3,
         (Target::Record(_), true) => 4,
-        (Target::View(_), true) => 5,
+        (Target::View(_) | Target::File(_) | Target::Setting(_), true) => 5,
         (Target::Collection(_), true) => 6,
     }
 }
@@ -787,7 +825,8 @@ pub fn check_views(conn: &Connection, released: &[String], collections: &[String
         if !released.contains(&name) && !collections.contains(&view.collection) {
             continue;
         }
-        match live_def_opt(conn, &view.collection)? {
+        let def = if view.collection == crate::members::MEMBERS { Some(crate::members::members_def()) } else { live_def_opt(conn, &view.collection)? };
+        match def {
             None => problems.push(format!("view:{name} 引用的 collection:{} 不在线上：请把集合一起发布，或先删除这个界面。", view.collection)),
             Some(def) => {
                 if let Err(e) = crate::schema::check_view(&view, &def) {
@@ -830,6 +869,16 @@ fn live_copy_of(conn: &Connection, id: i64, collection: &str, draft: Option<&str
 /// Publishes pending changes in one transaction: all of the actor's, or only the listed ones.
 /// Nothing goes live unless the whole release passes verification.
 pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: &str) -> Result<Release, String> {
+    run_publish(conn, actor, only, note, true)
+}
+
+/// Runs `publish` with all its checks inside a transaction that is always rolled back: what would go live,
+/// or the problems that would stop it. Nothing is written.
+pub fn dry_run_publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>) -> Result<Release, String> {
+    run_publish(conn, actor, only, "试运行", false)
+}
+
+fn run_publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: &str, commit: bool) -> Result<Release, String> {
     let all = pending_targets(conn)?;
     if all.is_empty() {
         return Err("没有待发布的改动：先修改内容或结构，再来发布。".into());
@@ -965,7 +1014,7 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
                 }
                 touched.push(collection);
             }
-            Target::View(_) | Target::Notes => {
+            Target::View(_) | Target::Notes | Target::File(_) | Target::Setting(_) => {
                 if let Target::View(n) = target {
                     views.push(n.clone());
                 }
@@ -986,6 +1035,7 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
     check_relations(&tx, &touched, &mut problems)?;
     let scope: Vec<String> = touched.iter().cloned().chain(defs.iter().map(|(n, _)| n.clone())).collect();
     check_views(&tx, &views, &scope, &mut problems)?;
+    crate::site::check_live(&tx, &mut problems)?;
     if !problems.is_empty() {
         let mut seen = std::collections::HashSet::new();
         problems.retain(|p| seen.insert(p.clone()));
@@ -1020,7 +1070,10 @@ pub fn publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
         let why = format!("随集合“{collection}”的结构改动自动转换");
         tx.execute(version, params![release, target.to_string(), live_copy(&target)?, before, actor.name, why]).map_err(fail)?;
     }
-    tx.commit().map_err(fail)?;
+    if commit {
+        tx.commit().map_err(fail)?;
+    }
+    // Without a commit, dropping the transaction rolls everything back.
     Ok(Release { id: release, published, skipped })
 }
 
@@ -1079,6 +1132,11 @@ pub fn restore(conn: &Connection, actor: &Actor, target: &Target, version_id: i6
             let def = current_def(conn, &collection)?.ok_or_else(|| format!("记录 {id} 所属的集合“{collection}”没有定义，无法恢复。"))?;
             crate::schema::fit(&def, &doc).map_err(|e| format!("版本 {version_id} 不符合集合“{collection}”现在的定义，没有恢复：{e}"))?
         }
+        Target::File(path) => {
+            crate::site::check_file(path, doc.as_str().unwrap_or_default())?;
+            check_file_count(conn, std::slice::from_ref(path))?;
+            doc
+        }
         _ => doc,
     };
     save_draft(conn, actor, target, &doc, note)
@@ -1091,4 +1149,56 @@ pub fn to_current(conn: &Connection, collection: &str, doc: &Value) -> Result<Va
         (Some(live), Some(draft)) => crate::schema::migrate(&parse_def(collection, live)?, &parse_def(collection, draft)?, doc),
         _ => Ok(doc.clone()),
     }
+}
+
+// ---- site files ----
+
+/// Refuses when writing these paths would leave more than `site::MAX_FILES` files once everything pending is published.
+pub fn check_file_count(conn: &Connection, paths: &[String]) -> Result<(), String> {
+    let kept = names(conn, "SELECT path FROM site_files WHERE draft_deleted = 0 AND (draft IS NOT NULL OR published IS NOT NULL)")?;
+    let mut all: std::collections::HashSet<&str> = kept.iter().map(String::as_str).collect();
+    all.extend(paths.iter().map(String::as_str));
+    let max = crate::site::MAX_FILES;
+    if all.len() > max {
+        return Err(format!("站点最多 {max} 个文件，这次写入后会有 {} 个：请先删掉不用的文件。", all.len()));
+    }
+    Ok(())
+}
+
+/// Puts `content` into the draft of a site file, already checked. Content equal to the live copy drops any draft
+/// or pending deletion instead, so nothing waits to be published. Returns false when nothing changed.
+pub fn stage_file(conn: &Connection, actor: &Actor, path: &str, content: &str, note: &str) -> Result<bool, String> {
+    let target = Target::File(path.to_string());
+    let doc = Value::String(content.to_string());
+    let json = doc.to_string();
+    let s = slot(conn, &target)?;
+    let (published, draft, deleting) = s.map_or((None, None, false), |s| (s.published, s.draft, s.draft_deleted));
+    if published.as_deref() == Some(json.as_str()) {
+        let pending = draft.is_some() || deleting;
+        if pending {
+            clear_draft(conn, &target)?;
+        }
+        return Ok(pending);
+    }
+    if !deleting && draft.as_deref() == Some(json.as_str()) {
+        return Ok(false);
+    }
+    save_draft(conn, actor, &target, &doc, note)?;
+    Ok(true)
+}
+
+pub fn setting_title(key: &str) -> &'static str {
+    SETTINGS.iter().find(|(n, _)| *n == key).map_or("设置", |(_, t)| *t)
+}
+
+/// A site option: the live value, or with `effective` the draft if there is one (a pending deletion reads as unset).
+pub fn setting(conn: &Connection, key: &str, effective: bool) -> Value {
+    let row: Option<(Option<String>, Option<String>, bool)> = conn
+        .query_row("SELECT published, draft, draft_deleted FROM options WHERE key = ?1", [key], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .optional()
+        .ok()
+        .flatten();
+    let Some((published, draft, deleting)) = row else { return Value::Null };
+    let json = if !effective { published } else if deleting { None } else { draft.or(published) };
+    parse_doc(&json)
 }

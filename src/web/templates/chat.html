@@ -1,0 +1,55 @@
+{#- The chat, on every admin page. One component in three sizes (the shell's chat-docked|floating|mini class):
+    the left panel, the bar at the bottom of the work area, the round button. Size buttons post to /admin/prefs. -#}
+{%- set ctx = chat_ctx if chat_ctx else ("record:" ~ form.id if form and form.id else "") -%}
+<aside class="chat{% if chat.turns %} has-log{% endif %}" aria-label="对话" data-chat>
+<div class="chat-bar">
+<form class="only-docked" method="post" action="/admin/prefs">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="nav" value="{{ 'open' if nav.collapsed else 'collapsed' }}">
+<button type="submit" class="ib" aria-label="{{ '展开导航' if nav.collapsed else '收起导航' }}">{{ i.icon("sidebar-simple", 20) }}</button>
+</form>
+<span class="title only-floating">对话</span>
+<span class="grow"></span>
+<form class="only-docked" method="post" action="/admin/prefs" data-size>
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<button type="submit" class="ib" name="chat" value="floating" aria-label="缩小到底部">{{ i.icon("arrows-in", 17) }}</button>
+</form>
+<form method="post" action="/admin/chat/new" data-new>
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<button type="submit" class="ib" aria-label="新对话">{{ i.icon("plus", 18) }}</button>
+</form>
+<button type="button" class="ib only-floating js-only" aria-label="收起对话记录" data-log-close>{{ i.icon("caret-down", 14) }}</button>
+</div>
+<div class="log" id="chat-log" data-log>
+{% include "chat_log.html" %}
+</div>
+<form class="composer" method="post" action="/admin/chat" enctype="multipart/form-data" data-composer>
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="ctx" value="{{ ctx }}" data-ctx>
+<div class="status" role="status" aria-live="polite">
+<span class="spin" aria-hidden="true"></span>
+<span class="now"><span class="label" data-status-label>{{ chat.status.label }}</span><span class="step" data-status-step>{% if chat.status.step %}第 {{ chat.status.step }} 步{% endif %}</span></span>
+<button type="submit" class="ib round only-floating" formaction="/admin/prefs" formenctype="application/x-www-form-urlencoded" formnovalidate name="chat" value="mini" aria-label="收成小按钮">{{ i.icon("caret-down", 14) }}</button>
+<button type="submit" class="stop" formaction="/admin/chat/stop" formenctype="application/x-www-form-urlencoded" formnovalidate aria-label="停下">{{ i.icon("stop", 16) }}<span class="only-docked">停下</span></button>
+</div>
+<div class="input">
+<button type="submit" class="ib round only-floating" formaction="/admin/prefs" formenctype="application/x-www-form-urlencoded" formnovalidate name="chat" value="mini" aria-label="收成小按钮">{{ i.icon("caret-down", 14) }}</button>
+<div class="chips" data-chips hidden></div>
+<label class="sr" for="ask">要改什么</label>
+<textarea id="ask" name="text" rows="2" placeholder="{{ '正在处理…' if chat.running else '想改什么，直接说。图片可以附上。' }}"{% if chat.running or not chat.model %} disabled{% endif %} data-ask></textarea>
+<div class="tools">
+<label class="ib attach" aria-label="添加图片"><input type="file" name="files" accept="image/png,image/jpeg,image/gif,image/webp" multiple class="sr" data-files>{{ i.icon("paperclip", 18) }}</label>
+<button type="button" class="ib js-only" aria-label="在预览里点选元素" aria-pressed="false" data-pick>{{ i.icon("cursor", 18) }}</button>
+<button type="submit" class="ib only-floating" formaction="/admin/prefs" formenctype="application/x-www-form-urlencoded" formnovalidate name="chat" value="docked" aria-label="展开成左侧聊天栏">{{ i.icon("arrows-out", 17) }}</button>
+<span class="grow"></span>
+<button type="submit" class="send" aria-label="发送"{% if chat.running or not chat.model %} disabled{% endif %}>{{ i.icon("arrow-up", 18) }}</button>
+</div>
+</div>
+<p class="error" role="alert" data-chat-error hidden></p>
+</form>
+<form class="mini" method="post" action="/admin/prefs" data-mini>
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<span class="pill" role="status" data-mini-pill><span class="label" data-status-label>{{ chat.status.label }}</span><span class="step" data-mini-step>{% if chat.status.step %}{{ chat.status.step }}{% endif %}</span></span>
+<button type="submit" class="mini-btn" name="chat" value="floating" aria-label="打开对话" aria-keyshortcuts="Meta+K Control+K">{{ i.icon("sparkle", 22) }}<span class="ring" aria-hidden="true"></span>{% if chat.pending %}<span class="badge" data-pending-badge>{{ chat.pending }}</span>{% else %}<span class="badge" data-pending-badge hidden></span>{% endif %}</button>
+</form>
+</aside>
