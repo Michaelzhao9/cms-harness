@@ -380,6 +380,9 @@ pub async fn restore(State(app): State<Shared>, Extension(user): Extension<Admin
 /// script origin that is added or removed. Unchanged entries are left out; changed ones are shown in full.
 fn setting_pairs(key: &str, old: &Value, new: &Value) -> Vec<Value> {
     let gone = || Some("（去掉）".to_string());
+    if key == "site_name" {
+        return vec![json!({ "field": "站点名称", "old": old.as_str(), "new": new.as_str().map(String::from).or_else(gone) })];
+    }
     if key == "script_origins" {
         let list = |v: &Value| v.as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect::<Vec<_>>();
         let (o, n) = (list(old), list(new));

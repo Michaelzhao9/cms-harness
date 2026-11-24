@@ -39,6 +39,26 @@ impl Lang {
     }
 }
 
+/// The cookie that keeps a visitor's pick from the 中文 / EN switch.
+pub const COOKIE: &str = "hc_lang";
+
+/// `lang=zh|en` in a query string: the switch's links.
+pub fn from_query(query: Option<&str>) -> Option<Lang> {
+    query?.split('&').find_map(|kv| kv.strip_prefix("lang=")).and_then(Lang::parse)
+}
+
+/// A visitor's language: the switch's link, else its cookie, else the browser's.
+pub fn for_visitor(headers: &HeaderMap, query: Option<&str>) -> Lang {
+    from_query(query)
+        .or_else(|| crate::web::session::cookie_value(headers, COOKIE).as_deref().and_then(Lang::parse))
+        .unwrap_or_else(|| from_headers(headers))
+}
+
+/// The `Set-Cookie` that remembers a pick for a year.
+pub fn remember(lang: Lang) -> String {
+    format!("{COOKIE}={}; Path=/; Max-Age=31536000; SameSite=Lax", lang.code())
+}
+
 /// The browser's first choice between the two: Chinese for `zh…`, English otherwise.
 pub fn from_headers(headers: &HeaderMap) -> Lang {
     let first = headers.get(header::ACCEPT_LANGUAGE).and_then(|v| v.to_str().ok()).and_then(|v| v.split(',').next()).unwrap_or("zh");

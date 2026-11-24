@@ -46,6 +46,11 @@ pub struct App {
 }
 
 impl App {
+    /// The site's name: the published `site_name` setting (the draft with `draft`), else `HC_SITE_NAME`.
+    pub fn name(&self, conn: &Connection, draft: bool) -> String {
+        crate::changes::setting(conn, "site_name", draft).as_str().map_or_else(|| self.site_name.clone(), String::from)
+    }
+
     pub fn new(conn: Connection, data_dir: PathBuf, origin: String, site_name: String) -> Shared {
         Arc::new(App {
             data_dir,

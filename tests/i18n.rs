@@ -97,4 +97,15 @@ async fn built_in_site_pages_follow_the_visitor() {
     assert!(page.contains("Page not found") || chinese_left(&page).is_empty(), "{page}");
     let (_, page) = get_lang(&app, "/no-such-page", None, "zh-CN").await;
     assert!(page.contains("页面不存在"), "{page}");
+    // The switch wins over the browser and is remembered in a cookie.
+    let req = Request::get("/?lang=en").header(header::ACCEPT_LANGUAGE, "zh-CN").body(axum::body::Body::empty()).unwrap();
+    let resp = cms_harness::api::router(app.clone()).oneshot(req).await.unwrap();
+    assert_eq!(resp.headers()[header::SET_COOKIE].to_str().unwrap(), "hc_lang=en; Path=/; Max-Age=31536000; SameSite=Lax");
+    let page = String::from_utf8_lossy(&resp.into_body().collect().await.unwrap().to_bytes()).into_owned();
+    assert!(page.contains("<html lang=\"en\">") && chinese_left(&page).is_empty(), "{:?}", chinese_left(&page));
+    let (_, page) = get_lang(&app, "/", Some("hc_lang=en"), "zh-CN").await;
+    assert!(page.contains("<html lang=\"en\">"), "{page}");
+    // The admin's login page has the same switch.
+    let (_, page) = get_lang(&app, "/admin/login?lang=en", None, "zh-CN").await;
+    assert!(page.contains("<html lang=\"en\">") && chinese_left(&page).is_empty(), "{:?}", chinese_left(&page));
 }

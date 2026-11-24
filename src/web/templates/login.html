@@ -10,7 +10,10 @@
 <body class="signin">
 <main class="signin-grid">
 <section class="signin-form">
-<span class="signin-site"><img class="logo" src="/admin/static/logo.svg" alt="" width="22" height="22">{{ site_name }}</span>
+<header class="signin-top">
+<span class="signin-site"><img class="logo" src="/admin/static/logo.svg" alt="" width="24" height="24">{{ site_name }}</span>
+<nav class="lang-switch" aria-label="语言 / Language"><a href="?lang=zh" lang="zh-CN"{% if lang != 'en' %} aria-current="true"{% endif %}>中文</a><a href="?lang=en" lang="en"{% if lang == 'en' %} aria-current="true"{% endif %}>EN</a></nav>
+</header>
 <div class="signin-body">
 <div class="signin-head">
 <h1>{{ "登录后台"|t }}</h1>
@@ -20,15 +23,21 @@
 <div class="fd"><label for="email">{{ "邮箱"|t }}</label>
 <input id="email" name="email" type="email" autocomplete="username" required autofocus></div>
 <div class="fd"><label for="password">{{ "密码"|t }}</label>
-<input id="password" name="password" type="password" autocomplete="current-password" required>
-{% if error %}<span class="error" role="alert">{{ error|t }}</span>{% endif %}</div>
+<input id="password" name="password" type="password" autocomplete="current-password" required></div>
+{% if error %}<p class="signin-error" role="alert">{{ error|t }}</p>{% endif %}
 <button type="submit">{{ "登录"|t }}</button>
 </form>
 <p class="signin-note">{{ "忘记密码时，请站点的搭建者在服务器上用"|t }} <code>{{ "cms-harness admin 邮箱"|t }}</code> {{ "重置。后台不提供自助找回。"|t }}</p>
 </div>
 <span class="signin-foot">{{ "由 CMS Harness 驱动"|t }}</span>
 </section>
-<div class="signin-art" aria-hidden="true"><img src="/admin/static/logo.svg" alt="" width="88" height="88"></div>
+<div class="signin-art" aria-hidden="true">
+<div class="art-stage">
+<div class="art-sheet art-live"><b></b><i></i><i></i><i class="short"></i></div>
+<div class="art-sheet art-draft"><span class="art-dot"></span><b></b><i></i><i class="mid"></i><span class="art-pic"></span><i></i><i class="short"></i></div>
+</div>
+<p class="art-line">{{ "改什么都先是草稿。"|t }}<br>{{ "你点发布，网站才变。"|t }}</p>
+</div>
 </main>
 </body>
 </html>

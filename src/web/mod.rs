@@ -51,6 +51,7 @@ pub fn router(app: Shared) -> Router {
         .route("/admin/settings/keys", post(settings::create_key))
         .route("/admin/settings/keys/{id}/revoke", post(settings::revoke_key))
         .route("/admin/settings/notes", post(settings::save_notes))
+        .route("/admin/settings/name", post(settings::save_name))
         .route("/admin/settings/password", post(settings::change_password))
         .route("/admin/settings/admins", post(settings::add_admin))
         .route("/admin/settings/admins/{id}/reset", post(settings::reset_admin))
@@ -83,7 +84,7 @@ pub fn router(app: Shared) -> Router {
 /// Every `/admin` path except the login page and static files needs a session; the user lands in the request extensions.
 /// Mounted in `api::router` around everything, so routes merged by later tasks are covered too.
 pub async fn guard(State(app): State<Shared>, req: Request, next: Next) -> Response {
-    let browser = crate::i18n::from_headers(req.headers());
+    let browser = crate::i18n::for_visitor(req.headers(), req.uri().query());
     let (lang, resp) = guarded(app, req, next, browser).await;
     plain_in(lang, resp).await
 }
@@ -216,9 +217,15 @@ async fn logo() -> Response {
     ([(header::CONTENT_TYPE, "image/svg+xml"), (header::CACHE_CONTROL, "public, max-age=86400")], LOGO_SVG).into_response()
 }
 
-async fn login_page(State(app): State<Shared>, headers: HeaderMap) -> Response {
-    let lang = crate::i18n::from_headers(&headers);
-    page(StatusCode::OK, "login.html", json!({ "site_name": app.site_name, "lang": lang.code(), "html_lang": lang.html() }))
+async fn login_page(State(app): State<Shared>, uri: axum::http::Uri, headers: HeaderMap) -> Response {
+    let picked = crate::i18n::from_query(uri.query());
+    let lang = crate::i18n::for_visitor(&headers, uri.query());
+    let name = app.name(&app.conn(), false);
+    let resp = page(StatusCode::OK, "login.html", json!({ "site_name": name, "lang": lang.code(), "html_lang": lang.html() }));
+    match picked {
+        Some(l) => ([(header::SET_COOKIE, crate::i18n::remember(l))], resp).into_response(),
+        None => resp,
+    }
 }
 
 #[derive(Deserialize)]
@@ -232,7 +239,7 @@ struct LoginForm {
 async fn login(State(app): State<Shared>, Extension(addr): Extension<Address>, peer: Option<Extension<ConnectInfo<SocketAddr>>>, headers: HeaderMap, Form(f): Form<LoginForm>) -> Response {
     let trust = std::env::var("HC_TRUST_PROXY").is_ok_and(|v| v == "1");
     let client = client_key(&headers, peer.map(|Extension(ConnectInfo(a))| a), trust);
-    let lang = crate::i18n::from_headers(&headers);
+    let lang = crate::i18n::for_visitor(&headers, None);
     let a = app.clone();
     // Argon2 runs between the two short database steps, never under the lock, and only a few at a time.
     let permit = crate::auth::HASHING.clone().acquire_owned().await;
@@ -256,7 +263,7 @@ async fn login(State(app): State<Shared>, Extension(addr): Extension<Address>, p
                 session::BAD_LOGIN => StatusCode::UNAUTHORIZED,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             };
-            page(status, "login.html", json!({ "site_name": app.site_name, "error": e, "lang": lang.code(), "html_lang": lang.html() }))
+            page(status, "login.html", json!({ "site_name": app.name(&app.conn(), false), "error": e, "lang": lang.code(), "html_lang": lang.html() }))
         }
     }
 }

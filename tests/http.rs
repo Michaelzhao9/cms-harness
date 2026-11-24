@@ -74,5 +74,7 @@ async fn a_fresh_site_has_a_front_page() {
     assert_eq!(status, StatusCode::OK);
     assert!(headers["content-type"].to_str().unwrap().starts_with("text/html"));
     let html = get_text(&app, "/").await;
-    assert!(html.contains("测试站") && html.contains("网站还没有内容"), "{html}");
+    // A welcome that sends the owner to the admin, in the visitor's language.
+    assert!(html.contains("测试站") && html.contains("网站已经跑起来了") && html.replace("&#x2f;", "/").contains("href=\"/admin\""), "{html}");
+    assert!(html.contains("href=\"?lang=en\""), "the 中文 / EN switch: {html}");
 }

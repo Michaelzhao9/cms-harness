@@ -38,22 +38,29 @@ pub async fn serve(State(app): State<Shared>, req: Request) -> Response {
         Some(admin) => format!("'self' {admin}"),
         None => "'self'".into(),
     };
+    let admin_url = req.extensions().get::<Address>().and_then(|a| a.admin.clone()).map_or_else(|| "/admin".to_string(), |a| format!("{a}/admin"));
     let (path, query, if_none_match) = parts(&req);
-    let lang = crate::i18n::from_headers(req.headers());
+    let lang = crate::i18n::for_visitor(req.headers(), req.uri().query());
+    let picked = crate::i18n::from_query(req.uri().query());
     let member_token = session::cookie_value(req.headers(), crate::members::COOKIE);
     let a = app.clone();
-    tokio::task::spawn_blocking(move || {
+    let resp = tokio::task::spawn_blocking(move || {
         let conn = a.conn();
         // The member cookie only personalises the live site when member login is live.
         let member = member_token
             .filter(|_| crate::members::login_enabled(&conn, false))
             .and_then(|t| crate::members::from_token(&conn, &t))
             .map(|m| crate::members::member_json(&m));
-        let v = Visit { app: &a, conn: &conn, mode: Mode::Live, base: "", path: &path, query: &query, if_none_match, framers, member, lang };
+        let v = Visit { app: &a, conn: &conn, mode: Mode::Live, base: "", path: &path, query: &query, if_none_match, framers, member, lang, admin_url };
         v.respond()
     })
     .await
-    .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("服务器内部错误：{e}")).into_response())
+    .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("服务器内部错误：{e}")).into_response());
+    // The 中文 / EN switch: remember the pick for the next pages.
+    match picked {
+        Some(l) => ([(header::SET_COOKIE, crate::i18n::remember(l))], resp).into_response(),
+        None => resp,
+    }
 }
 
 /// `GET /_hc/preview/<token>/<path>`: the draft site for the admin's preview frame. The frame is sandboxed (an
@@ -67,7 +74,7 @@ pub async fn preview(State(app): State<Shared>, req: Request) -> Response {
         return if rest.is_empty() { gone() } else { Redirect::to(&format!("/_hc/preview/{rest}/")).into_response() };
     };
     let (_, query, _) = parts(&req);
-    let lang = crate::i18n::from_headers(req.headers());
+    let lang = crate::i18n::for_visitor(req.headers(), req.uri().query());
     let a = app.clone();
     tokio::task::spawn_blocking(move || {
         let conn = a.conn();
@@ -75,7 +82,7 @@ pub async fn preview(State(app): State<Shared>, req: Request) -> Response {
             return gone();
         }
         let base = format!("/_hc/preview/{token}");
-        let v = Visit { app: &a, conn: &conn, mode: Mode::Preview, base: &base, path: &path, query: &query, if_none_match: None, framers: "'self'".into(), member: None, lang };
+        let v = Visit { app: &a, conn: &conn, mode: Mode::Preview, base: &base, path: &path, query: &query, if_none_match: None, framers: "'self'".into(), member: None, lang, admin_url: "/admin".into() };
         v.respond()
     })
     .await
@@ -116,12 +123,14 @@ struct Visit<'a> {
     member: Option<Value>,
     /// The visitor's language, for the built-in pages.
     lang: crate::i18n::Lang,
+    /// Where the admin opens (its own origin in 分开 mode), for the empty site's welcome.
+    admin_url: String,
 }
 
 /// The built-in sign-up or login page after a form post (`which` is "login" or "signup"), with an error.
 pub fn account_page(app: &App, conn: &Connection, which: &str, form: Value, status: StatusCode, lang: crate::i18n::Lang) -> Response {
     let path = format!("/account/{which}");
-    let v = Visit { app, conn, mode: Mode::Live, base: "", path: &path, query: &[], if_none_match: None, framers: "'self'".into(), member: None, lang };
+    let v = Visit { app, conn, mode: Mode::Live, base: "", path: &path, query: &[], if_none_match: None, framers: "'self'".into(), member: None, lang, admin_url: "/admin".into() };
     let mut extra = json!({ "mode": which, "next": "", "email": "", "name": "", "error": null });
     if let (Some(e), Value::Object(f)) = (extra.as_object_mut(), form) {
         e.extend(f);
@@ -175,15 +184,7 @@ impl Visit<'_> {
         }
         let viewer = self.member.as_ref().and_then(|m| m["id"].as_i64()).map_or(crate::access::Viewer::Anon, crate::access::Viewer::Member);
         match parts.as_slice() {
-            [""] => {
-                let mut list = vec![];
-                for name in collection_names(self.conn)? {
-                    if let Some((def, _)) = site::visible_def(self.conn, self.mode, &name, viewer)? {
-                        list.push(json!({ "name": def.name, "title": def.title }));
-                    }
-                }
-                Ok(self.page("_hc/home.html", json!({ "collections": list }), StatusCode::OK))
-            }
+            [""] => Ok(self.page("_hc/home.html", json!({}), StatusCode::OK)),
             [name] => match site::visible_def(self.conn, self.mode, name, viewer)? {
                 Some((def, _)) => Ok(self.page("_hc/list.html", json!({ "def": describe(&def) }), StatusCode::OK)),
                 None => Ok(self.not_found()),
@@ -250,16 +251,33 @@ impl Visit<'_> {
         Ok(self.finish(([(header::CONTENT_TYPE, site::content_type(name)), (header::ETAG, etag.as_str())], body).into_response(), None))
     }
 
+    fn visible_collections(&self) -> Result<Vec<Value>, String> {
+        let viewer = self.member.as_ref().and_then(|m| m["id"].as_i64()).map_or(crate::access::Viewer::Anon, crate::access::Viewer::Member);
+        let mut list = vec![];
+        for name in collection_names(self.conn)? {
+            if let Some((def, _)) = site::visible_def(self.conn, self.mode, &name, viewer)? {
+                list.push(describe(&def));
+            }
+        }
+        Ok(list)
+    }
+
     /// Renders a template into a page: the import map and, in preview, the preview's assets go after `<head>`.
     fn page(&self, template: &str, extra: Value, status: StatusCode) -> Response {
         let query: serde_json::Map<String, Value> = self.query.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
         let mut ctx = json!({
-            "site": { "name": self.app.site_name, "origin": self.app.origin },
+            "site": { "name": self.app.name(self.conn, self.mode == Mode::Preview), "origin": self.app.origin },
             "request": { "path": self.path, "query": query },
             "member": self.member,
             "lang": self.lang.code(),
             "html_lang": self.lang.html(),
         });
+        // The built-in theme's header: the collections this visitor may open, and the account links.
+        if template.starts_with("_hc/") {
+            ctx["collections"] = json!(self.visible_collections().unwrap_or_default());
+            ctx["accounts"] = json!(crate::members::login_enabled(self.conn, self.mode == Mode::Preview));
+            ctx["admin_url"] = json!(self.admin_url);
+        }
         if let (Some(c), Value::Object(extra)) = (ctx.as_object_mut(), extra) {
             c.extend(extra);
         }
@@ -322,8 +340,9 @@ fn collection_names(conn: &Connection) -> Result<Vec<String>, String> {
 fn describe(def: &crate::schema::CollectionDef) -> Value {
     use crate::schema::FieldType;
     let label = def.fields.iter().find(|f| f.kind == FieldType::Text && !f.multiple).map(|f| f.name.clone());
+    let date = def.fields.iter().find(|f| f.kind == FieldType::Date).map(|f| f.name.clone());
     let fields: Vec<Value> = def.fields.iter().map(|f| json!({ "name": f.name, "title": f.title, "type": f.kind, "multiple": f.multiple })).collect();
-    json!({ "name": def.name, "title": def.title, "label": label, "fields": fields })
+    json!({ "name": def.name, "title": def.title, "label": label, "date": date, "fields": fields })
 }
 
 /// Transpiled scripts by content hash: a file is transpiled once per version, not per request.

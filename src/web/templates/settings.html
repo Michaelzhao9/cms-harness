@@ -135,10 +135,15 @@
 </section>
 
 <section aria-labelledby="s-notes">
-<h2 id="s-notes">{{ "站点说明"|t }}</h2>
-<p class="lede">{{ "给对话模型看的一段话：这是什么网站、写给谁、有什么规矩。和内容一样，改完要发布才生效。"|t }}</p>
-{% if saved == "notes" %}<p class="note good" role="status">{{ "已存为草稿，发布后才会生效。"|t }}</p>{% endif %}
+<h2 id="s-notes">{{ "站点"|t }}</h2>
+<p class="lede">{{ "站点名称和给对话模型看的说明。和内容一样，改完要发布才生效。"|t }}</p>
+{% if saved == "notes" or saved == "name" %}<p class="note good" role="status">{{ "已存为草稿，发布后才会生效。"|t }}</p>{% endif %}
 {% if can_notes -%}
+<form class="fields" method="post" action="/admin/settings/name">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="fd"><label class="lb" for="n-name">{{ "站点名称"|t }}{% if name_status in ["changed", "draft", "deleting"] %}<span class="req">{{ "有未发布的改动"|t }}</span>{% endif %}</label><input class="in" id="n-name" type="text" name="name" maxlength="60" value="{{ site_name_draft }}" placeholder="CMS Harness"></div>
+<div class="actions"><button type="submit" class="btn">{{ "存为草稿"|t }}</button></div>
+</form>
 <form class="fields" method="post" action="/admin/settings/notes">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <div class="fd"><label class="lb" for="n-text">{{ "说明"|t }}{% if notes_status != "published" %}<span class="req">{{ "有未发布的改动"|t }}</span>{% endif %}</label><textarea class="in" id="n-text" name="text" rows="6" maxlength="20000">

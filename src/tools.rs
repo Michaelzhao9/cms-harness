@@ -51,7 +51,7 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<NoArgs>("get_site_notes", Scope::Read, "读取站点说明（有草稿时返回草稿）和状态。"),
             spec::<SetSiteNotes>("set_site_notes", Scope::Structure, "修改站点说明草稿：一段给对话模型看的文字，最多 20000 个字符。发布后才生效。"),
             spec::<NoArgs>("get_site_settings", Scope::Read, "读取网站的前端设置：import_map（浏览器里 import 的包从哪个网址加载）和 script_origins（网站允许加载脚本的其他来源，默认 https://esm.sh）。"),
-            spec::<SetSiteSettings>("set_site_settings", Scope::Structure, "修改网站的前端设置（草稿，发布后生效）。只传要改的项，传 null 恢复默认。例：用 React 时 import_map 设为 {\"imports\": {\"react\": \"https://esm.sh/react@19\", \"react/jsx-runtime\": \"https://esm.sh/react@19/jsx-runtime\", \"react-dom/client\": \"https://esm.sh/react-dom@19/client\"}}。"),
+            spec::<SetSiteSettings>("set_site_settings", Scope::Structure, "修改网站的设置（草稿，发布后生效）：name 是站点名称（网页标题、内置页面和后台都用它），import_map、script_origins 管前端脚本。只传要改的项，传 null 恢复默认。例：用 React 时 import_map 设为 {\"imports\": {\"react\": \"https://esm.sh/react@19\", \"react/jsx-runtime\": \"https://esm.sh/react@19/jsx-runtime\", \"react-dom/client\": \"https://esm.sh/react-dom@19/client\"}}。"),
             spec::<SetMemberLogin>("set_member_login", Scope::Structure, "打开或关闭网站的会员注册和登录（草稿，发布后生效）。打开后网站有 /account/signup、/account/login、/account/logout 页面和 /api/v1/members/* 接口，模板里 member 是当前登录的会员；后台左边会自动出现「用户管理」，关闭后它自动消失；要改它的样子，用 set_view 并写 collection: \"_members\"（字段 email、name、status、created_at、last_login）。网站要做登录功能时用它，不要自己建会员集合。"),
             spec::<ListMembers>("list_members", Scope::Read, "列出网站的注册会员（不含密码）：可按状态 active/disabled 和关键词筛选。"),
             spec::<SetMemberStatus>("set_member_status", Scope::Write, "停用或恢复一个会员（立即生效）：停用后他不能登录，已登录的会话也会失效。"),
@@ -737,6 +737,9 @@ struct SetSiteSettings {
     /// Origins scripts may load from, like ["https://esm.sh"]; null for the default. Leave out to keep it.
     #[serde(default, deserialize_with = "present")]
     script_origins: Option<Option<Value>>,
+    /// The site's name, shown in page titles, the built-in pages and the admin; null for the default. Leave out to keep it.
+    #[serde(default, deserialize_with = "present")]
+    name: Option<Option<Value>>,
     note: String,
 }
 
@@ -746,7 +749,7 @@ fn get_site_settings(conn: &Connection) -> Result<Value, String> {
         let target = Target::Setting(k.into());
         Ok(json!({ "value": changes::setting(conn, k, true), "status": changes::target_status(conn, &target)? }))
     };
-    Ok(json!({ "import_map": get("import_map")?, "script_origins": get("script_origins")? }))
+    Ok(json!({ "name": get("site_name")?, "import_map": get("import_map")?, "script_origins": get("script_origins")? }))
 }
 
 fn set_site_settings(conn: &Connection, actor: &Actor, a: SetSiteSettings) -> Result<Value, String> {
@@ -756,6 +759,14 @@ fn set_site_settings(conn: &Connection, actor: &Actor, a: SetSiteSettings) -> Re
         rest.is_some_and(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_alphanumeric() || b".-:".contains(&b)))
     };
     let mut writes: Vec<(&str, Option<String>)> = vec![];
+    if let Some(n) = a.name {
+        match n.as_ref().map(|v| v.as_str().map(str::trim)) {
+            Some(None) => return Err("name 要是一段文字，或者 null 恢复默认。".into()),
+            None | Some(Some("")) => writes.push(("site_name", None)),
+            Some(Some(n)) if n.chars().count() <= 60 => writes.push(("site_name", Some(json!(n).to_string()))),
+            Some(Some(_)) => return Err("站点名称太长：最多 60 个字符。".into()),
+        }
+    }
     if let Some(m) = a.import_map {
         let m = m.unwrap_or(Value::Null);
         match m {

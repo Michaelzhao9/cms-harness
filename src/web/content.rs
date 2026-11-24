@@ -56,9 +56,12 @@ pub(super) fn tool(app: &App, user: &AdminUser, name: &str, args: Value) -> Resu
 
 /// The context `base.html` needs around a page's own.
 pub(super) fn shell(app: &App, user: &AdminUser, current: &str, mut ctx: Value) -> Value {
-    let nav = nav(&app.conn(), user, current);
+    let (nav, name) = {
+        let conn = app.conn();
+        (nav(&conn, user, current), app.name(&conn, false))
+    };
     ctx["chat"] = super::chat::view(app, user);
-    ctx["site_name"] = json!(app.site_name);
+    ctx["site_name"] = json!(name);
     ctx["csrf"] = json!(user.csrf);
     ctx["nav"] = nav;
     let lang = crate::i18n::Lang::of_prefs(&user.prefs);

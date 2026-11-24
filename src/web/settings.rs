@@ -142,6 +142,7 @@ fn settings_page(app: &App, user: &AdminUser, extra: Extra) -> Result<Out, Out> 
         (keys, admins)
     };
     let notes = content::tool(app, user, "get_site_notes", json!({})).map_err(content::internal)?;
+    let site = content::tool(app, user, "get_site_settings", json!({})).map_err(content::internal)?;
     let nav = super::admin::nav(&app.conn(), user, "settings");
     let status = if extra.error.is_some() { StatusCode::BAD_REQUEST } else { StatusCode::OK };
     let address = super::address::section(app, extra.address);
@@ -159,6 +160,8 @@ fn settings_page(app: &App, user: &AdminUser, extra: Extra) -> Result<Out, Out> 
         "notes_status": notes["status"],
         "can_notes": user.actor().can(Scope::Structure),
         "notes_note": NOTES_NOTE,
+        "site_name_draft": site["name"]["value"].as_str().unwrap_or_default(),
+        "name_status": site["name"]["status"],
         "marks": MARKS.iter().map(|(k, label)| json!({ "key": k, "label": label, "on": nav["mark"] == *k })).collect::<Vec<_>>(),
         "chat_default": chat_default(app, user),
         "email": user.email,
@@ -259,6 +262,17 @@ pub async fn save_notes(State(app): State<Shared>, Extension(user): Extension<Ad
         match content::tool(app, user, "set_site_notes", json!({ "text": text, "note": posted.note(NOTES_NOTE) })) {
             Ok(_) => Ok(Out::Go("/admin/settings?saved=notes".into())),
             Err(e) => settings_page(app, user, Extra { error: Some(e), notes: Some(text), ..Default::default() }),
+        }
+    })
+    .await
+}
+
+pub async fn save_name(State(app): State<Shared>, Extension(user): Extension<AdminUser>, req: Request) -> Response {
+    handle(app, user, req, false, |app, user, posted| {
+        let name = posted.one("name").trim().to_string();
+        match content::tool(app, user, "set_site_settings", json!({ "name": name, "note": "后台修改站点名称" })) {
+            Ok(_) => Ok(Out::Go("/admin/settings?saved=name".into())),
+            Err(e) => refused(app, user, e),
         }
     })
     .await
