@@ -8,7 +8,7 @@
 {% if error %}<p class="note bad" role="alert">{{ error|t }}</p>{% endif %}
 {% if restored %}<p class="note good" role="status">{{ "已放回草稿，发布后才会上线。"|t }}</p>{% endif %}
 {% for r in releases -%}
-<section class="release" aria-label="{{ '第'|t }} {{ r.id }} {{ '次发布'|t }}">
+<section class="release" aria-label="{{ ('第 ' ~ r.id ~ ' 次发布')|t }}">
 <h2>{{ ("第 " ~ r.id ~ " 次发布")|t }}</h2>
 <p class="by">{{ r.actor|t }}{{ "，"|t }}{{ r.at }}{{ "（UTC）："|t }}{{ r.note|t }}</p>
 <ul class="went">
