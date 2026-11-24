@@ -27,7 +27,7 @@
 {% endfor -%}
 <span class="rule" aria-hidden="true"></span>
 <span class="cap">后台</span>
-{% if nav.members %}{{ item("/admin/v/members", "v:members", "用户管理", "users") }}
+{% if nav.members %}{{ item("/admin/members", "members", "用户管理", "users") }}
 {% endif -%}
 {{ item("/admin/media", "media", "素材库", "images") }}
 {{ item("/admin/releases", "releases", "发布记录", "clock-counter-clockwise") }}

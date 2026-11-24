@@ -100,7 +100,10 @@ async fn public_submissions_go_live_at_once_without_an_owner_and_are_rate_limite
         app.conn().query_row("SELECT owner, published, draft FROM records WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
     assert_eq!((owner, published.is_some(), draft), (None, true, None));
     let actor: String = app.conn().query_row("SELECT actor FROM versions WHERE target = ?1", [format!("record:{id}")], |r| r.get(0)).unwrap();
-    assert!(actor.starts_with("public:"));
+    assert_eq!(actor, "访客", "no visitor address is kept in history");
+    let session = admin_session(&app, "builder").await;
+    let (_, _, history) = get_with(&app, "/admin/releases", Some(&session.0)).await;
+    assert!(!history.contains("访客提交"), "submissions stay out of the publish history");
     // Validation still applies.
     assert_eq!(post(&app, "/api/v1/content/notes", json!({"stars": 3}), None).await.0, StatusCode::BAD_REQUEST);
     for _ in 0..19 {

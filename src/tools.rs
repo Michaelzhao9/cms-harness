@@ -52,7 +52,7 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<SetSiteNotes>("set_site_notes", Scope::Structure, "修改站点说明草稿：一段给对话模型看的文字，最多 20000 个字符。发布后才生效。"),
             spec::<NoArgs>("get_site_settings", Scope::Read, "读取网站的前端设置：import_map（浏览器里 import 的包从哪个网址加载）和 script_origins（网站允许加载脚本的其他来源，默认 https://esm.sh）。"),
             spec::<SetSiteSettings>("set_site_settings", Scope::Structure, "修改网站的前端设置（草稿，发布后生效）。只传要改的项，传 null 恢复默认。例：用 React 时 import_map 设为 {\"imports\": {\"react\": \"https://esm.sh/react@19\", \"react/jsx-runtime\": \"https://esm.sh/react@19/jsx-runtime\", \"react-dom/client\": \"https://esm.sh/react-dom@19/client\"}}。"),
-            spec::<SetMemberLogin>("set_member_login", Scope::Structure, "打开或关闭网站的会员注册和登录（草稿，发布后生效）。打开后网站有 /account/signup、/account/login、/account/logout 页面和 /api/v1/members/* 接口，模板里 member 是当前登录的会员；后台左边会自动出现「用户管理」。关闭后它自动消失。网站要做登录功能时用它，不要自己建会员集合。"),
+            spec::<SetMemberLogin>("set_member_login", Scope::Structure, "打开或关闭网站的会员注册和登录（草稿，发布后生效）。打开后网站有 /account/signup、/account/login、/account/logout 页面和 /api/v1/members/* 接口，模板里 member 是当前登录的会员；后台左边会自动出现「用户管理」，关闭后它自动消失；要改它的样子，用 set_view 并写 collection: \"_members\"（字段 email、name、status、created_at、last_login）。网站要做登录功能时用它，不要自己建会员集合。"),
             spec::<ListMembers>("list_members", Scope::Read, "列出网站的注册会员（不含密码）：可按状态 active/disabled 和关键词筛选。"),
             spec::<SetMemberStatus>("set_member_status", Scope::Write, "停用或恢复一个会员（立即生效）：停用后他不能登录，已登录的会话也会失效。"),
             spec::<UploadMedia>("upload_media", Scope::Write, "上传图片或 PDF（base64，最大 5 MB）：返回 /uploads/ 路径，可填进 media 字段。"),
@@ -332,9 +332,6 @@ fn save_collection(conn: &Connection, actor: &Actor, def: &CollectionDef, note: 
 
 fn create_collection(conn: &Connection, actor: &Actor, a: CreateCollection) -> Result<Value, String> {
     let note = check_note(&a.note)?;
-    if a.name == crate::members::MEMBERS {
-        return Err("“members”是内置的用户集合，不能新建同名集合：网站的会员用 set_member_login 打开，后台的用户管理界面用 set_view 的 collection: \"members\" 定制。".into());
-    }
     let def = CollectionDef {
         name: a.name,
         title: a.title,

@@ -115,11 +115,11 @@ async fn the_chat_builds_a_booking_form_a_visitor_books_and_members_get_a_screen
     ])))));
     chat_turn(&app, &session, "网站加个会员登录").await;
     let (_, _, admin) = get_with(&app, "/admin", Some(&session.0)).await;
-    assert!(admin.contains("/admin/v/members"));
+    assert!(admin.contains("/admin/members"));
     publish_everything(&app, &session).await;
     let (s, _, _) = post_form(&app, "/account/signup", None, &[("email", "visitor@example.com"), ("password", "long-enough-1")]).await;
     assert_eq!(s, StatusCode::SEE_OTHER);
-    let (_, _, members) = get_with(&app, "/admin/v/members", Some(&session.0)).await;
+    let (_, _, members) = get_with(&app, "/admin/members", Some(&session.0)).await;
     assert!(members.contains("visitor@example.com"));
     let id = ok(&app, &builder(), "list_members", json!({}))["items"][0]["id"].to_string();
     let (s, _, _) = post_form(&app, &format!("/admin/members/{id}/status"), Some(&session), &[("status", "disabled")]).await;

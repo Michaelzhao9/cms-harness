@@ -69,7 +69,8 @@ pub fn submit(conn: &Connection, collection: &str, data: &Value, who: &Submitter
     }
     let (key, limit, actor, owner) = match who {
         Submitter::Member(id) => (format!("submit:m:{id}"), MEMBER_PER_HOUR, format!("member:{id}"), Some(*id)),
-        Submitter::Public(client) => (format!("submit:ip:{client}"), PUBLIC_PER_HOUR, format!("public:{client}"), None),
+        // The client address is only a rate-limit key, deleted within the hour; history just says 访客.
+        Submitter::Public(client) => (format!("submit:ip:{client}"), PUBLIC_PER_HOUR, "访客".to_string(), None),
     };
     conn.execute("DELETE FROM member_attempts WHERE at <= datetime('now', '-1 hour')", []).map_err(db)?;
     let recent: i64 = conn.query_row("SELECT count(*) FROM member_attempts WHERE key = ?1", [&key], |r| r.get(0)).map_err(db)?;

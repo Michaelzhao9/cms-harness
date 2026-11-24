@@ -38,6 +38,7 @@ pub fn router(app: Shared) -> Router {
         .route("/admin/c/{name}", get(content::collection_list))
         .route("/admin/c/{name}/new", post(content::create).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
         .route("/admin/v/{name}", get(content::view_list))
+        .route("/admin/members", get(content::members_list))
         .route("/admin/members/{id}/status", post(content::member_status))
         .route("/admin/r/{id}", get(content::record).post(content::save).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
         .route("/admin/r/{id}/delete", post(content::delete))

@@ -443,9 +443,6 @@ fn collection_page(app: &App, user: &AdminUser, name: &str, params: &Params, typ
 }
 
 fn view_page(app: &App, user: &AdminUser, name: &str, params: &Params) -> Result<Out, Out> {
-    if name == crate::members::MEMBERS {
-        return members_page(app, user, params, None);
-    }
     let views = tool(app, user, "list_views", json!({})).map_err(internal)?;
     let view: ViewDef = views
         .as_array()
@@ -454,6 +451,9 @@ fn view_page(app: &App, user: &AdminUser, name: &str, params: &Params) -> Result
         .find(|v| v["definition"]["name"] == name)
         .and_then(|v| serde_json::from_value(v["definition"].clone()).ok())
         .ok_or_else(|| Out::Fail(StatusCode::NOT_FOUND, format!("界面“{name}”不存在或已删除。")))?;
+    if view.collection == crate::members::MEMBERS {
+        return members_page(app, user, params, None);
+    }
     let def = collection(app, &view.collection)?;
     let mut ctx = list_ctx(app, user, &def, Some(&view), params, None)?;
     if param(params, "new") == "1" && ctx["can_create"] == true {
@@ -744,6 +744,11 @@ pub async fn collection_list(State(app): State<Shared>, Extension(mut user): Ext
     .await
 }
 
+/// `GET /admin/members`: 用户管理.
+pub async fn members_list(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Query(params): Query<Params>) -> Response {
+    blocking(move || members_page(&app, &user, &params, None)).await
+}
+
 pub async fn view_list(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Path(name): Path<String>, Query(params): Query<Params>) -> Response {
     blocking(move || view_page(&app, &user, &name, &params)).await
 }
@@ -808,7 +813,7 @@ pub(super) fn members_page(app: &App, user: &AdminUser, params: &Params, error: 
         .as_array()
         .into_iter()
         .flatten()
-        .find(|v| v["definition"]["name"] == crate::members::MEMBERS && v["definition"]["collection"] == crate::members::MEMBERS)
+        .find(|v| v["definition"]["collection"] == crate::members::MEMBERS)
         .and_then(|v| serde_json::from_value(v["definition"].clone()).ok());
     let heading = custom.as_ref().map_or_else(|| "用户管理".to_string(), |v| v.title.clone());
     let names: Vec<String> = custom.as_ref().map_or_else(|| def.fields.iter().map(|f| f.name.clone()).collect(), |v| v.columns.clone());
@@ -854,7 +859,7 @@ pub(super) fn members_page(app: &App, user: &AdminUser, params: &Params, error: 
         if page > 1 {
             parts.push(format!("page={page}"));
         }
-        if parts.is_empty() { "/admin/v/members".to_string() } else { format!("/admin/v/members?{}", parts.join("&")) }
+        if parts.is_empty() { "/admin/members".to_string() } else { format!("/admin/members?{}", parts.join("&")) }
     };
     let pages = ((total + MEMBER_PAGE - 1) / MEMBER_PAGE).max(1);
     let tabs: Vec<Value> = [("", "全部"), ("active", "正常"), ("disabled", "已停用")].iter().map(|(k, l)| json!({ "href": href(k, 1), "label": l, "on": *k == tab })).collect();
@@ -871,7 +876,7 @@ pub(super) fn members_page(app: &App, user: &AdminUser, params: &Params, error: 
         "pager": (pages > 1).then(|| json!({ "page": page, "pages": pages,
             "prev": (page > 1).then(|| href(tab, page - 1)), "next": (page < pages).then(|| href(tab, page + 1)) })),
     });
-    Ok(Out::Page(StatusCode::OK, "members.html", shell(app, user, "v:members", ctx)))
+    Ok(Out::Page(StatusCode::OK, "members.html", shell(app, user, "members", ctx)))
 }
 
 fn url_escape(s: &str) -> String {
@@ -894,7 +899,7 @@ pub async fn member_status(State(app): State<Shared>, Extension(user): Extension
     blocking(move || {
         let note = if f.status == "disabled" { "后台停用会员" } else { "后台恢复会员" };
         match tool(&app, &user, "set_member_status", json!({ "id": id, "status": f.status, "note": note })) {
-            Ok(_) => Ok(Out::Go("/admin/v/members".into())),
+            Ok(_) => Ok(Out::Go("/admin/members".into())),
             Err(e) => members_page(&app, &user, &vec![], Some(e)),
         }
     })

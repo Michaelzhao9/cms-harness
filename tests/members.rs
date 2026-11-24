@@ -127,27 +127,27 @@ async fn the_admin_nav_follows_member_login_both_ways() {
     let session = admin_session(&app, "builder").await;
     let (_, _, page) = get_with(&app, "/admin", Some(&session.0)).await;
     assert!(!page.contains("用户管理"), "no login, no 用户管理");
-    assert_eq!(get_with(&app, "/admin/v/members", Some(&session.0)).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(get_with(&app, "/admin/members", Some(&session.0)).await.0, StatusCode::NOT_FOUND);
 
     // Turning login on (even as a draft) brings it; the page lists members.
     ok(&app, &builder(), "set_member_login", json!({"enabled": true, "note": "加登录"}));
     let (_, _, page) = get_with(&app, "/admin", Some(&session.0)).await;
-    assert!(page.contains("/admin/v/members") && page.contains("用户管理"));
+    assert!(page.contains("/admin/members") && page.contains("用户管理"));
     publish_all(&app);
     signup(&app, "list@example.com").await;
-    let (s, _, page) = get_with(&app, "/admin/v/members", Some(&session.0)).await;
+    let (s, _, page) = get_with(&app, "/admin/members", Some(&session.0)).await;
     assert_eq!(s, StatusCode::OK);
     assert!(page.contains("list@example.com") && page.contains("停用"));
 
     // The chat can reshape it like any screen.
-    ok(&app, &builder(), "set_view", json!({"name": "members", "title": "会员", "collection": "members", "columns": ["name", "email"], "note": "精简"}));
-    let (_, _, page) = get_with(&app, "/admin/v/members", Some(&session.0)).await;
+    ok(&app, &builder(), "set_view", json!({"name": "members", "title": "会员", "collection": "_members", "columns": ["name", "email"], "note": "精简"}));
+    let (_, _, page) = get_with(&app, "/admin/members", Some(&session.0)).await;
     assert!(page.contains("<h1>会员</h1>") && !page.contains("注册时间"));
 
     // Off again: gone.
     ok(&app, &builder(), "set_member_login", json!({"enabled": false, "note": "不要登录了"}));
     let (_, _, page) = get_with(&app, "/admin", Some(&session.0)).await;
-    assert!(!page.contains("/admin/v/members"));
+    assert!(!page.contains("/admin/members"));
 }
 
 #[tokio::test]
@@ -185,11 +185,27 @@ async fn site_forms_log_in_and_pages_see_the_member() {
     let _ = HeaderMap::new();
 }
 
-#[test]
-fn members_is_a_reserved_collection_name() {
+#[tokio::test]
+async fn a_real_collection_called_members_lives_beside_user_management() {
     let app = app();
-    let e = err(&app, &builder(), "create_collection", json!({"name": "members", "title": "会员", "fields": [{"name": "email", "title": "邮箱", "type": "text"}], "note": "x"}));
-    assert!(e.contains("set_member_login"));
+    ok(&app, &builder(), "create_collection", json!({"name": "members", "title": "会员名录", "read": "public", "note": "x",
+        "fields": [{"name": "phone", "title": "电话", "type": "text"}]}));
+    let r = ok(&app, &builder(), "create_record", json!({"collection": "members", "data": {"phone": "123"}, "note": "x"}));
+    login_on(&app);
+    // The real collection keeps its own definition and records.
+    ok(&app, &builder(), "update_record", json!({"id": r["id"], "data": {"phone": "456"}, "note": "改电话"}));
+    ok(&app, &builder(), "update_collection", json!({"name": "members", "title": "会员名录二", "note": "改名"}));
+    let def = ok(&app, &builder(), "get_collection", json!({"name": "members"}))["definition"].clone();
+    assert_eq!(def["fields"][0]["name"], "phone");
+    publish_all(&app);
+    let (s, _, list) = get(&app, "/api/v1/content/members", None).await;
+    assert_eq!((s, list["items"][0]["phone"].clone()), (StatusCode::OK, json!("456")));
+    // 用户管理 is separate.
+    signup(&app, "m@example.com").await;
+    let session = admin_session(&app, "builder").await;
+    let (_, _, page) = get_with(&app, "/admin/members", Some(&session.0)).await;
+    assert!(page.contains("m@example.com"));
+    assert!(err(&app, &builder(), "create_collection", json!({"name": "_members", "title": "x", "fields": [], "note": "x"})).contains("不合法"));
 }
 
 #[tokio::test]

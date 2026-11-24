@@ -15,8 +15,9 @@ const MAX_LOGIN_FAILURES: i64 = 5;
 const MAX_SIGNUPS_PER_HOUR: i64 = 10;
 pub const BAD_LOGIN: &str = "邮箱或密码不正确。";
 pub const LOCKED: &str = "尝试次数太多，请 15 分钟后再试。";
-/// The admin screen over members, and the name the built-in pseudo-collection goes by.
-pub const MEMBERS: &str = "members";
+/// The name the built-in pseudo-collection of members goes by in `set_view`. It starts with `_`, which no real
+/// collection name may, so it never collides with a collection called `members`.
+pub const MEMBERS: &str = "_members";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Member {

@@ -73,7 +73,7 @@ fn change_line(app: &App, ch: &Change, order: &[String]) -> Value {
             line["crumb"] = json!(["站点说明"]);
         }
         Ok(Target::Setting(key)) => {
-            line["href"] = json!(if key == "member_login" { "/admin/v/members" } else { "/admin/settings" });
+            line["href"] = json!(if key == "member_login" { "/admin/members" } else { "/admin/settings" });
             line["crumb"] = json!(["设置", crate::changes::setting_title(&key)]);
         }
         Err(_) => line["crumb"] = json!([ch.target]),
