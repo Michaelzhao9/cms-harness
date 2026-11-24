@@ -166,3 +166,78 @@ pub async fn me(State(app): State<Shared>, headers: HeaderMap) -> Response {
         Some(m) => ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "ok": true, "member": m }))).into_response(),
     }
 }
+
+/// `POST /<collection>/new` from a form on the site: a visitor (or the logged-in member) adds a record when the
+/// collection's `create` rule allows it. Fields arrive as text and are typed by the live definition. On success
+/// it goes back to `next` (or `/`) with `?sent=1`.
+pub async fn submit_form(
+    State(app): State<Shared>,
+    Path(collection): Path<String>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
+    headers: HeaderMap,
+    Form(pairs): Form<Vec<(String, String)>>,
+) -> Response {
+    let who_client = client(&headers, peer);
+    let token = session::cookie_value(&headers, COOKIE);
+    let next = pairs.iter().find(|(k, _)| k == "next").map(|(_, v)| site::safe_next(v)).unwrap_or_default();
+    let a = app.clone();
+    let done = tokio::task::spawn_blocking(move || {
+        let conn = a.conn();
+        let def = crate::changes::live_def(&conn, &collection).map_err(|_| format!("没有可以提交的“{collection}”。"))?;
+        let data = typed_form(&def, &pairs)?;
+        let who = match crate::access::viewer(&conn, None, token.as_deref()) {
+            crate::access::Viewer::Member(id) => crate::access::Submitter::Member(id),
+            _ => crate::access::Submitter::Public(who_client),
+        };
+        crate::access::submit(&conn, &collection, &data, &who)
+    })
+    .await
+    .unwrap_or_else(|e| Err(format!("服务器内部错误：{e}")));
+    match done {
+        Ok(_) => {
+            let back = if next.is_empty() { "/".to_string() } else { next };
+            let sep = if back.contains('?') { '&' } else { '?' };
+            Redirect::to(&format!("{back}{sep}sent=1")).into_response()
+        }
+        Err(e) => {
+            let status = if e.contains("太频繁") { StatusCode::TOO_MANY_REQUESTS } else if e.contains("登录") { StatusCode::UNAUTHORIZED } else if e.contains("不接受") || e.starts_with("没有可以提交") { StatusCode::FORBIDDEN } else { StatusCode::BAD_REQUEST };
+            let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+            let html = format!("<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>没有提交成功</title><body style=\"font:16px/1.6 -apple-system,'PingFang SC',sans-serif;max-width:36rem;margin:15vh auto;padding:0 24px\"><h1 style=\"font-size:22px\">没有提交成功</h1><p>{}</p><p><a href=\"javascript:history.back()\">返回修改</a></p>", esc(&e));
+            (status, [(header::CONTENT_TYPE, "text/html; charset=utf-8"), (header::CONTENT_SECURITY_POLICY, "default-src 'none'; style-src 'unsafe-inline'")], html).into_response()
+        }
+    }
+}
+
+/// Form text typed by the definition: numbers parsed, checkboxes as booleans, repeated keys as lists for
+/// multiple fields; unknown keys and `next` ignored; empty text leaves the field out.
+fn typed_form(def: &crate::schema::CollectionDef, pairs: &[(String, String)]) -> Result<Value, String> {
+    use crate::schema::FieldType;
+    let mut out = serde_json::Map::new();
+    for f in &def.fields {
+        let vals: Vec<&str> = pairs.iter().filter(|(k, _)| *k == f.name).map(|(_, v)| v.trim()).filter(|v| !v.is_empty()).collect();
+        let one = |v: &str| -> Result<Value, String> {
+            Ok(match f.kind {
+                FieldType::Number => json!(v.parse::<f64>().map_err(|_| format!("“{}”要填数字。", f.title))?),
+                FieldType::Relation => json!(v.parse::<i64>().map_err(|_| format!("“{}”的选项不对。", f.title))?),
+                FieldType::Boolean => json!(matches!(v, "on" | "true" | "1" | "yes")),
+                _ => json!(v),
+            })
+        };
+        if f.kind == FieldType::Boolean {
+            if !vals.is_empty() || pairs.iter().any(|(k, _)| *k == f.name) {
+                out.insert(f.name.clone(), one(vals.first().copied().unwrap_or("false"))?);
+            }
+            continue;
+        }
+        match (f.multiple, vals.as_slice()) {
+            (_, []) => {}
+            (true, many) => {
+                out.insert(f.name.clone(), Value::Array(many.iter().map(|v| one(v)).collect::<Result<_, _>>()?));
+            }
+            (false, [v, ..]) => {
+                out.insert(f.name.clone(), one(v)?);
+            }
+        }
+    }
+    Ok(Value::Object(out))
+}

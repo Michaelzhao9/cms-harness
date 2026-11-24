@@ -169,23 +169,24 @@ impl Visit<'_> {
             let next = self.query.iter().find(|(k, _)| k == "next").map(|(_, v)| safe_next(v)).unwrap_or_default();
             return Ok(self.page(&self.account_template(which), json!({ "mode": which, "next": next, "email": "", "name": "", "error": null }), StatusCode::OK));
         }
+        let viewer = self.member.as_ref().and_then(|m| m["id"].as_i64()).map_or(crate::access::Viewer::Anon, crate::access::Viewer::Member);
         match parts.as_slice() {
             [""] => {
                 let mut list = vec![];
                 for name in collection_names(self.conn)? {
-                    if let Some(def) = site::public_def(self.conn, self.mode, &name)? {
+                    if let Some((def, _)) = site::visible_def(self.conn, self.mode, &name, viewer)? {
                         list.push(json!({ "name": def.name, "title": def.title }));
                     }
                 }
                 Ok(self.page("_hc/home.html", json!({ "collections": list }), StatusCode::OK))
             }
-            [name] => match site::public_def(self.conn, self.mode, name)? {
-                Some(def) => Ok(self.page("_hc/list.html", json!({ "def": describe(&def) }), StatusCode::OK)),
+            [name] => match site::visible_def(self.conn, self.mode, name, viewer)? {
+                Some((def, _)) => Ok(self.page("_hc/list.html", json!({ "def": describe(&def) }), StatusCode::OK)),
                 None => Ok(self.not_found()),
             },
             [name, id] => {
-                let (Some(def), Ok(id)) = (site::public_def(self.conn, self.mode, name)?, id.parse::<i64>()) else { return Ok(self.not_found()) };
-                if !self.record_exists(name, id)? {
+                let (Some((def, owner)), Ok(id)) = (site::visible_def(self.conn, self.mode, name, viewer)?, id.parse::<i64>()) else { return Ok(self.not_found()) };
+                if !self.record_exists(name, id, owner)? {
                     return Ok(self.not_found());
                 }
                 Ok(self.page("_hc/item.html", json!({ "def": describe(&def), "id": id }), StatusCode::OK))
@@ -194,13 +195,17 @@ impl Visit<'_> {
         }
     }
 
-    fn record_exists(&self, collection: &str, id: i64) -> Result<bool, String> {
+    fn record_exists(&self, collection: &str, id: i64, owner: Option<i64>) -> Result<bool, String> {
         let visible = match self.mode {
             Mode::Live => "published IS NOT NULL",
             Mode::Preview => "(published IS NOT NULL OR draft IS NOT NULL) AND draft_deleted = 0",
         };
         self.conn
-            .query_row(&format!("SELECT EXISTS(SELECT 1 FROM records WHERE id = ?1 AND collection = ?2 AND {visible})"), rusqlite::params![id, collection], |r| r.get(0))
+            .query_row(
+                &format!("SELECT EXISTS(SELECT 1 FROM records WHERE id = ?1 AND collection = ?2 AND {visible} AND (?3 IS NULL OR owner = ?3))"),
+                rusqlite::params![id, collection, owner],
+                |r| r.get(0),
+            )
             .map_err(|e| format!("读取记录失败：{e}"))
     }
 

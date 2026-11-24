@@ -691,8 +691,20 @@ fn upload_blocking(app: &App, user: &AdminUser, posted: Posted) -> Result<Out, O
 
 // ---- routes ----
 
-pub async fn collection_list(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Path(name): Path<String>, Query(params): Query<Params>) -> Response {
-    blocking(move || collection_page(&app, &user, &name, &params, None)).await
+pub async fn collection_list(State(app): State<Shared>, Extension(mut user): Extension<AdminUser>, Path(name): Path<String>, Query(params): Query<Params>) -> Response {
+    blocking(move || {
+        // Opening the list marks its submissions as seen, so the nav's "N 条新" clears.
+        if crate::schema::valid_name(&name) {
+            let conn = app.conn();
+            if let Ok(now) = conn.query_row("SELECT datetime('now')", [], |r| r.get::<_, String>(0)) {
+                if super::session::set_admin_pref(&conn, user.id, &format!("seen_{name}"), &now).is_ok() {
+                    user.prefs[format!("seen_{name}")] = json!(now);
+                }
+            }
+        }
+        collection_page(&app, &user, &name, &params, None)
+    })
+    .await
 }
 
 pub async fn view_list(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Path(name): Path<String>, Query(params): Query<Params>) -> Response {

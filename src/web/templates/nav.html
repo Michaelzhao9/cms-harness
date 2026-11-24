@@ -16,7 +16,8 @@
 <span class="cap">内容与表单</span>
 {% for c in nav.collections -%}
 <a class="item" href="/admin/c/{{ c.name }}"{% if nav.current == "c:" ~ c.name %} aria-current="page"{% endif %}{% if nav.collapsed %} title="{{ c.title }}"{% endif %}>{{ i.icon("clipboard-text") }}<span class="label">{{ c.title }}</span>
-{%- if c.pending %}<span class="mk" aria-hidden="true"></span><span class="sr">有改动</span>{% endif %}<span class="num">{{ c.count }}</span></a>
+{%- if c.pending %}<span class="mk" aria-hidden="true"></span><span class="sr">有改动</span>{% endif %}
+{%- if c.fresh %}<span class="fresh">{{ c.fresh }} 条新</span>{% else %}<span class="num">{{ c.count }}</span>{% endif %}</a>
 {% if c.views and not nav.collapsed -%}
 <div class="views">
 {% for v in c.views %}<a class="sub" href="/admin/v/{{ v.name }}"{% if nav.current == "v:" ~ v.name %} aria-current="page"{% endif %}>{{ v.title }}</a>

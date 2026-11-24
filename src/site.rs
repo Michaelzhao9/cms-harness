@@ -222,8 +222,14 @@ pub fn file(conn: &Connection, mode: Mode, path: &str) -> Result<Option<String>,
     json.map(|j| serde_json::from_str(&j).map_err(|e| format!("站点文件“{path}”已损坏：{e}"))).transpose()
 }
 
-/// A collection's definition as `mode` sees it, if visitors may read it.
-pub fn public_def(conn: &Connection, mode: Mode, name: &str) -> Result<Option<CollectionDef>, String> {
+/// A collection's definition as `mode` sees it, with what `viewer` may read of it (`None` = every record,
+/// `Some(id)` = member `id`'s own), or `None` when the viewer may read nothing.
+pub fn visible_def(conn: &Connection, mode: Mode, name: &str, viewer: crate::access::Viewer) -> Result<Option<(CollectionDef, Option<i64>)>, String> {
+    Ok(any_def(conn, mode, name)?.and_then(|d| crate::access::read_filter(&d.access, viewer).map(|owner| (d, owner))))
+}
+
+/// A collection's definition as `mode` sees it, whoever may read it.
+fn any_def(conn: &Connection, mode: Mode, name: &str) -> Result<Option<CollectionDef>, String> {
     if !crate::schema::valid_name(name) {
         return Ok(None);
     }
@@ -231,8 +237,7 @@ pub fn public_def(conn: &Connection, mode: Mode, name: &str) -> Result<Option<Co
         Mode::Live => crate::changes::live_def(conn, name).ok(),
         Mode::Preview => crate::changes::collection_view(conn, name)?.filter(|(_, st)| *st != "deleting").map(|(d, _)| d),
     };
-    // ponytail: `public_read` until access rules (Task 12) replace it.
-    Ok(def.filter(|d| d.access.public_read))
+    Ok(def)
 }
 
 /// What a render asks of the thread that holds the database connection.
@@ -262,6 +267,8 @@ struct Server<'c> {
     /// Marks of changed site files the render loaded.
     files_changed: Vec<usize>,
     asks: usize,
+    /// Whose access rules apply: the logged-in member on the live site, else an anonymous visitor.
+    viewer: crate::access::Viewer,
 }
 
 impl Server<'_> {
@@ -302,7 +309,13 @@ impl Server<'_> {
 
     fn records(&mut self, name: &str, filter: &Value, sort: Option<String>, limit: i64, offset: i64, id: Option<i64>) -> Result<Vec<Rec>, String> {
         use crate::query::{Op, Query, Status};
-        let def = public_def(self.conn, self.mode, name)?.ok_or_else(|| format!("集合“{name}”不存在、没有上线或不公开，网站读不到它。"))?;
+        let Some((def, owner)) = visible_def(self.conn, self.mode, name, self.viewer)? else {
+            // Members-only content for a visitor who is not logged in: nothing, rather than a broken page.
+            return match any_def(self.conn, self.mode, name)? {
+                Some(d) if matches!(d.access.read, crate::schema::Read::Members | crate::schema::Read::Owner) => Ok(vec![]),
+                _ => Err(format!("集合“{name}”不存在、没有上线或不公开，网站读不到它。")),
+            };
+        };
         let mut filters = if filter.is_null() { vec![] } else { crate::query::parse_filter(&def, filter)? };
         if let Some(id) = id {
             filters.push(("id".into(), Op::Eq, json!(id)));
@@ -314,7 +327,7 @@ impl Server<'_> {
         let live = self.mode == Mode::Live;
         // Preview: drafts over live copies, without records waiting to be deleted.
         let status = if live { vec![] } else { vec![Status::Draft, Status::Changed, Status::Published] };
-        let q = Query { filters, status, sort, limit, offset };
+        let q = Query { filters, status, sort, limit, offset, owner };
         let (rows, _) = crate::query::run(self.conn, &def, &q, live)?;
         let mut out = vec![];
         for row in rows {
@@ -495,7 +508,8 @@ pub struct Rendered {
 /// functions `collection(name, filter?, sort?, limit?, offset?)` and `record(collection, id)`. Lookups run on
 /// `conn`, the caller's connection, so a render inside the publish transaction sees what is about to go live.
 pub fn render(conn: &Connection, mode: Mode, page: &str, ctx: Value) -> Result<Rendered, String> {
-    let mut server = Server { conn, mode, page: page.to_string(), order: None, files_changed: vec![], asks: 0 };
+    let viewer = ctx["member"]["id"].as_i64().map_or(crate::access::Viewer::Anon, crate::access::Viewer::Member);
+    let mut server = Server { conn, mode, page: page.to_string(), order: None, files_changed: vec![], asks: 0, viewer };
     let (tx, rx) = mpsc::channel::<Line>();
     // minijinja functions must be 'static, so they cannot borrow the connection: the render runs on a scoped
     // thread and asks this one, which answers until the render drops its end of the channel.

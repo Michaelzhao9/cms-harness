@@ -44,6 +44,10 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     // In-memory databases cannot use WAL; ignore that failure.
     let _ = conn.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()));
     conn.execute_batch(SCHEMA)?;
+    // Records added by visitors or members carry their owner and when they came in.
+    if !conn.prepare("SELECT 1 FROM pragma_table_info('records') WHERE name = 'owner'")?.exists([])? {
+        conn.execute_batch("ALTER TABLE records ADD COLUMN owner INTEGER; ALTER TABLE records ADD COLUMN submitted_at TEXT;")?;
+    }
     // Databases from before per-admin preferences lack the column.
     if !conn.prepare("SELECT 1 FROM pragma_table_info('admins') WHERE name = 'prefs'")?.exists([])? {
         conn.execute_batch("ALTER TABLE admins ADD COLUMN prefs TEXT NOT NULL DEFAULT '{}'")?;

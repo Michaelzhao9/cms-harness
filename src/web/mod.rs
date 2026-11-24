@@ -71,6 +71,7 @@ pub fn router(app: Shared) -> Router {
         .route("/_hc/preview/{*rest}", get(site::preview))
         .route("/_hc/ping", get(address::ping))
         .route("/account/{which}", get(site::serve).post(members::form))
+        .route("/{collection}/new", get(site::serve).post(members::submit_form).layer(DefaultBodyLimit::max(crate::access::MAX_SUBMIT_BYTES)))
         .route("/api/v1/members/me", get(members::me))
         .route("/api/v1/members/{which}", post(members::api))
         .fallback(site::serve)

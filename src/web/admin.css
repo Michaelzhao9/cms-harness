@@ -475,3 +475,7 @@ code.secret { font-size: 13px; color: var(--ink); background: #fff; user-select:
 .skills .name .muted { font-size: 12px; }
 .skills .desc { font-size: 13px; color: var(--ink-2); }
 .skills form { margin: 0; }
+
+/* New visitor submissions in the nav: a neutral chip, never the change colour. */
+.nav .fresh { margin-left: auto; padding: 1px 7px; border-radius: 9px; background: rgba(0, 0, 0, .07); color: var(--ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.shell.collapsed .nav .fresh { position: absolute; width: 0; height: 0; padding: 0; overflow: hidden; }

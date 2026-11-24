@@ -64,7 +64,12 @@ pub fn nav(conn: &Connection, user: &AdminUser, current: &str) -> Value {
         // 用户管理 is there exactly while member login is on (live or drafted) and gone when it is off.
         "members": crate::members::login_enabled(conn, true),
         // A database error leaves the nav without collections rather than failing the page.
-        "collections": nav_collections(conn).unwrap_or_default(),
+        "collections": nav_collections(conn).unwrap_or_default().into_iter().map(|mut c| {
+            let name = c["name"].as_str().unwrap_or_default().to_string();
+            // Visitor and member submissions this admin has not looked at yet.
+            c["fresh"] = json!(crate::access::new_submissions(conn, &name, user.prefs[format!("seen_{name}")].as_str()));
+            c
+        }).collect::<Vec<_>>(),
     })
 }
 
@@ -130,7 +135,8 @@ fn key_label(key: &str) -> &str {
     match key {
         "title" => "标题",
         "fields" => "字段",
-        "public_read" => "公开读取",
+        "public_read" | "read" => "谁能看",
+        "create" => "谁能提交",
         "single" => "单条",
         "columns" => "列",
         "filters" => "筛选",

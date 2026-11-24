@@ -31,11 +31,61 @@ pub struct FieldDef {
     pub target: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema, Clone, Default, PartialEq, Debug)]
-#[serde(deny_unknown_fields)]
+/// Who may read a collection's live records (content API and built-in site).
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Read {
+    /// Anyone.
+    Public,
+    /// Logged-in members (and API keys).
+    Members,
+    /// Each member their own records (API keys see all).
+    Owner,
+    /// API keys and the admin only.
+    #[default]
+    Private,
+}
+
+/// Who may add records from the site: they go live at once, stamped with their owner.
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Create {
+    #[default]
+    None,
+    Members,
+    Public,
+}
+
+#[derive(Serialize, JsonSchema, Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Access {
     #[serde(default)]
-    pub public_read: bool,
+    pub read: Read,
+    #[serde(default)]
+    pub create: Create,
+}
+
+impl<'de> Deserialize<'de> for Access {
+    /// Also reads the old `{ "public_read": true }` form as `read: public`.
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Raw {
+            read: Option<Read>,
+            #[serde(default)]
+            create: Create,
+            #[serde(default)]
+            public_read: bool,
+        }
+        let r = Raw::deserialize(d)?;
+        let read = r.read.unwrap_or(if r.public_read { Read::Public } else { Read::Private });
+        Ok(Access { read, create: r.create })
+    }
+}
+
+impl Access {
+    pub fn is_public(&self) -> bool {
+        self.read == Read::Public
+    }
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, PartialEq, Debug)]

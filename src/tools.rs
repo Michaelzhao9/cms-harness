@@ -33,7 +33,7 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<NoArgs>("list_collections", Scope::Read, "列出所有集合（不含已删除的），带状态和记录数。"),
             spec::<NameArgs>("get_collection", Scope::Read, "查看一个集合的定义（有草稿时返回草稿）、状态和记录数。"),
             spec::<CreateCollection>("create_collection", Scope::Structure, "新建集合草稿：名字、标题和字段列表。发布后才对外生效。"),
-            spec::<UpdateCollection>("update_collection", Scope::Structure, "修改集合草稿：标题、公开读取、增加/修改/删除字段。"),
+            spec::<UpdateCollection>("update_collection", Scope::Structure, "修改集合草稿：标题、谁能看（read：public 公开 / members 登录会员 / owner 每个会员只看自己的 / private 仅后台）、谁能从网站提交（create：none / members / public，提交即上线并记下提交人）、增加/修改/删除字段。会员相关的规则要先用 set_member_login 打开会员登录。"),
             spec::<DeleteCollection>("delete_collection", Scope::Structure, "删除集合草稿；从未发布的集合直接消失，已发布的待发布时才真正删除。"),
             spec::<CreateRecord>("create_record", Scope::Write, "新建记录草稿：集合名和字段值（data）。发布后才对外生效。"),
             spec::<UpdateRecord>("update_record", Scope::Write, "修改记录草稿：只需传要改的字段，null 表示清空该字段。"),
@@ -210,8 +210,13 @@ struct CreateCollection {
     title: String,
     #[serde(default)]
     single: bool,
+    /// Old form of `read: public`.
     #[serde(default)]
     public_read: bool,
+    /// Who may read live records: public, members (logged-in members), owner (each member their own), private (default).
+    read: Option<crate::schema::Read>,
+    /// Who may add records from the site, live at once: none (default), members, public.
+    create: Option<crate::schema::Create>,
     fields: Vec<FieldDef>,
     note: String,
 }
@@ -241,7 +246,12 @@ struct FieldChange {
 struct UpdateCollection {
     name: String,
     title: Option<String>,
+    /// Old form of `read`: true means public, false private.
     public_read: Option<bool>,
+    /// public, members, owner or private.
+    read: Option<crate::schema::Read>,
+    /// none, members or public.
+    create: Option<crate::schema::Create>,
     add_fields: Option<Vec<FieldDef>>,
     change_fields: Option<Vec<FieldChange>>,
     remove_fields: Option<Vec<String>>,
@@ -329,7 +339,10 @@ fn create_collection(conn: &Connection, actor: &Actor, a: CreateCollection) -> R
         name: a.name,
         title: a.title,
         single: a.single,
-        access: crate::schema::Access { public_read: a.public_read },
+        access: crate::schema::Access {
+            read: a.read.unwrap_or(if a.public_read { crate::schema::Read::Public } else { crate::schema::Read::Private }),
+            create: a.create.unwrap_or_default(),
+        },
         fields: a.fields,
     };
     let taken = conn
@@ -360,7 +373,13 @@ fn update_collection(conn: &Connection, actor: &Actor, a: UpdateCollection) -> R
         def.title = t;
     }
     if let Some(p) = a.public_read {
-        def.access.public_read = p;
+        def.access.read = if p { crate::schema::Read::Public } else { crate::schema::Read::Private };
+    }
+    if let Some(r) = a.read {
+        def.access.read = r;
+    }
+    if let Some(c) = a.create {
+        def.access.create = c;
     }
     for f in a.add_fields.unwrap_or_default() {
         if def.field(&f.name).is_some() {
@@ -581,6 +600,7 @@ fn query_records(conn: &Connection, a: QueryRecords) -> Result<Value, String> {
         }),
         limit: a.limit.unwrap_or(20),
         offset: a.offset.unwrap_or(0),
+        owner: None,
     };
     let (rows, total) = query::run(conn, &def, &q, false)?;
     let items: Vec<Value> = rows.into_iter().map(|r| json!({ "id": r.id, "status": r.status, "data": r.doc })).collect();
