@@ -34,6 +34,7 @@
 - **后台跟着网站走。** 网站加了表单、会员、订单，助手在同一轮里就建好管理它们的界面；功能删掉，界面也一起删掉。打开会员登录，左边自动出现「用户管理」。
 - **会员和访问规则。** 访客可以注册登录，和后台管理员是两套账号。每个集合可以设定谁能看（所有人、登录会员、只看自己的、不公开）、谁能从网站提交。
 - **什么模型都能用。** Claude、OpenAI、Gemini、DeepSeek、通义千问、Kimi、智谱 GLM、豆包、硅基流动、Mistral、xAI、Groq、OpenRouter，本机的 Ollama、LM Studio，或任何兼容 OpenAI 的接口。填好密钥就能列出可用的型号。
+- **对话联网搜索（默认关闭）。** 搭建者可以打开 `web_search` 和 `fetch_page`，走自己部署的 SearXNG、Brave 或 Tavily。任何模型都能用，DeepSeek 也行。网页内容只当资料，不当指令；内网和本机地址每一次跳转都会检查，读不了。
 - **技能。** 从 GitHub 或 zip 安装技能文件夹（带 `SKILL.md`），对话遇到相关的事会自己去读。
 - **你的 agent 也能接。** 内置 MCP 服务和 REST 接口，密钥分权限（`read`、`write`、`structure`、`publish`）。
 - **全文搜索。** 页面里用 `search("关键词")`，接口 `GET /api/v1/search`，还有 `search` 工具。中文不用词库也能搜，访客只会搜到自己能看的内容。

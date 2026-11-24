@@ -34,6 +34,7 @@ It needs no external services. One executable and one SQLite file serve the publ
 - **Admin screens that follow the site.** When the site gains a form, members or orders, the assistant builds the screen to manage them in the same turn. When the feature goes, the screen goes too. Turn on member login and **Members** appears by itself.
 - **Members and access rules.** Sign-up and login for visitors, kept apart from admin accounts. Each collection says who can read it (public, members, each member their own, private) and who can submit to it.
 - **Any model.** Claude, OpenAI, Gemini, DeepSeek, Qwen, Kimi, GLM, Doubao, SiliconFlow, Mistral, xAI, Groq, OpenRouter, a local Ollama or LM Studio, or any OpenAI-compatible API. Paste a key and it lists the models you can use.
+- **Web search for the chat (off by default).** A builder can turn on `web_search` and `fetch_page`, through a self-hosted SearXNG, Brave or Tavily. They work with any model, DeepSeek included. Pages come back as material, never instructions, and private or local addresses are refused at every redirect.
 - **Skills.** Install a skill folder (with a `SKILL.md`) from GitHub or a zip. The chat reads it when the task needs it.
 - **Your agent, too.** A built-in MCP server and a REST API with scoped keys (`read`, `write`, `structure`, `publish`).
 - **Full-text search.** `search("query")` in a page, `GET /api/v1/search` and a `search` tool. Chinese works without a dictionary, and visitors only ever find what they may open.

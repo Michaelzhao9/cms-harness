@@ -109,6 +109,26 @@
 {%- endif %}
 </section>
 
+<section aria-labelledby="s-web-h" id="s-web">
+<h2 id="s-web-h">{{ "联网搜索"|t }}</h2>
+{% if saved == "web" %}<p class="note good" role="status">{{ "已保存。"|t }}</p>{% endif %}
+<p class="lede">{{ "打开后，对话可以在网上搜索、读网页（任何模型都能用）。网上的内容只当资料，不当指令；内网和本机地址读不了。"|t }}</p>
+{% if builder -%}
+<form class="fields" method="post" action="/admin/settings/web-search">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<label class="check"><input type="checkbox" name="enabled" value="1"{% if web.enabled %} checked{% endif %}> {{ "让对话联网搜索"|t }}</label>
+<div class="pair2">
+<div class="fd"><label class="lb" for="w-svc">{{ "搜索服务"|t }}</label><select class="in" id="w-svc" name="provider">
+{% for p in web.providers %}<option value="{{ p.id }}"{% if p.on %} selected{% endif %}>{{ p.name|t }}</option>
+{% endfor %}</select></div>
+<div class="fd"><label class="lb" for="w-key">{{ "密钥"|t }}<span class="req">{{ "Brave、Tavily 要填"|t }}</span></label><input class="in" id="w-key" type="password" name="key" autocomplete="off" placeholder="{{ ('已保存，不显示。要换就重新填'|t) if web.key_set else ('这家服务给你的 API 密钥'|t) }}"></div>
+</div>
+<div class="fd"><label class="lb" for="w-url">{{ "SearXNG 的网址"|t }}<span class="req">{{ "用自己的 SearXNG 时填"|t }}</span></label><input class="in mono" id="w-url" type="url" name="base_url" value="{{ web.base_url }}" placeholder="http://127.0.0.1:8888"></div>
+<div class="actions"><button type="submit" class="btn">{{ "保存"|t }}</button></div>
+</form>
+{%- else %}<p class="small">{{ ("已打开"|t) if web.enabled else ("没有打开"|t) }}{{ "。只有搭建者可以设置。"|t }}</p>{% endif %}
+</section>
+
 <section aria-labelledby="s-skills-h" id="s-skills">
 <h2 id="s-skills-h">{{ "技能"|t }}</h2>
 <p class="lede">{{ "技能是一份写给对话的做事方法，比如品牌语气、做表格的规矩。装好后，对话遇到相关的事会自己去读。技能里的脚本只当参考，不会被运行。"|t }}</p>

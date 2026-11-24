@@ -55,6 +55,7 @@ pub fn router(app: Shared) -> Router {
         .route("/admin/settings/notes", post(settings::save_notes))
         .route("/admin/settings/name", post(settings::save_name))
         .route("/admin/settings/backup", post(settings::download_backup))
+        .route("/admin/settings/web-search", post(settings::save_web_search))
         .route("/admin/settings/restore", post(settings::restore_backup).layer(DefaultBodyLimit::max(crate::backup::MAX_ARCHIVE)))
         .route("/admin/settings/password", post(settings::change_password))
         .route("/admin/settings/admins", post(settings::add_admin))

@@ -160,6 +160,7 @@ fn settings_page(app: &App, user: &AdminUser, extra: Extra) -> Result<Out, Out> 
         "notes_status": notes["status"],
         "can_notes": user.actor().can(Scope::Structure),
         "notes_note": NOTES_NOTE,
+        "web": web_section(app),
         "site_name_draft": site["name"]["value"].as_str().unwrap_or_default(),
         "name_status": site["name"]["status"],
         "marks": MARKS.iter().map(|(k, label)| json!({ "key": k, "label": label, "on": nav["mark"] == *k })).collect::<Vec<_>>(),
@@ -519,6 +520,33 @@ pub async fn restore_backup(State(app): State<Shared>, Extension(user): Extensio
         }
         match crate::backup::restore_live(app, bytes) {
             Ok(_) => Ok(Out::Go("/admin/settings?saved=restored#s-backup".into())),
+            Err(e) => refused(app, user, e),
+        }
+    })
+    .await
+}
+
+fn web_section(app: &App) -> Value {
+    let cfg = crate::websearch::load(&app.conn());
+    let on = cfg.as_ref().map_or("searxng", |c| c.provider.code());
+    let providers: Vec<Value> = ["searxng", "brave", "tavily"]
+        .iter()
+        .map(|id| json!({ "id": id, "name": crate::websearch::name(crate::websearch::Provider::parse(id).unwrap_or(crate::websearch::Provider::Searxng)), "on": *id == on }))
+        .collect();
+    json!({
+        "enabled": cfg.as_ref().is_some_and(|c| c.enabled),
+        "providers": providers,
+        "base_url": cfg.as_ref().and_then(|c| c.base_url.clone()).unwrap_or_default(),
+        "key_set": cfg.as_ref().is_some_and(|c| c.api_key.is_some()),
+    })
+}
+
+/// `POST /admin/settings/web-search`: turns web search for the chat on or off (builders only).
+pub async fn save_web_search(State(app): State<Shared>, Extension(user): Extension<AdminUser>, req: Request) -> Response {
+    handle(app, user, req, true, |app, user, posted| {
+        let saved = crate::websearch::save(&app.conn(), posted.one("provider"), posted.one("base_url"), posted.one("key"), posted.one("enabled") == "1");
+        match saved {
+            Ok(()) => Ok(Out::Go("/admin/settings?saved=web#s-web".into())),
             Err(e) => refused(app, user, e),
         }
     })

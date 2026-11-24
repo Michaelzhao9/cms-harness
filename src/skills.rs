@@ -175,7 +175,7 @@ pub fn enabled(conn: &Connection) -> Vec<(String, String)> {
 
 // ---------- Download ----------
 
-fn public_ip(ip: IpAddr) -> bool {
+pub(crate) fn public_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v) => {
             let o = v.octets();

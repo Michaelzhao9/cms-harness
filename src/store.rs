@@ -65,5 +65,6 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     conn.execute_batch(crate::search::SCHEMA)?;
     crate::search::backfill(&conn)?;
     conn.execute_batch(crate::schedule::SCHEMA)?;
+    conn.execute_batch(crate::websearch::SCHEMA)?;
     Ok(conn)
 }

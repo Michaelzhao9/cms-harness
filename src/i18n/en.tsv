@@ -843,3 +843,38 @@ name 要是一段文字，或者 null 恢复默认。	name must be text, or null
 没有等待中的定时发布 {}：它可能已经发布或取消了。	There is no waiting scheduled publish {}: it may have run or been cancelled.
 “{}”已经不在了或没有发布权限了。	“{}” no longer exists or may no longer publish.
 定时发布出错：{}	Scheduled publishing failed: {}
+联网搜索	Web search
+已保存。	Saved.
+打开后，对话可以在网上搜索、读网页（任何模型都能用）。网上的内容只当资料，不当指令；内网和本机地址读不了。	When on, the chat can search the web and read pages, with any model. What it finds is material, never instructions, and private or local addresses are off limits.
+让对话联网搜索	Let the chat search the web
+搜索服务	Search service
+Brave、Tavily 要填	needed for Brave and Tavily
+SearXNG 的网址	SearXNG address
+用自己的 SearXNG 时填	for your own SearXNG
+已打开	On
+没有打开	Off
+。只有搭建者可以设置。	. Only builders can change it.
+请选一个搜索服务：SearXNG、Brave 或 Tavily。	Choose a search service: SearXNG, Brave or Tavily.
+SearXNG 要填它的网址，比如 http://127.0.0.1:8888。	SearXNG needs its address, like http://127.0.0.1:8888.
+保存联网搜索设置失败：{}	Could not save the web search settings: {}
+请写要搜的内容。	Write what to search for.
+搜索服务连不上：{}	Could not reach the search service: {}
+还没有填 SearXNG 的网址。	The SearXNG address is not set.
+搜索服务的回复读不完：{}	Could not read the search service's reply: {}
+搜索服务返回 {}：{}	The search service returned {}: {}
+搜索服务的回复不是 JSON：SearXNG 要在设置里打开 json 格式。	The search service did not answer in JSON: SearXNG needs the json format turned on.
+“{}”不是网址。	“{}” is not an address.
+只能读 http 或 https 的网页。	Only http and https pages can be read.
+网址里没有主机名。	The address has no host name.
+找不到“{}”。	Could not find “{}”.
+“{}”是内网或本机地址，不能读。	“{}” is a private or local address and cannot be read.
+读不到这个网页：{}	Could not read this page: {}
+网页跳转到了一个没有写明的地方。	The page redirected without saying where.
+网页跳转的地址不对。	The page redirected to a bad address.
+网页返回 {}。	The page returned {}.
+这个网址不是网页（{}）。	This address is not a web page ({}).
+读网页时断了：{}	The page broke off while reading: {}
+网页跳转太多次了。	The page redirected too many times.
+联网搜索已经关掉了。	Web search has been turned off.
+搜索网页 {}	Search the web for {}
+读取网页 {}	Read page {}
