@@ -41,6 +41,13 @@ pub fn role_scopes(role: &str) -> Vec<Scope> {
     }
 }
 
+/// Argon2 runs (about 19 MiB each) allowed at once on request paths. Request handlers take a permit before hashing
+/// or verifying, so a burst of logins or sign-ups queues instead of exhausting memory.
+pub static HASHING: std::sync::LazyLock<std::sync::Arc<tokio::sync::Semaphore>> = std::sync::LazyLock::new(|| {
+    let n = std::thread::available_parallelism().map_or(2, |n| n.get()).clamp(2, 8);
+    std::sync::Arc::new(tokio::sync::Semaphore::new(n))
+});
+
 pub fn hash_password(password: &str) -> String {
     Argon2::default()
         .hash_password(password.as_bytes(), &SaltString::generate(&mut SaltRng))

@@ -59,24 +59,27 @@ fn status_of(e: &str) -> StatusCode {
 async fn enter(app: &Shared, which: &str, f: &AccountForm, who: String) -> Option<Result<String, String>> {
     let (a, which) = (app.clone(), which.to_string());
     let (email, password, name) = (f.email.clone(), f.password.clone(), f.name.clone());
+    // Argon2 is slow on purpose: never under the database lock, and only a few at a time.
+    let permit = crate::auth::HASHING.clone().acquire_owned().await;
     tokio::task::spawn_blocking(move || {
-        // Argon2 is slow on purpose: never run it while holding the one database lock.
+        let _permit = permit;
         if !members::login_enabled(&a.conn(), false) {
             return None;
         }
         if which == "signup" {
-            if password.chars().count() < members::MIN_PASSWORD {
-                return Some(Err(format!("密码至少 {} 个字符。", members::MIN_PASSWORD)));
-            }
+            let email = match members::signup_begin(&a.conn(), &email, &password, &who) {
+                Ok(e) => e,
+                Err(e) => return Some(Err(e)),
+            };
             let hash = crate::auth::hash_password(&password);
-            return Some(members::signup_hashed(&a.conn(), &email, &hash, &name, &who));
+            return Some(members::signup_finish(&a.conn(), &email, &hash, &name));
         }
-        let found = match members::login_begin(&a.conn(), &email, &who) {
-            Ok(f) => f,
+        let attempt = match members::login_begin(&a.conn(), &email, &who) {
+            Ok(at) => at,
             Err(e) => return Some(Err(e)),
         };
-        let ok = crate::auth::verify_password(found.as_ref().map_or(members::dummy_hash(), |f| f.1.as_str()), &password);
-        Some(members::login_finish(&a.conn(), &email, &who, found, ok))
+        let ok = crate::auth::verify_password(attempt.found.as_ref().map_or(members::dummy_hash(), |f| f.1.as_str()), &password);
+        Some(members::login_finish(&a.conn(), &email, attempt, ok))
     })
     .await
     .unwrap_or_else(|e| Some(Err(format!("服务器内部错误：{e}"))))

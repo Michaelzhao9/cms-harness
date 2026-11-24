@@ -313,6 +313,8 @@ pub async fn events(State(app): State<Shared>, Extension(user): Extension<AdminU
     });
     let mut resp = Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
     resp.headers_mut().insert(header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-store"));
+    // nginx buffers proxied responses by default, which would hold streamed text back.
+    resp.headers_mut().insert("x-accel-buffering", axum::http::HeaderValue::from_static("no"));
     resp
 }
 

@@ -90,6 +90,9 @@ pub async fn guard(State(app): State<Shared>, mut req: Request, next: Next) -> R
     if req.method() == Method::POST && !keyed {
         let here = req.extensions().get::<Address>().map_or(app.origin.as_str(), |a| a.here.as_str());
         if let Some(origin) = req.headers().get(header::ORIGIN) {
+            if origin.as_bytes() == b"null" {
+                return (StatusCode::FORBIDDEN, "这里是后台里隔离的预览框，不能提交表单：请在新标签页打开网站再提交。").into_response();
+            }
             if origin.as_bytes() != here.as_bytes() {
                 return (StatusCode::FORBIDDEN, format!("请求来源与这个网址（{here}）不一致，已拒绝。请在这个网址的页面上提交。")).into_response();
             }
@@ -207,11 +210,13 @@ async fn login(State(app): State<Shared>, Extension(addr): Extension<Address>, p
     let trust = std::env::var("HC_TRUST_PROXY").is_ok_and(|v| v == "1");
     let client = client_key(&headers, peer.map(|Extension(ConnectInfo(a))| a), trust);
     let a = app.clone();
-    // Argon2 runs between the two short database steps, never under the lock.
+    // Argon2 runs between the two short database steps, never under the lock, and only a few at a time.
+    let permit = crate::auth::HASHING.clone().acquire_owned().await;
     let done = tokio::task::spawn_blocking(move || {
-        let found = session::login_begin(&a.conn(), &f.email, &client)?;
-        let ok = crate::auth::verify_password(found.as_ref().map_or(session::dummy_hash(), |x| x.1.as_str()), &f.password);
-        session::login_finish(&a.conn(), &f.email, &client, found, ok)
+        let _permit = permit;
+        let attempt = session::login_begin(&a.conn(), &f.email, &client)?;
+        let ok = crate::auth::verify_password(attempt.found.as_ref().map_or(session::dummy_hash(), |x| x.1.as_str()), &f.password);
+        session::login_finish(&a.conn(), &f.email, attempt, ok)
     })
         .await
         .unwrap_or_else(|e| Err(format!("服务器内部错误：{e}")));

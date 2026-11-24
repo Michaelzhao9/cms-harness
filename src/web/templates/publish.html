@@ -27,7 +27,7 @@
 <div class="what">
 {%- endif %}
 <span class="crumb"><span class="mk" aria-hidden="true"></span>{% for c in it.crumb %}<span>{{ c }}</span>{% endfor %}<span class="kind">{{ it.kind_label }}</span></span>
-{% for p in it.pairs %}<span class="pair"><span class="field">{{ p.field }}</span>{% if p.old %}<s>{{ p.old }}</s>{% endif %}<b>{{ p.new }}</b></span>
+{% for p in it.pairs %}{% if p.code %}<span class="pair code-pair"><span class="field">{{ p.field }}</span>{% if p.old %}<span class="was">原来</span><pre class="code-old">{{ p.old }}</pre>{% endif %}<span class="was">改成</span><pre class="code-new">{{ p.new }}</pre></span>{% else %}<span class="pair"><span class="field">{{ p.field }}</span>{% if p.old %}<s>{{ p.old }}</s>{% endif %}<b>{{ p.new }}</b></span>{% endif %}
 {% endfor -%}
 {% if it.summary %}<span class="pair">{{ it.summary }}</span>{% endif %}
 <span class="by">{{ it.actor }}{% if it.note %}：{{ it.note }}{% endif %} <code>{{ it.target }}</code></span>

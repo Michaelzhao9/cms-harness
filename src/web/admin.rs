@@ -193,11 +193,24 @@ fn describe(app: &App, p: &Value, target: &Target) -> (Vec<String>, Vec<Value>, 
             let summary = (changed && !keys.is_empty()).then(|| format!("改了{}", keys.join("、")));
             (vec![what.to_string(), title], vec![], summary)
         }
-        Target::Setting(key) => {
+        Target::Setting(key) if key == "member_login" => {
             let on = |v: Value| if v == json!(true) { "开" } else { "关" };
             let conn = app.conn();
             let (old, new) = (on(crate::changes::setting(&conn, key, false)), on(crate::changes::setting(&conn, key, true)));
             (vec!["设置".into(), title], vec![json!({ "field": "状态", "old": changed.then_some(old), "new": new })], None)
+        }
+        // The import map and script origins decide what code the live site runs: the reviewer sees exactly what.
+        Target::Setting(key) => {
+            let conn = app.conn();
+            let show = |v: Value| -> String {
+                if v.is_null() {
+                    return UNSET.into();
+                }
+                let text = serde_json::to_string_pretty(&v).unwrap_or_default();
+                if text.chars().count() > 1200 { format!("{}…", text.chars().take(1200).collect::<String>()) } else { text }
+            };
+            let (old, new) = (crate::changes::setting(&conn, key, false), crate::changes::setting(&conn, key, true));
+            (vec!["设置".into(), title], vec![json!({ "field": "内容", "old": (!old.is_null()).then(|| show(old)), "new": show(new), "code": true })], None)
         }
         // Path and line counts only: a file can be a megabyte long.
         Target::File(path) => {

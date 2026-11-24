@@ -601,3 +601,12 @@ fn site_settings_are_drafts_until_published() {
     assert!(err(&app, &builder(), "set_site_settings", json!({"import_map": [1], "note": "x"})).contains("imports"));
     assert!(err(&app, &editor(), "set_site_settings", json!({"note": "x"})).contains("权限"));
 }
+
+#[tokio::test]
+async fn the_publish_review_shows_the_exact_import_map() {
+    let app = app();
+    ok(&app, &builder(), "set_site_settings", json!({"import_map": {"imports": {"react": "https://esm.sh/evil-pkg"}}, "note": "加 React"}));
+    let s = admin_session(&app, "builder").await;
+    let (_, _, page) = get_with(&app, "/admin/publish", Some(&s.0)).await;
+    assert!(page.contains("esm.sh&#x2f;evil-pkg") && page.contains("code-new"), "the reviewer sees what will load");
+}

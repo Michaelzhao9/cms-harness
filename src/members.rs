@@ -110,42 +110,68 @@ fn open_session(conn: &Connection, member_id: i64) -> Result<String, String> {
 
 /// Creates a member and logs them in; returns the session token. `client` is the caller's address key.
 pub fn signup(conn: &Connection, email: &str, password: &str, name: &str, client: &str) -> Result<String, String> {
-    if password.chars().count() < MIN_PASSWORD {
-        return Err(format!("密码至少 {MIN_PASSWORD} 个字符。"));
-    }
-    signup_hashed(conn, email, &auth::hash_password(password), name, client)
+    let email = signup_begin(conn, email, password, client)?;
+    signup_finish(conn, &email, &auth::hash_password(password), name)
 }
 
-/// `signup` with the password already hashed, so the slow hashing happens without the database lock.
-pub fn signup_hashed(conn: &Connection, email: &str, password_hash: &str, name: &str, client: &str) -> Result<String, String> {
+/// Everything a sign-up checks before the slow hashing: the rate limit (the attempt is counted now), the email's
+/// shape, the password's length and that the email is free. Returns the normalised email.
+pub fn signup_begin(conn: &Connection, email: &str, password: &str, client: &str) -> Result<String, String> {
     conn.execute("DELETE FROM member_attempts WHERE at <= datetime('now', '-1 hour')", []).map_err(db)?;
     let client_key = format!("signup:{client}");
     if attempts(conn, &client_key, "-1 hour")? >= MAX_SIGNUPS_PER_HOUR {
         return Err("注册太频繁，请过一会儿再试。".into());
     }
     let email = check_email(email)?;
-    let name: String = name.trim().chars().take(80).collect();
+    if password.chars().count() < MIN_PASSWORD {
+        return Err(format!("密码至少 {MIN_PASSWORD} 个字符。"));
+    }
     note_attempt(conn, &[&client_key])?;
     // ponytail: says the email is taken; a CMS sign-up form usually does, at the cost of revealing who registered.
     let taken: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM members WHERE email = ?1)", [&email], |r| r.get(0)).map_err(db)?;
     if taken {
         return Err("这个邮箱已经注册过了，请直接登录。".into());
     }
-    conn.execute("INSERT INTO members(email, password_hash, name) VALUES (?1, ?2, ?3)", params![email, password_hash, name]).map_err(db)?;
-    open_session(conn, conn.last_insert_rowid())
+    Ok(email)
 }
 
-/// The stored hash a login checks against: (member id, hash, status) when the email is known. Fails when the email
-/// or the client is locked out. Call `login_finish` with the result of verifying, outside the database lock.
-pub fn login_begin(conn: &Connection, email: &str, client: &str) -> Result<Option<(i64, String, String)>, String> {
+/// Stores the member with its hash (made outside the database lock) and opens a session.
+pub fn signup_finish(conn: &Connection, email: &str, password_hash: &str, name: &str) -> Result<String, String> {
+    let name: String = name.trim().chars().take(80).collect();
+    match conn.execute("INSERT INTO members(email, password_hash, name) VALUES (?1, ?2, ?3)", params![email, password_hash, name]) {
+        Ok(_) => open_session(conn, conn.last_insert_rowid()),
+        // Two sign-ups for one email raced past `signup_begin`.
+        Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == rusqlite::ErrorCode::ConstraintViolation => Err("这个邮箱已经注册过了，请直接登录。".into()),
+        Err(e) => Err(db(e)),
+    }
+}
+
+/// A member login in progress: the member to check against (id, hash, status) when the email is known, and the
+/// attempt rows already counted for it.
+pub struct Attempt {
+    pub found: Option<(i64, String, String)>,
+    rows: [i64; 2],
+}
+
+/// Checks the limits and counts this attempt as a failure up front, so concurrent attempts are all counted;
+/// `login_finish` removes the count when the password matches. Verify outside the database lock in between.
+pub fn login_begin(conn: &Connection, email: &str, client: &str) -> Result<Attempt, String> {
     conn.execute("DELETE FROM member_attempts WHERE at <= datetime('now', '-1 hour')", []).map_err(db)?;
     let email = auth::normalize_email(email);
-    if attempts(conn, &format!("login:email:{email}"), "-15 minutes")? >= MAX_LOGIN_FAILURES || attempts(conn, &format!("login:ip:{client}"), "-15 minutes")? >= MAX_LOGIN_FAILURES {
+    let (email_key, client_key) = (format!("login:email:{email}"), format!("login:ip:{client}"));
+    if attempts(conn, &email_key, "-15 minutes")? >= MAX_LOGIN_FAILURES || attempts(conn, &client_key, "-15 minutes")? >= MAX_LOGIN_FAILURES {
         return Err(LOCKED.into());
     }
-    conn.query_row("SELECT id, password_hash, status FROM members WHERE email = ?1", [&email], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+    let mut rows = [0; 2];
+    for (i, k) in [&email_key, &client_key].into_iter().enumerate() {
+        conn.execute("INSERT INTO member_attempts(key) VALUES (?1)", [k]).map_err(db)?;
+        rows[i] = conn.last_insert_rowid();
+    }
+    let found = conn
+        .query_row("SELECT id, password_hash, status FROM members WHERE email = ?1", [&email], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
         .optional()
-        .map_err(db)
+        .map_err(db)?;
+    Ok(Attempt { found, rows })
 }
 
 /// The hash to verify against when the email is unknown, so both failures take the same time.
@@ -154,29 +180,26 @@ pub fn dummy_hash() -> &'static str {
     DUMMY.as_str()
 }
 
-/// Records the outcome of a login and opens the session when it passed. 5 failures per email or per client in
-/// 15 minutes lock that key; unknown email and wrong password get the same message.
-pub fn login_finish(conn: &Connection, email: &str, client: &str, found: Option<(i64, String, String)>, ok: bool) -> Result<String, String> {
+/// Opens the session when the password matched. Unknown email and wrong password get the same message; the
+/// failure was already counted by `login_begin`.
+pub fn login_finish(conn: &Connection, email: &str, attempt: Attempt, ok: bool) -> Result<String, String> {
     let email = auth::normalize_email(email);
-    let (email_key, client_key) = (format!("login:email:{email}"), format!("login:ip:{client}"));
-    match found {
+    match attempt.found {
         Some((id, _, status)) if ok && status == "active" => {
-            conn.execute("DELETE FROM member_attempts WHERE key = ?1", [&email_key]).map_err(db)?;
+            conn.execute("DELETE FROM member_attempts WHERE key = ?1 OR rowid IN (?2, ?3)", params![format!("login:email:{email}"), attempt.rows[0], attempt.rows[1]])
+                .map_err(db)?;
             open_session(conn, id)
         }
         Some((_, _, status)) if ok && status != "active" => Err("这个账号已被停用。".into()),
-        _ => {
-            note_attempt(conn, &[&email_key, &client_key])?;
-            Err(BAD_LOGIN.into())
-        }
+        _ => Err(BAD_LOGIN.into()),
     }
 }
 
 /// `login_begin`, verify, `login_finish` in one go, for callers that are not on a request path.
 pub fn login(conn: &Connection, email: &str, password: &str, client: &str) -> Result<String, String> {
-    let found = login_begin(conn, email, client)?;
-    let ok = auth::verify_password(found.as_ref().map_or(dummy_hash(), |f| f.1.as_str()), password);
-    login_finish(conn, email, client, found, ok)
+    let attempt = login_begin(conn, email, client)?;
+    let ok = auth::verify_password(attempt.found.as_ref().map_or(dummy_hash(), |f| f.1.as_str()), password);
+    login_finish(conn, email, attempt, ok)
 }
 
 pub fn logout(conn: &Connection, token: &str) {

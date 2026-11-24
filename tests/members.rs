@@ -231,3 +231,22 @@ fn behind_a_local_proxy_each_visitor_gets_their_own_rate_limit_key() {
     assert_eq!(client_key(&h, Some(remote), false), "198.51.100.7", "a direct caller cannot pick its own key");
     assert_eq!(client_key(&HeaderMap::new(), Some(local), false), "127.0.0.1");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_wrong_passwords_still_lock_after_five() {
+    let app = app();
+    login_on(&app);
+    signup(&app, "burst@example.com").await;
+    let mut tasks = vec![];
+    for _ in 0..12 {
+        let a = app.clone();
+        tasks.push(tokio::spawn(async move { api(&a, "/api/v1/members/login", json!({"email": "burst@example.com", "password": "wrong-password-x"}), None).await.0 }));
+    }
+    let mut wrong = 0;
+    for t in tasks {
+        if t.await.unwrap() == StatusCode::UNAUTHORIZED {
+            wrong += 1;
+        }
+    }
+    assert!(wrong <= 5, "{wrong} guesses got through; the limit is 5");
+}
