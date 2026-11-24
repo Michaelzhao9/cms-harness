@@ -35,7 +35,7 @@ async fn login_sets_a_strict_http_only_cookie_and_redirects() {
     assert_ne!(stored, token);
     let (status, _, body) = get_with(&app, "/admin", Some(&cookie_pair(&h))).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("a@test"), "{body}");
+    assert!(body.contains("aria-label=\"导航\""), "the admin shell: {body}");
 }
 
 #[tokio::test]

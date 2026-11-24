@@ -1,19 +1,13 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>后台 · {{ site_name }}</title>
-<link rel="stylesheet" href="/admin/static/admin.css">
-</head>
-<body class="plain">
-<main class="login">
-<h1>{{ site_name }}</h1>
-<p class="who">已登录：{{ email }}</p>
-<form method="post" action="/admin/logout">
-<input type="hidden" name="csrf" value="{{ csrf }}">
-<button type="submit">退出登录</button>
-</form>
-</main>
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}网页{% endblock %}
+{% block main %}
+{%- import "icons.html" as i %}
+<header class="bar">
+<div class="address">
+<strong>首页</strong>
+<span class="url">{{ origin }}/</span>
+<a class="ib sm" href="/?preview=1" target="_blank" rel="noopener" aria-label="在新标签页打开">{{ i.icon("arrow-square-out", 15) }}</a>
+</div>
+</header>
+<iframe class="preview" src="/?preview=1" title="网站预览"></iframe>
+{% endblock %}

@@ -126,6 +126,13 @@ pub fn from_cookie(conn: &Connection, headers: &HeaderMap) -> Option<AdminUser> 
     Some(user)
 }
 
+/// Stores one string preference in the session's `prefs`.
+pub fn set_pref(conn: &Connection, token_hash: &str, key: &str, value: &str) -> Result<(), String> {
+    conn.execute("UPDATE admin_sessions SET prefs = json_set(prefs, ?1, ?2) WHERE token_hash = ?3", params![format!("$.{key}"), value, token_hash])
+        .map(drop)
+        .map_err(|e| format!("保存偏好失败：{e}"))
+}
+
 pub fn check_csrf(user: &AdminUser, form_token: &str) -> Result<(), StatusCode> {
     if constant_eq(user.csrf.as_bytes(), form_token.as_bytes()) {
         Ok(())

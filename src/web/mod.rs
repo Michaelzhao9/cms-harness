@@ -1,5 +1,6 @@
 //! The admin web UI: router, session gate, Origin check and security headers.
 
+pub mod admin;
 pub mod session;
 
 use crate::{render, Shared};
@@ -19,7 +20,8 @@ pub const ADMIN_CSP: &str =
 
 pub fn router(app: Shared) -> Router {
     Router::new()
-        .route("/admin", get(home))
+        .route("/admin", get(admin::home))
+        .route("/admin/prefs", post(admin::prefs))
         .route("/admin/login", get(login_page).post(login))
         .route("/admin/logout", post(logout))
         .route("/admin/static/admin.css", get(css))
@@ -92,7 +94,9 @@ fn page(status: StatusCode, name: &str, ctx: serde_json::Value) -> Response {
 }
 
 async fn css() -> Response {
-    ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], include_str!("admin.css")).into_response()
+    // Pages link it with `?v=<content hash>`, so it can be cached for good.
+    let headers = [(header::CONTENT_TYPE, "text/css; charset=utf-8"), (header::CACHE_CONTROL, "public, max-age=31536000, immutable")];
+    (headers, render::ADMIN_CSS).into_response()
 }
 
 async fn login_page(State(app): State<Shared>) -> Response {
@@ -143,9 +147,4 @@ async fn logout(State(app): State<Shared>, Extension(user): Extension<AdminUser>
     let a = app.clone();
     let _ = tokio::task::spawn_blocking(move || session::logout(&a.conn(), &user.token_hash)).await;
     ([(header::SET_COOKIE, session::clear_cookie(app.secure_cookies))], Redirect::to("/admin/login")).into_response()
-}
-
-/// Placeholder admin home until the workbench lands.
-async fn home(State(app): State<Shared>, Extension(user): Extension<AdminUser>) -> Response {
-    page(StatusCode::OK, "home.html", json!({ "site_name": app.site_name, "email": user.email, "csrf": user.csrf }))
 }

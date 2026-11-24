@@ -1,0 +1,32 @@
+{% import "icons.html" as i -%}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}后台{% endblock %} · {{ site_name }}</title>
+<link rel="stylesheet" href="/admin/static/admin.css?v={{ css_v }}">
+</head>
+<body>
+<div class="shell{% if nav.collapsed %} collapsed{% endif %}">
+{% include "nav.html" %}
+<aside class="chat" aria-label="对话">
+<div class="chat-bar">
+<form method="post" action="/admin/prefs">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="nav" value="{{ 'open' if nav.collapsed else 'collapsed' }}">
+<button type="submit" class="ib" aria-label="{{ '展开导航' if nav.collapsed else '收起导航' }}">{{ i.icon("sidebar-simple", 20) }}</button>
+</form>
+<form method="post" action="/admin/chat/new">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<button type="submit" class="ib" aria-label="新对话">{{ i.icon("plus", 18) }}</button>
+</form>
+</div>
+{% block chat %}{% endblock %}
+</aside>
+<main class="main">
+{% block main %}{% endblock %}
+</main>
+</div>
+</body>
+</html>

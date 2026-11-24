@@ -1,0 +1,26 @@
+{%- import "icons.html" as i -%}
+{%- macro item(href, key, label, icon, cls="item") -%}
+<a class="{{ cls }}" href="{{ href|safe }}"{% if nav.current == key %} aria-current="page"{% endif %}{% if nav.collapsed %} title="{{ label }}"{% endif %}>{{ i.icon(icon) }}<span class="label">{{ label }}</span></a>
+{%- endmacro -%}
+<nav class="nav" aria-label="导航">
+{{ item("/admin", "web", "网页", "browser") }}
+<span class="rule" aria-hidden="true"></span>
+<span class="cap">内容与表单</span>
+{% for c in nav.collections -%}
+<a class="item" href="/admin/c/{{ c.name }}"{% if nav.current == "c:" ~ c.name %} aria-current="page"{% endif %}{% if nav.collapsed %} title="{{ c.title }}"{% endif %}>{{ i.icon("clipboard-text") }}<span class="label">{{ c.title }}</span>
+{%- if c.pending %}<span class="mk" aria-hidden="true"></span><span class="sr">有改动</span>{% endif %}<span class="num">{{ c.count }}</span></a>
+{% if c.views and not nav.collapsed -%}
+<div class="views">
+{% for v in c.views %}<a class="sub" href="/admin/v/{{ v.name }}"{% if nav.current == "v:" ~ v.name %} aria-current="page"{% endif %}>{{ v.title }}</a>
+{% endfor -%}
+</div>
+{% endif -%}
+{% endfor -%}
+<span class="rule" aria-hidden="true"></span>
+<span class="cap">后台</span>
+{% if nav.members %}{{ item("/admin/v/members", "v:members", "用户管理", "users") }}
+{% endif -%}
+{{ item("/admin/media", "media", "素材库", "images") }}
+{{ item("/admin/releases", "releases", "发布记录", "clock-counter-clockwise") }}
+{{ item("/admin/settings", "settings", "设置", "sliders-horizontal", "item end") }}
+</nav>
