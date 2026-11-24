@@ -30,6 +30,8 @@ It needs no external services. One executable and one SQLite file serve the publ
 
 - **AI that builds, people who publish.** The assistant cannot publish. It treats text in records, pages and uploads as data, never as instructions.
 - **Drafts everywhere.** Content, collections, pages, admin screens and settings are drafts until published. The live site always shows the published version, whoever visits.
+- **A page for every record, automatically.** Write one detail template and every record of a collection gets its own page at a clean address (`/news/drum-contest`, Chinese titles stay Chinese). Addresses follow the data: change a slug or a category and the old address redirects forever; links in text point at the record, not the address, so they never break; publishing is stopped if it would leave a dead link.
+- **Dynamic, at static speed.** Live pages are cached, and a publish recomputes exactly the pages it touched. `cms-harness export` writes the whole site as static files for any CDN.
 - **A real website.** Pages are HTML with `{{ }}` templates, plus CSS, JavaScript, JSX and TypeScript (transpiled on the fly). React, Vue or Three.js load through an import map, with no build step. You can also upload a site built with Vite.
 - **Admin screens that follow the site.** When the site gains a form, members or orders, the assistant builds the screen to manage them in the same turn. When the feature goes, the screen goes too. Turn on member login and **Members** appears by itself.
 - **Members and access rules.** Sign-up and login for visitors, kept apart from admin accounts. Each collection says who can read it (public, members, each member their own, private) and who can submit to it.
@@ -92,6 +94,7 @@ Back up and restore from the command line too (stop the server before a restore)
 ```sh
 ./target/release/cms-harness backup site.zip
 ./target/release/cms-harness restore site.zip
+HC_ORIGIN=https://example.com ./target/release/cms-harness export ./public   # the site as static files
 ```
 
 ## Connect your agent
@@ -124,6 +127,10 @@ A fresh site has one built-in page: a welcome with the site's name and a link to
 - Libraries from `https://esm.sh` through an import map (`set_site_settings`), so no bundler is needed. A site built elsewhere can be uploaded in one piece (`upload_site_bundle`).
 
 The live site always shows the published version, whatever cookies or headers a visitor sends. Drafts only appear in the admin's preview.
+
+**Record pages.** A collection visitors may read gets a page per record once the site has a detail template: `<collection>/_item.html`, or `_item.html` for every collection. The template reads the record as `item`. Addresses come from the collection's `url` pattern, `/{collection}/{slug}` by default; `{id}`, a field (`{year}`) or a relation's slug (`/products/{category.slug}/{slug}`) work too. Each record gets its slug from its title when it is created and keeps it when the title changes. A new slug is a draft; once live, the old address keeps redirecting. Link to records with `item.url` (or `/_r/<id>`): links pasted into rich text are stored that way automatically and always render at the record's current address.
+
+**Cache and export.** Live pages for visitors who are not signed in are cached until something they read is published again (the `x-cms-cache` header says hit or miss). `cms-harness export <dir>` writes every public page, record pages included, plus site files, uploads, `sitemap.xml`, `robots.txt` and `404.html`; set `HC_ORIGIN` to the address the files will be served from. Forms and sign-in still need the server; the command lists the pages that use them.
 
 `/sitemap.xml` lists the published pages (not layouts or fragments that other files extend or include, nor names starting with `_`), each with the date it last went live, and `/robots.txt` points to it. Both follow every publish. A site file with the same name replaces them.
 </details>
@@ -166,9 +173,9 @@ Only fields declared with `index` or `unique` can filter and sort.
 | Tool | Permission | What it does |
 | --- | --- | --- |
 | `list_collections` `get_collection` | read | list collections, read one |
-| `create_collection` `update_collection` `delete_collection` | structure | create, change, delete (records are kept) |
+| `create_collection` `update_collection` `delete_collection` | structure | create, change (fields, access, `url` pattern), delete (records are kept) |
 | `get_record` `query_records` `search` | read | read records, full-text search |
-| `create_record` `update_record` `delete_record` | write | write records |
+| `create_record` `update_record` `delete_record` | write | write records (and their `slug`) |
 | `list_pending` `list_versions` | read | pending changes, release history |
 | `publish` | publish | publish |
 | `schedule_publish` `cancel_schedule` / `list_schedules` | publish / read | publish at a set time |

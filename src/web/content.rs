@@ -533,9 +533,16 @@ fn record_page(app: &App, user: &AdminUser, id: i64, params: &Params, typed: Opt
     let raw = raw_of(&def, &current, typed.as_ref());
     let fields = form_fields(app, user, &def, &raw, &marks).map_err(internal)?;
     let title = record_title(&def, &current, id);
+    let (slug, url) = {
+        let conn = app.conn();
+        let slug: Option<String> = conn.query_row("SELECT coalesce(draft_slug, slug) FROM records WHERE id = ?1", [id], |r| r.get(0)).ok().flatten();
+        (slug, crate::routes::url_for(&conn, crate::site::Mode::Preview, &def, id, &current))
+    };
+    let typed_slug = typed.as_ref().and_then(|t| t.raw.get("_slug")).and_then(|v| v.last()).cloned();
     let mut ctx = list_ctx(app, user, &def, None, &vec![], Some(id))?;
     ctx["form"] = json!({
         "id": id, "title": title, "status": status, "status_label": status_label(status), "fields": fields,
+        "slug": typed_slug.or(slug), "url": url,
         "seen": typed.as_ref().and_then(|t| t.seen.as_deref()).unwrap_or(&row.seen),
         "note": typed.as_ref().map_or(EDIT_NOTE, |t| t.note.as_str()), "error": typed.as_ref().map(|t| &t.error),
         "saved": typed.is_none() && param(params, "saved") == "1",
@@ -649,10 +656,17 @@ fn save_blocking(app: &App, user: &AdminUser, id: i64, posted: Posted) -> Result
     if let Err(e) = store_files(app, user, &def, &posted, &current, &mut data) {
         return retry(StatusCode::BAD_REQUEST, e);
     }
-    if data.is_empty() {
+    // The address segment, when the form carries one and it changed.
+    let slug_now: Option<String> = app.conn().query_row("SELECT coalesce(draft_slug, slug) FROM records WHERE id = ?1", [id], |r| r.get(0)).ok().flatten();
+    let slug = Some(posted.one("_slug").trim().to_string()).filter(|s| !s.is_empty() && Some(s) != slug_now.as_ref());
+    if data.is_empty() && slug.is_none() {
         return Ok(Out::Go(format!("/admin/r/{id}")));
     }
-    match tool(app, user, "update_record", json!({ "id": id, "data": data, "note": note })) {
+    let mut args = json!({ "id": id, "data": data, "note": note });
+    if let Some(s) = slug {
+        args["slug"] = json!(s);
+    }
+    match tool(app, user, "update_record", args) {
         Ok(_) => Ok(Out::Go(format!("/admin/r/{id}?saved=1"))),
         Err(e) => retry(StatusCode::BAD_REQUEST, e),
     }

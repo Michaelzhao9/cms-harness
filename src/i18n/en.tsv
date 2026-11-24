@@ -881,3 +881,18 @@ SearXNG 要填它的网址，比如 http://127.0.0.1:8888。	SearXNG needs its a
 第 {} 次发布	Release {}
 ，	, 
 （UTC）：	 (UTC): 
+网址名	Address name
+在网站上看	View on the site
+加上详情模板后才有页面	It gets a page once there is a detail template
+网址名“{}”不合法：只能用字母、数字和 - _ .，不能以 . 或 _ 开头，最长 80 个字符。	Address name “{}” is invalid: use letters, digits, - _ and ., not starting with . or _, at most 80 characters.
+网址名“{}”已经被这个集合里的别的记录用了，请换一个。	Address name “{}” is already used by another record in this collection.
+检查网址名失败：{}	Could not check the address name: {}
+保存网址名失败：{}	Could not save the address name: {}
+网址规则“{}”不合法：{}	Address pattern “{}” is invalid: {}
+要以 / 开头，比如 /news/{slug}。	it must start with /, like /news/{slug}.
+每一段只能用字母、数字和 - _ .，不能以 _ 开头。	each part may use letters, digits and - _ . only, and not start with _.
+要有且只有一个 {slug} 或 {id}，用来找到是哪一条记录。	it needs exactly one {slug} or {id} to find the record.
+admin、api、uploads、account、mcp 开头的网址留给系统。	addresses starting with admin, api, uploads, account or mcp belong to the system.
+检查链接失败：{}	Could not check the links: {}
+{} 链接到 record:{}，它不在线上：请把它一起发布，或先去掉这个链接。	{} links to record:{}, which is not live: publish it too, or remove the link first.
+record:{} 还被 {} 链接着，删掉会留下死链：请先改掉那个链接，或一起发布。	record:{} is still linked from {}; removing it would leave a dead link. Change that link first, or publish both.

@@ -72,9 +72,11 @@ async fn search(State(app): State<Shared>, Query(p): Params, h: HeaderMap) -> Re
                 changes::live_def(&conn, &hit.collection),
                 conn.query_row("SELECT published FROM records WHERE id = ?1", [hit.id], |r| r.get::<_, Option<String>>(0)),
             ) else { continue };
-            let mut data = crate::schema::project(&def, &serde_json::from_str(&doc).unwrap_or(Value::Null));
+            let doc: Value = serde_json::from_str(&doc).unwrap_or(Value::Null);
+            let url = crate::routes::url_for(&conn, crate::site::Mode::Live, &def, hit.id, &doc);
+            let mut data = crate::schema::project(&def, &doc);
             data["id"] = json!(hit.id);
-            items.push(json!({ "collection": hit.collection, "id": hit.id, "snippet": hit.snippet, "data": data }));
+            items.push(json!({ "collection": hit.collection, "id": hit.id, "url": url, "snippet": hit.snippet, "data": data }));
         }
         Ok::<_, String>((viewer, json!({ "items": items })))
     })

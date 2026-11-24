@@ -15,6 +15,8 @@ pub mod websearch;
 pub mod members;
 pub mod access;
 pub mod backup;
+pub mod cache;
+pub mod export;
 pub mod i18n;
 pub mod routes;
 pub mod schedule;
@@ -48,6 +50,8 @@ pub struct App {
     pub old_admin_until: Mutex<Option<Instant>>,
     /// The one-time answer `/_hc/ping` gives while a switch checks that the new admin address reaches us.
     pub ping_nonce: Mutex<Option<String>>,
+    /// Rendered live pages, kept until something they read is published again.
+    pub cache: cache::Cache,
 }
 
 impl App {
@@ -69,6 +73,7 @@ impl App {
             env_admin_origin: OnceLock::new(),
             old_admin_until: Mutex::new(None),
             ping_nonce: Mutex::new(None),
+            cache: cache::Cache::default(),
         })
     }
 

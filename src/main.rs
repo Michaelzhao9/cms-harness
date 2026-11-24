@@ -6,6 +6,7 @@
 //!   cms-harness admin-origin <url|off>                  put the admin on its own address, or back on the site's
 //!   cms-harness backup [file.zip]                       write the whole site (database and uploads) to a zip
 //!   cms-harness restore <file.zip>                      replace the whole site with a backup (stop the server first)
+//!   cms-harness export <dir>                            write the live site as static files (set HC_ORIGIN to its address)
 //!
 //! Settings come from the environment: HC_PORT (4200), HC_DATA (data), HC_DB (<HC_DATA>/harness.db),
 //! HC_HOST (127.0.0.1; 0.0.0.0 in a container), HC_ORIGIN (http://127.0.0.1:<port>), HC_SITE_NAME (CMS Harness),
@@ -25,7 +26,8 @@ const USAGE: &str = "用法：
   cms-harness key <名字> [write] [structure] [publish]  生成一把接口密钥（只显示一次）
   cms-harness admin-origin <网址|off>                  把后台放到自己的网址上；off 切回和网站同一个网址
   cms-harness backup [文件.zip]                        把整站（数据库和上传的文件）备份成一个 zip
-  cms-harness restore <文件.zip>                       用备份替换整站（先停掉正在运行的服务）";
+  cms-harness restore <文件.zip>                       用备份替换整站（先停掉正在运行的服务）
+  cms-harness export <目录>                            把线上网站导出成静态文件（HC_ORIGIN 设成它要放的网址）";
 
 fn env(name: &str, default: &str) -> String {
     std::env::var(name).ok().filter(|v| !v.trim().is_empty()).unwrap_or_else(|| default.to_string())
@@ -36,7 +38,7 @@ fn main() -> ExitCode {
     // Check the command before anything is created on disk.
     let known = match args.first().map(String::as_str) {
         None => true,
-        Some("admin" | "key" | "admin-origin" | "restore") => args.len() >= 2,
+        Some("admin" | "key" | "admin-origin" | "restore" | "export") => args.len() >= 2,
         Some("backup") => true,
         Some(_) => false,
     };
@@ -157,6 +159,25 @@ fn main() -> ExitCode {
                 }
                 Err(e) => {
                     let _ = std::fs::remove_file(&out);
+                    eprintln!("{e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("export") => {
+            let origin = env("HC_ORIGIN", &format!("http://127.0.0.1:{port}"));
+            let app = App::new(conn, data, origin.trim_end_matches('/').to_string(), env("HC_SITE_NAME", "CMS Harness"));
+            let dir = PathBuf::from(&args[1]);
+            let done = tokio::runtime::Runtime::new().map_err(|e| e.to_string()).and_then(|rt| rt.block_on(cms_harness::export::export(&app, &dir)));
+            match done {
+                Ok(s) => {
+                    println!("已导出到 {}：{} 个页面，{} 个文件，{} 个上传文件。", dir.display(), s.pages, s.files, s.uploads);
+                    if !s.need_server.is_empty() {
+                        println!("这些页面有表单或登录，那部分还要靠服务器：{}", s.need_server.join("、"));
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
                     eprintln!("{e}");
                     ExitCode::FAILURE
                 }

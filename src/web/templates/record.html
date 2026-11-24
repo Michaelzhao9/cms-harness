@@ -59,6 +59,9 @@
 {% if f.mark %}<span class="was">{{ "线上是"|t }} <s>{{ f.mark.old }}</s>{{ "，草稿是"|t }} <b>{{ f.mark.new }}</b>{{ "，发布后才会更新。"|t }}</span>{% endif %}
 </div>
 {% endfor -%}
+{% if form.id and form.slug -%}
+<div class="fd"><label class="lb" for="f-slug">{{ "网址名"|t }}{% if form.url %}<a class="req" href="/admin?p={{ form.url|urlencode }}">{{ "在网站上看"|t }}</a>{% else %}<span class="req">{{ "加上详情模板后才有页面"|t }}</span>{% endif %}</label><input class="in mono" id="f-slug" type="text" name="_slug" value="{{ form.slug }}" maxlength="80"></div>
+{%- endif %}
 <div class="fd"><label class="lb" for="f-note">{{ "修改说明"|t }}</label><input class="in" id="f-note" type="text" name="note" value="{{ form.note|t }}"></div>
 <div class="actions">
 <button type="submit" class="btn" data-dirty-only>{{ "存为草稿"|t }}</button>

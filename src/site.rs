@@ -210,6 +210,23 @@ fn template_error(e: &minijinja::Error) -> String {
 /// date of the release that last changed it. Built from the published state on every request, so it is current
 /// after each publish.
 pub fn sitemap(conn: &Connection, origin: &str) -> Result<String, String> {
+    let urls = public_paths(conn)?;
+    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
+    for (url, lastmod) in urls {
+        out.push_str(&format!("  <url><loc>{}{}</loc>", esc(origin), esc(&crate::routes::encode(&url))));
+        if let Some(d) = lastmod {
+            out.push_str(&format!("<lastmod>{d}</lastmod>"));
+        }
+        out.push_str("</url>\n");
+    }
+    out.push_str("</urlset>\n");
+    Ok(out)
+}
+
+/// Every public page of the live site, with the date it last changed: page files (not layouts or fragments) and
+/// record pages. The sitemap and the static export list these.
+pub fn public_paths(conn: &Connection) -> Result<Vec<(String, Option<String>)>, String> {
     let fail = |e: rusqlite::Error| format!("读取站点文件失败：{e}");
     let mut stmt = conn.prepare("SELECT path, published FROM site_files WHERE published IS NOT NULL AND path LIKE '%.html' ORDER BY path").map_err(fail)?;
     let files: Vec<(String, String)> = stmt
@@ -243,17 +260,7 @@ pub fn sitemap(conn: &Connection, origin: &str) -> Result<String, String> {
     if !urls.iter().any(|(u, _)| u == "/") {
         urls.insert(0, ("/".into(), None));
     }
-    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
-    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
-    for (url, lastmod) in urls {
-        out.push_str(&format!("  <url><loc>{}{}</loc>", esc(origin), esc(&crate::routes::encode(&url))));
-        if let Some(d) = lastmod {
-            out.push_str(&format!("<lastmod>{d}</lastmod>"));
-        }
-        out.push_str("</url>\n");
-    }
-    out.push_str("</urlset>\n");
-    Ok(out)
+    Ok(urls)
 }
 
 /// Template names a source pulls in with `extends`, `include`, `import` or `from`.
@@ -341,6 +348,8 @@ struct Server<'c> {
     asks: usize,
     /// Whose access rules apply: the logged-in member on the live site, else an anonymous visitor.
     viewer: crate::access::Viewer,
+    /// What the render read, for the page cache: `f:<path>`, `c:<collection>`, `records`.
+    deps: std::collections::BTreeSet<String>,
 }
 
 impl Server<'_> {
@@ -360,6 +369,11 @@ impl Server<'_> {
         if self.asks > MAX_ASKS {
             return Err(format!("一个页面最多读取 {MAX_ASKS} 次内容或文件，请减少循环里的 collection()、record() 调用。"));
         }
+        match &ask {
+            Ask::File(path) => self.deps.insert(format!("f:{path}")),
+            Ask::Records { collection, .. } => self.deps.insert(format!("c:{collection}")),
+            Ask::Search { .. } => self.deps.insert("records".into()),
+        };
         match ask {
             Ask::File(path) => {
                 if check_path(&path).is_err() || is_binary(&path) {
@@ -433,6 +447,9 @@ impl Server<'_> {
                 let mut v = row.doc.get(&f.name).cloned().unwrap_or(Value::Null);
                 let changed = live_copy.as_ref().is_none_or(|old| old.get(&f.name) != Some(&v));
                 if let (FieldType::Richtext, Value::String(html)) = (&f.kind, &v) {
+                    if html.contains("/_r/") {
+                        self.deps.insert("records".into());
+                    }
                     v = Value::String(crate::routes::expand_refs(self.conn, self.mode, html, self.viewer));
                 }
                 fields.push((f.name.clone(), v, f.kind == FieldType::Richtext, mark.filter(|_| changed)));
@@ -613,6 +630,8 @@ fn render_thread(asker: Asker, mode: Mode, page: &str, ctx: Value) -> Result<Str
 pub struct Rendered {
     pub html: String,
     pub page_changes: Vec<usize>,
+    /// What the page read (see `cache`).
+    pub deps: std::collections::BTreeSet<String>,
 }
 
 /// Renders the template at `page` (a site file, or a built-in `_hc/` template) with `ctx` plus the site
@@ -621,7 +640,7 @@ pub struct Rendered {
 /// `conn`, the caller's connection, so a render inside the publish transaction sees what is about to go live.
 pub fn render(conn: &Connection, mode: Mode, page: &str, ctx: Value) -> Result<Rendered, String> {
     let viewer = ctx["member"]["id"].as_i64().map_or(crate::access::Viewer::Anon, crate::access::Viewer::Member);
-    let mut server = Server { conn, mode, page: page.to_string(), order: None, files_changed: vec![], asks: 0, viewer };
+    let mut server = Server { conn, mode, page: page.to_string(), order: None, files_changed: vec![], asks: 0, viewer, deps: Default::default() };
     let (tx, rx) = mpsc::channel::<Line>();
     // minijinja functions must be 'static, so they cannot borrow the connection: the render runs on a scoped
     // thread and asks this one, which answers until the render drops its end of the channel.
@@ -633,13 +652,13 @@ pub fn render(conn: &Connection, mode: Mode, page: &str, ctx: Value) -> Result<R
         render.join().unwrap_or_else(|_| Err("渲染页面时出现内部错误。".into()))
     })?;
     if mode == Mode::Live {
-        return Ok(Rendered { html, page_changes: vec![] });
+        return Ok(Rendered { html, page_changes: vec![], deps: server.deps });
     }
     let (html, regions) = finish(&html);
     let mut page_changes: Vec<usize> = server.files_changed.into_iter().filter(|n| !regions.contains(n)).collect();
     page_changes.sort();
     page_changes.dedup();
-    Ok(Rendered { html, page_changes })
+    Ok(Rendered { html, page_changes, deps: server.deps })
 }
 
 /// Removes every marker from text where no element may go.

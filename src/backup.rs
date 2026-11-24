@@ -182,6 +182,7 @@ pub fn restore_live(app: &crate::App, bytes: &[u8]) -> Result<PathBuf, String> {
         Err(e) => return Err(format!("打开恢复后的数据库失败：{e}。恢复前的整站备份在 {}。", saved.display())),
     }
     swapped?;
+    app.cache.clear();
     crate::changes::sync_all_indexes(&conn)?;
     if let Some(settings) = crate::llm::effective(&conn) {
         app.set_model(settings.client());

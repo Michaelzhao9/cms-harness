@@ -32,6 +32,8 @@
 
 - **AI 动手，人来发布。** 对话助手不能发布。记录、网页、上传文件里的文字，它只当数据，不当指令。
 - **什么都是草稿。** 内容、集合、页面、后台界面、设置，发布前都是草稿。线上网站永远只显示已发布的版本，不管谁来访问。
+- **每条内容自动有自己的页面。** 写一个详情模板，集合里每条记录就有自己的页面和干净的网址（`/news/鼓手大赛`，中文标题就是中文网址）。网址跟着数据走：改了网址名或分类，旧网址永久跳转；正文里的链接认的是那条记录而不是网址，所以永远不会断；发布会留下死链时直接拦下。
+- **动态网站，静态网站的速度。** 线上页面会缓存，一次发布只重算它影响到的页面。`cms-harness export` 能把整个网站导出成静态文件，放到任何 CDN 上。
 - **真正的网站。** 页面是 HTML 加 `{{ }}` 模板，还能写 CSS、JavaScript、JSX、TypeScript（访问时自动转换）。React、Vue、Three.js 通过 import map 加载，不需要打包；用 Vite 打包好的网站也能整个上传。
 - **后台跟着网站走。** 网站加了表单、会员、订单，助手在同一轮里就建好管理它们的界面；功能删掉，界面也一起删掉。打开会员登录，左边自动出现「用户管理」。
 - **会员和访问规则。** 访客可以注册登录，和后台管理员是两套账号。每个集合可以设定谁能看（所有人、登录会员、只看自己的、不公开）、谁能从网站提交。
@@ -94,6 +96,7 @@ cargo build --release
 ```sh
 ./target/release/cms-harness backup site.zip
 ./target/release/cms-harness restore site.zip
+HC_ORIGIN=https://example.com ./target/release/cms-harness export ./public   # 导出成静态网站
 ```
 
 ## 接入 agent
@@ -126,6 +129,10 @@ cargo build --release
 - 第三方库通过 import map 从 `https://esm.sh` 加载（`set_site_settings`），不需要打包；别处打包好的网站可以整个上传（`upload_site_bundle`）。
 
 线上网站永远只显示已发布的版本，不管访客带什么 cookie 或请求头。草稿只在后台的预览里看得到。
+
+**记录页面。** 访客能看的集合，只要网站里有详情模板，每条记录就自动有页面：模板叫 `集合名/_item.html`，全站通用的叫 `_item.html`，模板里用 `item` 取这条记录。网址来自集合的 `url` 规则，默认 `/集合名/{slug}`；也可以用 `{id}`、某个字段（`{year}`）或关联字段的网址名（`/products/{category.slug}/{slug}`）。记录新建时从标题生成网址名，之后改标题网址不变；改网址名是草稿，上线后旧网址一直跳转到新的。链接到记录用 `item.url`（或 `/_r/编号`）：粘贴进正文的本站链接会自动存成这种形式，显示时总是记录现在的网址。
+
+**缓存和导出。** 没登录的访客看到的线上页面会缓存，直到它读过的内容再次发布（响应头 `x-cms-cache` 显示 hit 或 miss）。`cms-harness export <目录>` 导出所有公开页面（含记录页面）、网站文件、上传文件、`sitemap.xml`、`robots.txt` 和 `404.html`；把 `HC_ORIGIN` 设成这些文件要放的网址。表单和登录还是要靠服务器，命令会列出用到它们的页面。
 
 `/sitemap.xml` 列出已发布的页面（不含被别的文件 extends、include 的布局和片段，也不含 `_` 开头的文件），带上每页最近一次上线的日期；`/robots.txt` 指向它。两者都跟着每次发布更新。网站里有同名文件时用网站自己的。
 </details>
@@ -168,9 +175,9 @@ cargo build --release
 | 工具 | 权限 | 作用 |
 | --- | --- | --- |
 | `list_collections` `get_collection` | read | 列出集合、查看定义 |
-| `create_collection` `update_collection` `delete_collection` | structure | 新建、修改、删除集合（记录保留） |
+| `create_collection` `update_collection` `delete_collection` | structure | 新建、修改（字段、访问规则、网址规则 `url`）、删除集合（记录保留） |
 | `get_record` `query_records` `search` | read | 读记录、全文搜索 |
-| `create_record` `update_record` `delete_record` | write | 写记录 |
+| `create_record` `update_record` `delete_record` | write | 写记录（含网址名 `slug`） |
 | `list_pending` `list_versions` | read | 待发布的改动、发布历史 |
 | `publish` | publish | 发布 |
 | `schedule_publish` `cancel_schedule` / `list_schedules` | publish / read | 定时发布 |

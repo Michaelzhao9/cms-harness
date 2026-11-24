@@ -635,7 +635,9 @@ fn get_record(conn: &Connection, a: GetRecord) -> Result<Value, String> {
     let def = collection_def_for_read(conn, &row.collection)?;
     let doc: Value = serde_json::from_str(row.draft.as_deref().or(row.published.as_deref()).unwrap_or("{}"))
         .map_err(|e| format!("记录 {} 的内容已损坏：{e}", a.id))?;
-    Ok(json!({ "id": a.id, "collection": row.collection, "status": row.status(), "data": project(&def, &doc) }))
+    let slug: Option<String> = conn.query_row("SELECT coalesce(draft_slug, slug) FROM records WHERE id = ?1", [a.id], |r| r.get(0)).ok().flatten();
+    let url = crate::routes::url_for(conn, crate::site::Mode::Preview, &def, a.id, &doc);
+    Ok(json!({ "id": a.id, "collection": row.collection, "status": row.status(), "slug": slug, "url": url, "data": project(&def, &doc) }))
 }
 
 fn query_records(conn: &Connection, a: QueryRecords) -> Result<Value, String> {

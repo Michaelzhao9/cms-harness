@@ -71,6 +71,7 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     crate::search::backfill(&conn)?;
     conn.execute_batch(crate::schedule::SCHEMA)?;
     conn.execute_batch(crate::websearch::SCHEMA)?;
+    conn.execute_batch(crate::cache::SCHEMA)?;
     crate::routes::backfill(&conn).map_err(|e| anyhow::anyhow!(e))?;
     Ok(conn)
 }

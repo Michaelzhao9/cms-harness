@@ -26,6 +26,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 oxc = { version = "=0.160.0", default-features = false, features = ["semantic", "transformer", "codegen"] }
 zip = { version = "=9.8.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
-[dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+
+[dev-dependencies]
 http-body-util = "0.1"

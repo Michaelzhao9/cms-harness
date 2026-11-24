@@ -167,7 +167,26 @@ impl Visit<'_> {
         }
     }
 
+    /// The cache key of this request: only live pages for visitors who are not signed in.
+    fn cache_key(&self) -> Option<String> {
+        (self.mode == Mode::Live && self.member.is_none()).then(|| {
+            let mut q: Vec<String> = self.query.iter().map(|(k, v)| format!("{k}={v}")).collect();
+            q.sort();
+            format!("{}|{}?{}", self.lang.code(), self.path, q.join("&"))
+        })
+    }
+
     fn route(&self, rel: &str) -> Result<Response, String> {
+        if let Some(hit) = self.cache_key().and_then(|k| self.app.cache.get(self.conn, &k)) {
+            let mut resp = (StatusCode::from_u16(hit.status).unwrap_or(StatusCode::OK), hit.body).into_response();
+            for (k, v) in hit.headers {
+                if let (Ok(k), Ok(v)) = (header::HeaderName::try_from(k), HeaderValue::from_str(&v)) {
+                    resp.headers_mut().insert(k, v);
+                }
+            }
+            resp.headers_mut().insert("x-cms-cache", HeaderValue::from_static("hit"));
+            return Ok(resp);
+        }
         for name in candidates(rel) {
             // Detail templates are pages for records, not pages of their own.
             if site::check_path(&name).is_err() || name == "_item.html" || name.ends_with("/_item.html") {
@@ -301,7 +320,18 @@ impl Visit<'_> {
         }
         html.insert_str(site::head_insert_at(&html), &inject);
         let hash = map.map(|m| base64::engine::general_purpose::STANDARD.encode(Sha256::digest(m.as_bytes())));
-        self.finish((status, Html(html)).into_response(), hash.as_deref())
+        let cache = self.cache_key().filter(|_| status == StatusCode::OK).map(|k| (k, html.clone()));
+        let mut resp = self.finish((status, Html(html)).into_response(), hash.as_deref());
+        if let Some((key, body)) = cache {
+            // What decides this page: what it read, and every file that could have answered this address.
+            let rel = self.path.strip_prefix('/').unwrap_or(self.path);
+            let mut deps = rendered.deps;
+            deps.extend(candidates(rel).into_iter().map(|c| format!("f:{c}")));
+            let headers = resp.headers().iter().filter_map(|(k, v)| Some((k.to_string(), v.to_str().ok()?.to_string()))).collect();
+            self.app.cache.put(self.conn, key, deps, status.as_u16(), headers, body.into_bytes());
+            resp.headers_mut().insert("x-cms-cache", HeaderValue::from_static("miss"));
+        }
+        resp
     }
 
     /// A site file `account/login.html` (or signup) replaces the built-in page when there is one.
