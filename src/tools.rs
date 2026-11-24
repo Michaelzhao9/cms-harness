@@ -52,6 +52,9 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<SetSiteNotes>("set_site_notes", Scope::Structure, "修改站点说明草稿：一段给对话模型看的文字，最多 20000 个字符。发布后才生效。"),
             spec::<NoArgs>("get_site_settings", Scope::Read, "读取网站的前端设置：import_map（浏览器里 import 的包从哪个网址加载）和 script_origins（网站允许加载脚本的其他来源，默认 https://esm.sh）。"),
             spec::<SetSiteSettings>("set_site_settings", Scope::Structure, "修改网站的前端设置，立即生效（不经过发布）。只传要改的项，传 null 恢复默认。例：用 React 时 import_map 设为 {\"imports\": {\"react\": \"https://esm.sh/react@19\", \"react/jsx-runtime\": \"https://esm.sh/react@19/jsx-runtime\", \"react-dom/client\": \"https://esm.sh/react-dom@19/client\"}}。"),
+            spec::<SetMemberLogin>("set_member_login", Scope::Structure, "打开或关闭网站的会员注册和登录（草稿，发布后生效）。打开后网站有 /account/signup、/account/login、/account/logout 页面和 /api/v1/members/* 接口，模板里 member 是当前登录的会员；后台左边会自动出现「用户管理」。关闭后它自动消失。网站要做登录功能时用它，不要自己建会员集合。"),
+            spec::<ListMembers>("list_members", Scope::Read, "列出网站的注册会员（不含密码）：可按状态 active/disabled 和关键词筛选。"),
+            spec::<SetMemberStatus>("set_member_status", Scope::Write, "停用或恢复一个会员（立即生效）：停用后他不能登录，已登录的会话也会失效。"),
             spec::<UploadMedia>("upload_media", Scope::Write, "上传图片或 PDF（base64，最大 5 MB）：返回 /uploads/ 路径，可填进 media 字段。"),
             spec::<NoArgs>("list_site_files", Scope::Read, "List the built-in website's source files with status, size in bytes and line count (draft copy if any). Content is not included: use get_site_file."),
             spec::<PathArgs>("get_site_file", Scope::Read, "Read one site file by path: its content (the draft if there is one) and status."),
@@ -147,6 +150,19 @@ fn dispatch(app: &App, conn: &Connection, actor: &Actor, name: &str, args: Value
         "delete_view" => delete_view(conn, actor, parse(name, args)?),
         "get_site_notes" => parse::<NoArgs>(name, args).and_then(|_| get_site_notes(conn)),
         "set_site_notes" => set_site_notes(conn, actor, parse(name, args)?),
+        "set_member_login" => {
+            let a: SetMemberLogin = parse(name, args)?;
+            crate::members::set_login(conn, actor, a.enabled, check_note(&a.note)?)
+        }
+        "list_members" => {
+            let a: ListMembers = parse(name, args)?;
+            crate::members::list(conn, a.status.as_deref(), a.query.as_deref(), a.limit.unwrap_or(50), a.offset.unwrap_or(0))
+        }
+        "set_member_status" => {
+            let a: SetMemberStatus = parse(name, args)?;
+            check_note(&a.note)?;
+            crate::members::set_status(conn, a.id, &a.status)
+        }
         "get_site_settings" => parse::<NoArgs>(name, args).and_then(|_| get_site_settings(conn)),
         "set_site_settings" => set_site_settings(conn, parse(name, args)?),
         "upload_media" => upload_media(app, parse(name, args)?),
@@ -306,6 +322,9 @@ fn save_collection(conn: &Connection, actor: &Actor, def: &CollectionDef, note: 
 
 fn create_collection(conn: &Connection, actor: &Actor, a: CreateCollection) -> Result<Value, String> {
     let note = check_note(&a.note)?;
+    if a.name == crate::members::MEMBERS {
+        return Err("“members”是内置的用户集合，不能新建同名集合：网站的会员用 set_member_login 打开，后台的用户管理界面用 set_view 的 collection: \"members\" 定制。".into());
+    }
     let def = CollectionDef {
         name: a.name,
         title: a.title,
@@ -649,6 +668,33 @@ struct SetView {
 #[serde(deny_unknown_fields)]
 struct DeleteView {
     name: String,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SetMemberLogin {
+    enabled: bool,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ListMembers {
+    /// active or disabled
+    status: Option<String>,
+    /// Matches email or name.
+    query: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SetMemberStatus {
+    id: i64,
+    /// active or disabled
+    status: String,
     note: String,
 }
 

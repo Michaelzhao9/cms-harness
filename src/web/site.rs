@@ -39,9 +39,16 @@ pub async fn serve(State(app): State<Shared>, req: Request) -> Response {
         None => "'self'".into(),
     };
     let (path, query, if_none_match) = parts(&req);
+    let member_token = session::cookie_value(req.headers(), crate::members::COOKIE);
     let a = app.clone();
     tokio::task::spawn_blocking(move || {
-        let v = Visit { app: &a, conn: &a.conn(), mode: Mode::Live, base: "", path: &path, query: &query, if_none_match, framers };
+        let conn = a.conn();
+        // The member cookie only personalises the live site when member login is live.
+        let member = member_token
+            .filter(|_| crate::members::login_enabled(&conn, false))
+            .and_then(|t| crate::members::from_token(&conn, &t))
+            .map(|m| crate::members::member_json(&m));
+        let v = Visit { app: &a, conn: &conn, mode: Mode::Live, base: "", path: &path, query: &query, if_none_match, framers, member };
         v.respond()
     })
     .await
@@ -66,7 +73,7 @@ pub async fn preview(State(app): State<Shared>, req: Request) -> Response {
             return gone();
         }
         let base = format!("/_hc/preview/{token}");
-        let v = Visit { app: &a, conn: &conn, mode: Mode::Preview, base: &base, path: &path, query: &query, if_none_match: None, framers: "'self'".into() };
+        let v = Visit { app: &a, conn: &conn, mode: Mode::Preview, base: &base, path: &path, query: &query, if_none_match: None, framers: "'self'".into(), member: None };
         v.respond()
     })
     .await
@@ -103,6 +110,19 @@ struct Visit<'a> {
     if_none_match: Option<String>,
     /// Who may frame the page (`frame-ancestors`).
     framers: String,
+    /// The logged-in member (live site only), as templates see it.
+    member: Option<Value>,
+}
+
+/// The built-in sign-up or login page after a form post (`which` is "login" or "signup"), with an error.
+pub fn account_page(app: &App, conn: &Connection, which: &str, form: Value, status: StatusCode) -> Response {
+    let path = format!("/account/{which}");
+    let v = Visit { app, conn, mode: Mode::Live, base: "", path: &path, query: &[], if_none_match: None, framers: "'self'".into(), member: None };
+    let mut extra = json!({ "mode": which, "next": "", "email": "", "name": "", "error": null });
+    if let (Some(e), Value::Object(f)) = (extra.as_object_mut(), form) {
+        e.extend(f);
+    }
+    v.page(&v.account_template(which), extra, status)
 }
 
 /// Which site files a path may name, in order.
@@ -140,8 +160,15 @@ impl Visit<'_> {
                 return self.file(&name, content);
             }
         }
-        // No file: the built-in templates for public collections.
+        // No file: the built-in templates for public collections and, when member login is on, the account pages.
         let parts: Vec<&str> = rel.trim_end_matches('/').split('/').collect();
+        if let ["account", which @ ("login" | "signup")] = parts.as_slice() {
+            if !crate::members::login_enabled(self.conn, self.mode == Mode::Preview) {
+                return Ok(self.not_found());
+            }
+            let next = self.query.iter().find(|(k, _)| k == "next").map(|(_, v)| safe_next(v)).unwrap_or_default();
+            return Ok(self.page(&self.account_template(which), json!({ "mode": which, "next": next, "email": "", "name": "", "error": null }), StatusCode::OK));
+        }
         match parts.as_slice() {
             [""] => {
                 let mut list = vec![];
@@ -184,7 +211,7 @@ impl Visit<'_> {
         if let Ok(v) = HeaderValue::from_str(&csp) {
             h.insert(header::CONTENT_SECURITY_POLICY, v);
         }
-        let cache = if self.mode == Mode::Preview { "no-store" } else { "no-cache" };
+        let cache = if self.mode == Mode::Preview { "no-store" } else if self.member.is_some() { "private, no-cache" } else { "no-cache" };
         h.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
         // Sandboxed frames (the preview, the 线上 view) have an opaque origin: module scripts, fetch() and fonts
         // they load are CORS requests. Nothing here depends on cookies, so anyone may read it.
@@ -220,7 +247,7 @@ impl Visit<'_> {
         let mut ctx = json!({
             "site": { "name": self.app.site_name, "origin": self.app.origin },
             "request": { "path": self.path, "query": query },
-            "member": null,
+            "member": self.member,
         });
         if let (Some(c), Value::Object(extra)) = (ctx.as_object_mut(), extra) {
             c.extend(extra);
@@ -246,6 +273,12 @@ impl Visit<'_> {
         html.insert_str(site::head_insert_at(&html), &inject);
         let hash = map.map(|m| base64::engine::general_purpose::STANDARD.encode(Sha256::digest(m.as_bytes())));
         self.finish((status, Html(html)).into_response(), hash.as_deref())
+    }
+
+    /// A site file `account/login.html` (or signup) replaces the built-in page when there is one.
+    fn account_template(&self, which: &str) -> String {
+        let own = format!("account/{which}.html");
+        if matches!(site::file(self.conn, self.mode, &own), Ok(Some(_))) { own } else { "_hc/account.html".into() }
     }
 
     fn not_found(&self) -> Response {
@@ -492,4 +525,10 @@ pub fn site_csp(origins: &[String], script_hash: Option<&str>, preview: bool, fr
         scripts.push_str(&format!(" 'sha256-{h}'"));
     }
     format!("{sandbox}default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src {scripts}; frame-ancestors {framers}; base-uri 'none'; form-action 'self'")
+}
+
+/// Where to go after logging in: a path on this site only, never another host.
+pub fn safe_next(next: &str) -> String {
+    let n = next.trim();
+    if n.starts_with('/') && !n.starts_with("//") && !n.contains('\\') && !n.chars().any(char::is_control) { n.to_string() } else { String::new() }
 }

@@ -11,6 +11,7 @@ pub mod site;
 pub mod llm;
 pub mod chat;
 pub mod skills;
+pub mod members;
 pub mod web;
 
 use rusqlite::Connection;

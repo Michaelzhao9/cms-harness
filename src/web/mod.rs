@@ -1,6 +1,7 @@
 //! The admin web UI: router, session gate, Origin check and security headers.
 
 pub mod address;
+pub mod members;
 pub mod admin;
 pub mod chat;
 pub mod content;
@@ -37,6 +38,7 @@ pub fn router(app: Shared) -> Router {
         .route("/admin/c/{name}", get(content::collection_list))
         .route("/admin/c/{name}/new", post(content::create).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
         .route("/admin/v/{name}", get(content::view_list))
+        .route("/admin/members/{id}/status", post(content::member_status))
         .route("/admin/r/{id}", get(content::record).post(content::save).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
         .route("/admin/r/{id}/delete", post(content::delete))
         .route("/admin/r/{id}/discard", post(content::discard))
@@ -68,6 +70,9 @@ pub fn router(app: Shared) -> Router {
         .route("/_hc/preview/", get(site::preview))
         .route("/_hc/preview/{*rest}", get(site::preview))
         .route("/_hc/ping", get(address::ping))
+        .route("/account/{which}", get(site::serve).post(members::form))
+        .route("/api/v1/members/me", get(members::me))
+        .route("/api/v1/members/{which}", post(members::api))
         .fallback(site::serve)
         .with_state(app)
 }

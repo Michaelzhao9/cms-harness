@@ -180,7 +180,8 @@ pub const FUEL: u64 = 2_000_000;
 const MAX_ASKS: usize = 1_000;
 
 /// Built-in templates for routes no site file serves. `_hc/` paths are reserved, so a site file cannot shadow them.
-const FALLBACKS: [(&str, &str); 5] = [
+const FALLBACKS: [(&str, &str); 6] = [
+    ("_hc/account.html", include_str!("web/templates/site/account.html")),
     ("_hc/layout.html", include_str!("web/templates/site/layout.html")),
     ("_hc/home.html", include_str!("web/templates/site/home.html")),
     ("_hc/list.html", include_str!("web/templates/site/list.html")),

@@ -88,7 +88,7 @@ pub fn logout(conn: &Connection, token_hash: &str) {
 }
 
 /// The value of the cookie `name`, from any `Cookie` header.
-fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
+pub fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get_all(header::COOKIE)
         .iter()

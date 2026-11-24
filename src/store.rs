@@ -15,6 +15,15 @@ CREATE TABLE IF NOT EXISTS views(name TEXT PRIMARY KEY, published TEXT, draft TE
 CREATE TABLE IF NOT EXISTS site_files(path TEXT PRIMARY KEY, published TEXT, draft TEXT,
   draft_deleted INTEGER NOT NULL DEFAULT 0, draft_actor TEXT, draft_note TEXT);
 CREATE TABLE IF NOT EXISTS site_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS options(key TEXT PRIMARY KEY, published TEXT, draft TEXT,
+  draft_deleted INTEGER NOT NULL DEFAULT 0, draft_actor TEXT, draft_note TEXT);
+CREATE TABLE IF NOT EXISTS members(id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')), last_login TEXT);
+CREATE TABLE IF NOT EXISTS member_sessions(token_hash TEXT PRIMARY KEY, member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  expires_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS member_attempts(key TEXT NOT NULL, at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE INDEX IF NOT EXISTS member_attempts_key ON member_attempts(key, at);
 CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY CHECK(id = 1), published TEXT, draft TEXT, draft_actor TEXT, draft_note TEXT);
 CREATE TABLE IF NOT EXISTS releases(id INTEGER PRIMARY KEY, actor TEXT NOT NULL, note TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')));

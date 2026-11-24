@@ -406,6 +406,9 @@ fn collection_page(app: &App, user: &AdminUser, name: &str, params: &Params, typ
 }
 
 fn view_page(app: &App, user: &AdminUser, name: &str, params: &Params) -> Result<Out, Out> {
+    if name == crate::members::MEMBERS {
+        return members_page(app, user, params, None);
+    }
     let views = tool(app, user, "list_views", json!({})).map_err(internal)?;
     let view: ViewDef = views
         .as_array()
@@ -737,4 +740,114 @@ pub async fn upload(State(app): State<Shared>, Extension(user): Extension<AdminU
         Ok(posted) => blocking(move || upload_blocking(&app, &user, posted)).await,
         Err(o) => o.into_response(),
     }
+}
+
+const MEMBER_PAGE: i64 = 20;
+
+/// 用户管理: the site's members. Its title and columns come from a view named `members` when the chat made one.
+pub(super) fn members_page(app: &App, user: &AdminUser, params: &Params, error: Option<String>) -> Result<Out, Out> {
+    let (live, on) = {
+        let conn = app.conn();
+        (crate::members::login_enabled(&conn, false), crate::members::login_enabled(&conn, true))
+    };
+    if !on {
+        return Err(Out::Fail(StatusCode::NOT_FOUND, "网站没有打开会员登录，所以没有用户管理。".into()));
+    }
+    let def = crate::members::members_def();
+    let views = tool(app, user, "list_views", json!({})).map_err(internal)?;
+    let custom: Option<ViewDef> = views
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|v| v["definition"]["name"] == crate::members::MEMBERS && v["definition"]["collection"] == crate::members::MEMBERS)
+        .and_then(|v| serde_json::from_value(v["definition"].clone()).ok());
+    let heading = custom.as_ref().map_or_else(|| "用户管理".to_string(), |v| v.title.clone());
+    let names: Vec<String> = custom.as_ref().map_or_else(|| def.fields.iter().map(|f| f.name.clone()).collect(), |v| v.columns.clone());
+    let columns: Vec<&crate::schema::FieldDef> = names.iter().filter_map(|n| def.field(n)).collect();
+    let tab = match param(params, "status") {
+        s @ ("active" | "disabled") => s,
+        _ => "",
+    };
+    let q = param(params, "q").trim().to_string();
+    let page = param(params, "page").parse::<i64>().unwrap_or(1).max(1);
+    let mut args = json!({ "limit": MEMBER_PAGE, "offset": (page - 1) * MEMBER_PAGE });
+    if !tab.is_empty() {
+        args["status"] = json!(tab);
+    }
+    if !q.is_empty() {
+        args["query"] = json!(q);
+    }
+    let list = tool(app, user, "list_members", args).map_err(internal)?;
+    let total = list["total"].as_i64().unwrap_or(0);
+    let shown = |name: &str, v: &Value| -> String {
+        match (name, v.as_str()) {
+            ("status", Some("active")) => "正常".into(),
+            ("status", Some("disabled")) => "已停用".into(),
+            ("created_at" | "last_login", Some(t)) => t.chars().take(16).collect(),
+            (_, Some(t)) => t.to_string(),
+            _ => String::new(),
+        }
+    };
+    let rows: Vec<Value> = list["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|m| json!({ "id": m["id"], "disabled": m["status"] == "disabled", "cells": columns.iter().map(|f| shown(&f.name, &m[&f.name])).collect::<Vec<_>>() }))
+        .collect();
+    let href = |status: &str, page: i64| {
+        let mut parts = vec![];
+        if !status.is_empty() {
+            parts.push(format!("status={status}"));
+        }
+        if !q.is_empty() {
+            parts.push(format!("q={}", url_escape(&q)));
+        }
+        if page > 1 {
+            parts.push(format!("page={page}"));
+        }
+        if parts.is_empty() { "/admin/v/members".to_string() } else { format!("/admin/v/members?{}", parts.join("&")) }
+    };
+    let pages = ((total + MEMBER_PAGE - 1) / MEMBER_PAGE).max(1);
+    let tabs: Vec<Value> = [("", "全部"), ("active", "正常"), ("disabled", "已停用")].iter().map(|(k, l)| json!({ "href": href(k, 1), "label": l, "on": *k == tab })).collect();
+    let ctx = json!({
+        "heading": heading,
+        "summary": format!("共 {total} 人"),
+        "live": live,
+        "tab": tab,
+        "q": q,
+        "error": error,
+        "tabs": tabs,
+        "columns": columns.iter().map(|f| json!({ "name": f.name, "title": f.title })).collect::<Vec<_>>(),
+        "rows": rows,
+        "pager": (pages > 1).then(|| json!({ "page": page, "pages": pages,
+            "prev": (page > 1).then(|| href(tab, page - 1)), "next": (page < pages).then(|| href(tab, page + 1)) })),
+    });
+    Ok(Out::Page(StatusCode::OK, "members.html", shell(app, user, "v:members", ctx)))
+}
+
+fn url_escape(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+#[derive(serde::Deserialize)]
+pub struct MemberStatusForm {
+    #[serde(default)]
+    csrf: String,
+    #[serde(default)]
+    status: String,
+}
+
+/// `POST /admin/members/<id>/status`: 停用 or 恢复 a member, then back to the list.
+pub async fn member_status(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Path(id): Path<i64>, axum::Form(f): axum::Form<MemberStatusForm>) -> Response {
+    if let Err(s) = super::session::check_csrf(&user, &f.csrf) {
+        return s.into_response();
+    }
+    blocking(move || {
+        let note = if f.status == "disabled" { "后台停用会员" } else { "后台恢复会员" };
+        match tool(&app, &user, "set_member_status", json!({ "id": id, "status": f.status, "note": note })) {
+            Ok(_) => Ok(Out::Go("/admin/v/members".into())),
+            Err(e) => members_page(&app, &user, &vec![], Some(e)),
+        }
+    })
+    .await
 }

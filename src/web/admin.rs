@@ -61,8 +61,8 @@ pub fn nav(conn: &Connection, user: &AdminUser, current: &str) -> Value {
         "collapsed": user.prefs["nav"] == "collapsed",
         "mark": mark,
         "chat": user.prefs["chat"].as_str().filter(|c| CHAT_MODES.contains(c)).unwrap_or("docked"),
-        // Task 11 turns this on with member login.
-        "members": false,
+        // 用户管理 is there exactly while member login is on (live or drafted) and gone when it is off.
+        "members": crate::members::login_enabled(conn, true),
         // A database error leaves the nav without collections rather than failing the page.
         "collections": nav_collections(conn).unwrap_or_default(),
     })
@@ -187,6 +187,12 @@ fn describe(app: &App, p: &Value, target: &Target) -> (Vec<String>, Vec<Value>, 
             let summary = (changed && !keys.is_empty()).then(|| format!("改了{}", keys.join("、")));
             (vec![what.to_string(), title], vec![], summary)
         }
+        Target::Setting(key) => {
+            let on = |v: Value| if v == json!(true) { "开" } else { "关" };
+            let conn = app.conn();
+            let (old, new) = (on(crate::changes::setting(&conn, key, false)), on(crate::changes::setting(&conn, key, true)));
+            (vec!["设置".into(), title], vec![json!({ "field": "状态", "old": changed.then_some(old), "new": new })], None)
+        }
         // Path and line counts only: a file can be a megabyte long.
         Target::File(path) => {
             let n = |i: usize| p["lines"][i].as_i64().unwrap_or_default();
@@ -260,6 +266,7 @@ fn version_title(target: &Target, doc: &Value) -> String {
         Target::Record(id) => named().unwrap_or_else(|| format!("记录 {id}")),
         Target::Collection(n) | Target::View(n) => named().unwrap_or_else(|| n.clone()),
         Target::File(p) => p.clone(),
+        Target::Setting(k) => crate::changes::setting_title(k).into(),
     }
 }
 

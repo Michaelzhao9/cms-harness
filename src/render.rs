@@ -29,6 +29,7 @@ static ADMIN: LazyLock<Environment<'static>> = LazyLock::new(|| {
         ("publish.html", include_str!("web/templates/publish.html")),
         ("releases.html", include_str!("web/templates/releases.html")),
         ("settings.html", include_str!("web/templates/settings.html")),
+        ("members.html", include_str!("web/templates/members.html")),
     ] {
         env.add_template(name, source).expect("embedded admin template parses");
     }

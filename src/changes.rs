@@ -14,11 +14,16 @@ pub enum Target {
     Notes,
     /// A site file, by path.
     File(String),
+    /// A site option that goes live on publish, like `member_login`.
+    Setting(String),
 }
+
+/// Site options that are drafted and published like everything else.
+pub const SETTINGS: &[(&str, &str)] = &[("member_login", "会员登录")];
 
 impl Target {
     pub fn parse(s: &str) -> Result<Target, String> {
-        let bad = || format!("对象标识“{s}”不合法：请使用 collection:<名字>、record:<编号>、view:<名字>、file:<路径> 或 notes。");
+        let bad = || format!("对象标识“{s}”不合法：请使用 collection:<名字>、record:<编号>、view:<名字>、file:<路径>、setting:<名字> 或 notes。");
         if s == "notes" {
             return Ok(Target::Notes);
         }
@@ -27,6 +32,7 @@ impl Target {
             ("view", n) if crate::schema::valid_name(n) => Ok(Target::View(n.into())),
             ("record", n) => n.parse().map(Target::Record).map_err(|_| bad()),
             ("file", p) if crate::site::check_path(p).is_ok() => Ok(Target::File(p.into())),
+            ("setting", k) if SETTINGS.iter().any(|(n, _)| *n == k) => Ok(Target::Setting(k.into())),
             _ => Err(bad()),
         }
     }
@@ -39,6 +45,7 @@ impl Target {
             Target::View(n) => ("views", "name", Sql::Text(n.clone()), true),
             Target::Notes => ("notes", "id", Sql::Integer(1), false),
             Target::File(p) => ("site_files", "path", Sql::Text(p.clone()), true),
+            Target::Setting(k) => ("options", "key", Sql::Text(k.clone()), true),
         }
     }
 }
@@ -51,6 +58,7 @@ impl fmt::Display for Target {
             Target::View(n) => write!(f, "view:{n}"),
             Target::Notes => write!(f, "notes"),
             Target::File(p) => write!(f, "file:{p}"),
+            Target::Setting(k) => write!(f, "setting:{k}"),
         }
     }
 }
@@ -222,6 +230,9 @@ fn parse_def(name: &str, json: &str) -> Result<CollectionDef, String> {
 
 /// Draft definition if there is one, else the published one; errors if the collection is gone or pending deletion.
 pub fn effective_def(conn: &Connection, name: &str) -> Result<CollectionDef, String> {
+    if name == crate::members::MEMBERS {
+        return Ok(crate::members::members_def());
+    }
     let r = coll_row_required(conn, name)?;
     if r.deleted {
         return Err(format!("集合“{name}”已被删除。"));
@@ -537,6 +548,7 @@ fn pending_targets(conn: &Connection) -> Result<Vec<Target>, String> {
     out.extend(names(conn, &format!("SELECT name FROM collections WHERE {waiting} ORDER BY name"))?.into_iter().map(Target::Collection));
     out.extend(names(conn, &format!("SELECT name FROM views WHERE {waiting} ORDER BY name"))?.into_iter().map(Target::View));
     out.extend(names(conn, &format!("SELECT path FROM site_files WHERE {waiting} ORDER BY path"))?.into_iter().map(Target::File));
+    out.extend(names(conn, &format!("SELECT key FROM options WHERE {waiting} ORDER BY key"))?.into_iter().map(Target::Setting));
     if !names(conn, "SELECT 'notes' FROM notes WHERE draft IS NOT NULL")?.is_empty() {
         out.push(Target::Notes);
     }
@@ -609,6 +621,7 @@ pub fn pending(conn: &Connection) -> Result<Vec<Pending>, String> {
                 .map_or_else(|| format!("记录 {id}"), String::from),
             Target::Collection(n) | Target::View(n) => shown.get("title").and_then(Value::as_str).unwrap_or(n).to_string(),
             Target::File(p) => p.clone(),
+            Target::Setting(k) => setting_title(k).to_string(),
         };
         let kind = if s.draft_deleted { "deleted" } else if s.published.is_none() { "created" } else { "changed" };
         out.push(Pending {
@@ -650,11 +663,11 @@ pub fn may_publish(actor: &Actor, target: &Target) -> bool {
 fn rank(target: &Target, deleting: bool) -> u8 {
     match (target, deleting) {
         (Target::Collection(_), false) => 0,
-        (Target::View(_) | Target::File(_), false) => 1,
+        (Target::View(_) | Target::File(_) | Target::Setting(_), false) => 1,
         (Target::Notes, _) => 2,
         (Target::Record(_), false) => 3,
         (Target::Record(_), true) => 4,
-        (Target::View(_) | Target::File(_), true) => 5,
+        (Target::View(_) | Target::File(_) | Target::Setting(_), true) => 5,
         (Target::Collection(_), true) => 6,
     }
 }
@@ -812,7 +825,8 @@ pub fn check_views(conn: &Connection, released: &[String], collections: &[String
         if !released.contains(&name) && !collections.contains(&view.collection) {
             continue;
         }
-        match live_def_opt(conn, &view.collection)? {
+        let def = if view.collection == crate::members::MEMBERS { Some(crate::members::members_def()) } else { live_def_opt(conn, &view.collection)? };
+        match def {
             None => problems.push(format!("view:{name} 引用的 collection:{} 不在线上：请把集合一起发布，或先删除这个界面。", view.collection)),
             Some(def) => {
                 if let Err(e) = crate::schema::check_view(&view, &def) {
@@ -1000,7 +1014,7 @@ fn run_publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
                 }
                 touched.push(collection);
             }
-            Target::View(_) | Target::Notes | Target::File(_) => {
+            Target::View(_) | Target::Notes | Target::File(_) | Target::Setting(_) => {
                 if let Target::View(n) = target {
                     views.push(n.clone());
                 }
@@ -1171,4 +1185,20 @@ pub fn stage_file(conn: &Connection, actor: &Actor, path: &str, content: &str, n
     }
     save_draft(conn, actor, &target, &doc, note)?;
     Ok(true)
+}
+
+pub fn setting_title(key: &str) -> &'static str {
+    SETTINGS.iter().find(|(n, _)| *n == key).map_or("设置", |(_, t)| *t)
+}
+
+/// A site option: the live value, or with `effective` the draft if there is one (a pending deletion reads as unset).
+pub fn setting(conn: &Connection, key: &str, effective: bool) -> Value {
+    let row: Option<(Option<String>, Option<String>, bool)> = conn
+        .query_row("SELECT published, draft, draft_deleted FROM options WHERE key = ?1", [key], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .optional()
+        .ok()
+        .flatten();
+    let Some((published, draft, deleting)) = row else { return Value::Null };
+    let json = if !effective { published } else if deleting { None } else { draft.or(published) };
+    parse_doc(&json)
 }
