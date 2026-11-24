@@ -50,6 +50,8 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<DeleteView>("delete_view", Scope::Structure, "删除界面草稿；从未发布的界面直接消失，已发布的待发布时才真正删除。"),
             spec::<NoArgs>("get_site_notes", Scope::Read, "读取站点说明（有草稿时返回草稿）和状态。"),
             spec::<SetSiteNotes>("set_site_notes", Scope::Structure, "修改站点说明草稿：一段给对话模型看的文字，最多 20000 个字符。发布后才生效。"),
+            spec::<NoArgs>("get_site_settings", Scope::Read, "读取网站的前端设置：import_map（浏览器里 import 的包从哪个网址加载）和 script_origins（网站允许加载脚本的其他来源，默认 https://esm.sh）。"),
+            spec::<SetSiteSettings>("set_site_settings", Scope::Structure, "修改网站的前端设置，立即生效（不经过发布）。只传要改的项，传 null 恢复默认。例：用 React 时 import_map 设为 {\"imports\": {\"react\": \"https://esm.sh/react@19\", \"react/jsx-runtime\": \"https://esm.sh/react@19/jsx-runtime\", \"react-dom/client\": \"https://esm.sh/react-dom@19/client\"}}。"),
             spec::<UploadMedia>("upload_media", Scope::Write, "上传图片或 PDF（base64，最大 5 MB）：返回 /uploads/ 路径，可填进 media 字段。"),
             spec::<NoArgs>("list_site_files", Scope::Read, "List the built-in website's source files with status, size in bytes and line count (draft copy if any). Content is not included: use get_site_file."),
             spec::<PathArgs>("get_site_file", Scope::Read, "Read one site file by path: its content (the draft if there is one) and status."),
@@ -145,6 +147,8 @@ fn dispatch(app: &App, conn: &Connection, actor: &Actor, name: &str, args: Value
         "delete_view" => delete_view(conn, actor, parse(name, args)?),
         "get_site_notes" => parse::<NoArgs>(name, args).and_then(|_| get_site_notes(conn)),
         "set_site_notes" => set_site_notes(conn, actor, parse(name, args)?),
+        "get_site_settings" => parse::<NoArgs>(name, args).and_then(|_| get_site_settings(conn)),
+        "set_site_settings" => set_site_settings(conn, parse(name, args)?),
         "upload_media" => upload_media(app, parse(name, args)?),
         "list_site_files" => parse::<NoArgs>(name, args).and_then(|_| list_site_files(conn)),
         "get_site_file" => get_site_file(conn, parse(name, args)?),
@@ -646,6 +650,68 @@ struct SetView {
 struct DeleteView {
     name: String,
     note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SetSiteSettings {
+    /// An import map object ({"imports": {...}}), or null for none. Leave out to keep it.
+    #[serde(default, deserialize_with = "present")]
+    import_map: Option<Option<Value>>,
+    /// Origins scripts may load from, like ["https://esm.sh"]; null for the default. Leave out to keep it.
+    #[serde(default, deserialize_with = "present")]
+    script_origins: Option<Option<Value>>,
+}
+
+fn get_site_settings(conn: &Connection) -> Result<Value, String> {
+    let get = |k: &str| -> Result<Value, String> {
+        let v: Option<String> = conn.query_row("SELECT value FROM site_settings WHERE key = ?1", [k], |r| r.get(0)).optional().map_err(|e| e.to_string())?;
+        Ok(v.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or(Value::Null))
+    };
+    Ok(json!({ "import_map": get("import_map")?, "script_origins": get("script_origins")? }))
+}
+
+fn set_site_settings(conn: &Connection, a: SetSiteSettings) -> Result<Value, String> {
+    let origin_ok = |o: &str| {
+        let rest = o.strip_prefix("https://").or_else(|| o.strip_prefix("http://"));
+        rest.is_some_and(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_alphanumeric() || b".-:".contains(&b)))
+    };
+    let mut writes: Vec<(&str, Option<String>)> = vec![];
+    if let Some(m) = a.import_map {
+        let m = m.unwrap_or(Value::Null);
+        match m {
+            Value::Null => writes.push(("import_map", None)),
+            Value::Object(ref o) if o.get("imports").is_none_or(Value::is_object) && o.get("scopes").is_none_or(Value::is_object) => {
+                writes.push(("import_map", Some(m.to_string())))
+            }
+            _ => return Err("import_map 要形如 {\"imports\": {\"react\": \"https://esm.sh/react@19\"}}。".into()),
+        }
+    }
+    if let Some(l) = a.script_origins {
+        match l.unwrap_or(Value::Null) {
+            Value::Null => writes.push(("script_origins", None)),
+            Value::Array(items) => {
+                let mut list = vec![];
+                for o in items {
+                    let s = o.as_str().unwrap_or("").trim().trim_end_matches('/').to_string();
+                    if !origin_ok(&s) {
+                        return Err(format!("script_origins 里的 {o} 不是来源网址：要形如 https://esm.sh，不带路径。"));
+                    }
+                    list.push(s);
+                }
+                writes.push(("script_origins", Some(json!(list).to_string())));
+            }
+            _ => return Err("script_origins 要是一组网址，比如 [\"https://esm.sh\"]。".into()),
+        }
+    }
+    for (k, v) in writes {
+        match v {
+            Some(v) => conn.execute("INSERT INTO site_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2", rusqlite::params![k, v]),
+            None => conn.execute("DELETE FROM site_settings WHERE key = ?1", [k]),
+        }
+        .map_err(|e| format!("保存网站设置失败：{e}"))?;
+    }
+    get_site_settings(conn)
 }
 
 #[derive(Deserialize, JsonSchema)]

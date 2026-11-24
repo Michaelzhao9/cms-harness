@@ -347,3 +347,16 @@ async fn stop_ends_a_running_turn_and_the_next_turn_works() {
     assert_eq!(c.turns.iter().map(|t| (t.text.as_str(), t.messages)).collect::<Vec<_>>(), vec![("改个标题", 0), ("再试一次", 1)]);
     assert_eq!(m.seen.lock().unwrap().len(), 2);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_system_prompt_ties_admin_screens_to_site_features() {
+    let app = app();
+    let m = with_model(&app, Scripted { replies: Mutex::new(VecDeque::from([done("好")])), ..Default::default() });
+    let u = admin("builder");
+    chat::start(app.clone(), &u, "加个登录".into(), vec![], None).unwrap();
+    idle(&app, &u.token_hash).await;
+    let system = m.seen.lock().unwrap()[0].2.clone();
+    assert!(system.contains("需要时必须有，不需要时必须没有"));
+    assert!(system.contains("set_view") && system.contains("delete_view"));
+    assert!(system.contains("完全独立运行"));
+}

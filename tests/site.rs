@@ -475,3 +475,19 @@ async fn a_normal_page_stays_well_inside_the_fuel_budget() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body.matches("<h2>").count(), 500);
 }
+
+#[test]
+fn site_settings_set_the_import_map_and_script_origins() {
+    let app = app();
+    let map = json!({"imports": {"vue": "https://esm.sh/vue@3"}});
+    let v = ok(&app, &builder(), "set_site_settings", json!({"import_map": map, "script_origins": ["https://esm.sh/", "https://cdn.jsdelivr.net"]}));
+    assert_eq!(v["import_map"], map);
+    assert_eq!(v["script_origins"], json!(["https://esm.sh", "https://cdn.jsdelivr.net"]));
+    // Leaving a key out keeps it; null resets it.
+    let v = ok(&app, &builder(), "set_site_settings", json!({"script_origins": null}));
+    assert_eq!((v["import_map"].clone(), v["script_origins"].clone()), (map, Value::Null));
+    assert!(err(&app, &builder(), "set_site_settings", json!({"script_origins": ["https://a.example/x"]})).contains("不带路径"));
+    assert!(err(&app, &builder(), "set_site_settings", json!({"import_map": [1]})).contains("imports"));
+    assert!(err(&app, &editor(), "set_site_settings", json!({})).contains("权限"));
+    assert_eq!(ok(&app, &reader(), "get_site_settings", json!({}))["import_map"]["imports"]["vue"], "https://esm.sh/vue@3");
+}
