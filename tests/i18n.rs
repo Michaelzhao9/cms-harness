@@ -120,3 +120,13 @@ async fn a_sites_own_text_files_reach_english_browsers_untouched() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, big);
 }
+
+#[tokio::test]
+async fn the_preview_speaks_the_admins_language() {
+    let app = app();
+    let s = admin_session(&app, "builder").await;
+    post_form(&app, "/admin/settings/appearance", Some(&s), &[("lang", "en")]).await;
+    let base = preview_base(&app, &s.0).await;
+    let (_, page) = get_lang(&app, &format!("{base}/"), None, "zh-CN").await;
+    assert!(page.contains("<html lang=\"en\">") && page.contains("The site is up"), "{page}");
+}

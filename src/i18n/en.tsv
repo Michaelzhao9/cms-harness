@@ -6,7 +6,6 @@
 缩小到底部	Shrink to the bottom
 新对话	New chat
 收起对话记录	Collapse the conversation
-第	Step
 步	
 收成小按钮	Shrink to a button
 停下	Stop
@@ -109,7 +108,6 @@ cms-harness admin 邮箱	cms-harness admin your-email
 发布记录	Releases
 设置	Settings
 已发布	Published
-次发布，	release,
 另有	plus
 项	more
 看发布记录	View releases
@@ -878,3 +876,8 @@ SearXNG 要填它的网址，比如 http://127.0.0.1:8888。	SearXNG needs its a
 联网搜索已经关掉了。	Web search has been turned off.
 搜索网页 {}	Search the web for {}
 读取网页 {}	Read page {}
+第 {} 步	Step {}
+第 {} / {} 页	Page {} of {}
+第 {} 次发布	Release {}
+，	, 
+（UTC）：	 (UTC): 

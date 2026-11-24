@@ -6,7 +6,7 @@
 {% if done -%}
 <section class="review" aria-labelledby="pub-h">
 <h1 id="pub-h">{{ "已发布"|t }}</h1>
-<p class="by">{{ "第"|t }} {{ done.id }} {{ "次发布，"|t }}{{ done.actor|t }}{{ "，"|t }}{{ done.at }}{{ "（UTC）："|t }}{{ done.note|t }}</p>
+<p class="by">{{ ("第 " ~ done.id ~ " 次发布")|t }}{{ "，"|t }}{{ done.actor|t }}{{ "，"|t }}{{ done.at }}{{ "（UTC）："|t }}{{ done.note|t }}</p>
 <ul class="went">
 {% for v in done.versions %}<li><span class="kind">{{ v.kind_label|t }}</span><span class="grow">{{ v.title|t }}</span><code>{{ v.target }}</code></li>
 {% endfor -%}

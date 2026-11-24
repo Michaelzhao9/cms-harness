@@ -75,12 +75,15 @@ pub async fn preview(State(app): State<Shared>, req: Request) -> Response {
     };
     let (_, query, _) = parts(&req);
     let lang = crate::i18n::for_visitor(req.headers(), req.uri().query());
+    let picked = crate::i18n::from_query(req.uri().query());
     let a = app.clone();
     tokio::task::spawn_blocking(move || {
         let conn = a.conn();
         if !session::use_preview(&conn, &token) {
             return gone();
         }
+        // A ?lang= link wins, then the admin's own language, then the browser's.
+        let lang = picked.or_else(|| session::preview_lang(&conn, &token)).unwrap_or(lang);
         let base = format!("/_hc/preview/{token}");
         let v = Visit { app: &a, conn: &conn, mode: Mode::Preview, base: &base, path: &path, query: &query, if_none_match: None, framers: "'self'".into(), member: None, lang, admin_url: "/admin".into() };
         v.respond()

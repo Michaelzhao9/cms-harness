@@ -212,6 +212,19 @@ pub fn use_preview(conn: &Connection, token: &str) -> bool {
         .is_ok_and(|n| n == 1)
 }
 
+/// The language of the admin a preview token belongs to: the preview shows built-in pages the way the admin reads.
+pub fn preview_lang(conn: &Connection, token: &str) -> Option<crate::i18n::Lang> {
+    let prefs: String = conn
+        .query_row(
+            "SELECT json_patch(a.prefs, s.prefs) FROM preview_tokens p JOIN admin_sessions s ON s.token_hash = p.session
+             JOIN admins a ON a.id = s.admin_id WHERE p.token_hash = ?1",
+            [sha256_hex(token)],
+            |r| r.get(0),
+        )
+        .ok()?;
+    serde_json::from_str::<serde_json::Value>(&prefs).ok().and_then(|p| p["lang"].as_str().and_then(crate::i18n::Lang::parse))
+}
+
 /// Stores one string preference on the admin account, kept across sessions.
 pub fn set_admin_pref(conn: &Connection, admin_id: i64, key: &str, value: &str) -> Result<(), String> {
     conn.execute("UPDATE admins SET prefs = json_set(prefs, ?1, ?2) WHERE id = ?3", params![format!("$.{key}"), value, admin_id])

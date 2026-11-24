@@ -28,7 +28,7 @@
 <input type="hidden" name="ctx" value="{{ ctx }}" data-ctx>
 <div class="status" role="status" aria-live="polite">
 <span class="spin" aria-hidden="true"></span>
-<span class="now"><span class="label" data-status-label>{{ chat.status.label|t }}</span><span class="step" data-status-step>{% if chat.status.step %}{{ "第"|t }} {{ chat.status.step }} {{ "步"|t }}{% endif %}</span></span>
+<span class="now"><span class="label" data-status-label>{{ chat.status.label|t }}</span><span class="step" data-status-step>{% if chat.status.step %}{{ ("第 " ~ chat.status.step ~ " 步")|t }}{% endif %}</span></span>
 <button type="submit" class="ib round only-floating" formaction="/admin/prefs" formenctype="application/x-www-form-urlencoded" formnovalidate name="chat" value="mini" aria-label="{{ '收成小按钮'|t }}">{{ i.icon("caret-down", 14) }}</button>
 <button type="submit" class="stop" formaction="/admin/chat/stop" formenctype="application/x-www-form-urlencoded" formnovalidate aria-label="{{ '停下'|t }}">{{ i.icon("stop", 16) }}<span class="only-docked">{{ "停下"|t }}</span></button>
 </div>

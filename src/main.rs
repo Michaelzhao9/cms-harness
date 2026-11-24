@@ -8,7 +8,8 @@
 //!   cms-harness restore <file.zip>                      replace the whole site with a backup (stop the server first)
 //!
 //! Settings come from the environment: HC_PORT (4200), HC_DATA (data), HC_DB (<HC_DATA>/harness.db),
-//! HC_ORIGIN (http://127.0.0.1:<port>), HC_SITE_NAME (CMS Harness), HC_ADMIN_PASSWORD (for `admin`),
+//! HC_HOST (127.0.0.1; 0.0.0.0 in a container), HC_ORIGIN (http://127.0.0.1:<port>), HC_SITE_NAME (CMS Harness),
+//! HC_ADMIN_PASSWORD (for `admin`),
 //! HC_TRUST_PROXY (set to 1 behind a reverse proxy so login rate limits use X-Forwarded-For),
 //! HC_ADMIN_ORIGIN (the admin's own origin, or `off`; overrides 设置 → 网址).
 
@@ -246,7 +247,8 @@ fn serve(conn: rusqlite::Connection, data: PathBuf, port: String) -> ExitCode {
                 }
             }
         });
-        let addr = format!("127.0.0.1:{port}");
+        // Loopback by default, behind a reverse proxy; HC_HOST=0.0.0.0 in a container.
+        let addr = format!("{}:{port}", env("HC_HOST", "127.0.0.1"));
         let listener = match tokio::net::TcpListener::bind(&addr).await {
             Ok(l) => l,
             Err(e) => {

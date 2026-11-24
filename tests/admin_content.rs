@@ -208,7 +208,7 @@ async fn lists_page_by_twenty_and_views_follow_their_declaration() {
 
     let (_, _, first) = get_with(&app, "/admin/c/news", Some(&s.0)).await;
     assert_eq!(rows(&first), 20);
-    assert!(first.contains("page=2") && first.contains("第 1 / 2 页"), "{first}");
+    assert!(first.contains("page=2") && first.replace("&#x2f;", "/").contains("第 1 / 2 页"), "{first}");
     let (_, _, second) = get_with(&app, "/admin/c/news?page=2", Some(&s.0)).await;
     assert_eq!(rows(&second), 1);
     assert!(second.contains("第0条"), "newest first, so the oldest is on page 2: {second}");

@@ -17,7 +17,7 @@
 It needs no external services. One executable and one SQLite file serve the public site, the admin, the chat, member accounts and the API.
 
 <p align="center">
-  <img src="docs/images/workbench-en.webp" alt="The admin: the chat on the left built a studio home page; the preview on the right marks what changed; Publish shows 2 pending changes." width="100%">
+  <img src="docs/images/demo.gif" alt="Typing a request in the admin chat, the AI building a studio home page as a draft with the changes marked in the preview, then publishing it and viewing the live site." width="100%">
 </p>
 
 ## How it works
@@ -63,7 +63,15 @@ It needs no external services. One executable and one SQLite file serve the publ
 
 ## Quick start
 
-You need Rust 1.85 or newer.
+With Docker:
+
+```sh
+curl -O https://raw.githubusercontent.com/Michaelzhao9/cms-harness/main/docker-compose.yml
+docker compose up -d
+docker compose exec cms-harness cms-harness admin you@example.com   # prints the admin password once
+```
+
+Or download a binary for Linux, macOS or Windows from [Releases](https://github.com/Michaelzhao9/cms-harness/releases), or build from source (Rust 1.85 or newer):
 
 ```sh
 git clone https://github.com/Michaelzhao9/cms-harness.git
@@ -182,6 +190,7 @@ Every key can read. Changing structure, screens, site files and notes needs `str
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `HC_HOST` | `127.0.0.1` | address to listen on (`0.0.0.0` in the Docker image) |
 | `HC_PORT` | `4200` | port |
 | `HC_DATA` | `data` | data folder, uploads included |
 | `HC_DB` | `<HC_DATA>/harness.db` | database file |

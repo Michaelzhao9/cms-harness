@@ -1,0 +1,21 @@
+# docker compose up -d, then create the first admin:
+#   docker compose exec cms-harness cms-harness admin you@example.com
+services:
+  cms-harness:
+    image: ghcr.io/michaelzhao9/cms-harness:latest
+    # build: .   # or build it yourself
+    restart: unless-stopped
+    ports:
+      - "4200:4200"
+    environment:
+      # The address people type in the browser, exactly (scheme, host and port).
+      HC_ORIGIN: "http://localhost:4200"
+      # Behind a reverse proxy on another host or container, so rate limits see real visitors:
+      # HC_TRUST_PROXY: "1"
+      # The chat model can also be set here instead of in Settings:
+      # LLM_PROVIDER: "anthropic"
+      # LLM_API_KEY: "..."
+    volumes:
+      - cms-harness-data:/data
+volumes:
+  cms-harness-data:

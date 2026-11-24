@@ -37,7 +37,7 @@
 {% if pager -%}
 <nav class="pager" aria-label="{{ '分页'|t }}">
 {% if pager.prev %}<a href="{{ pager.prev }}">{{ "上一页"|t }}</a>{% endif %}
-<span>{{ "第"|t }} {{ pager.page }} / {{ pager.pages }} {{ "页"|t }}</span>
+<span>{{ ("第 " ~ pager.page ~ " / " ~ pager.pages ~ " 页")|t }}</span>
 {% if pager.next %}<a href="{{ pager.next }}">{{ "下一页"|t }}</a>{% endif %}
 </nav>
 {% endif -%}

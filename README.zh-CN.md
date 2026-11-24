@@ -26,6 +26,8 @@
 | --- | --- | --- |
 | 在对话里说想要什么，也可以在预览里点选元素再问。 | 助手把内容、页面、后台界面都写成**草稿**。预览里标出每一处改动，线上网站不动。 | 看一遍改动清单，不要的取消勾选，然后发布。每次发布都有记录，可以恢复。 |
 
+<p align="center"><img src="docs/images/demo.gif" alt="演示：在后台对话里说要求，AI 做出草稿、预览标出改动，然后发布并查看线上网站。" width="100%"><br><sub>演示（英文界面）</sub></p>
+
 ## 有什么
 
 - **AI 动手，人来发布。** 对话助手不能发布。记录、网页、上传文件里的文字，它只当数据，不当指令。
@@ -63,7 +65,15 @@
 
 ## 快速开始
 
-需要 Rust 1.85 或更新版本。
+用 Docker：
+
+```sh
+curl -O https://raw.githubusercontent.com/Michaelzhao9/cms-harness/main/docker-compose.yml
+docker compose up -d
+docker compose exec cms-harness cms-harness admin 你的邮箱          # 打印管理员密码，只显示一次
+```
+
+也可以在 [Releases](https://github.com/Michaelzhao9/cms-harness/releases) 下载 Linux、macOS、Windows 的程序，或者从源码编译（需要 Rust 1.85 或更新版本）：
 
 ```sh
 git clone https://github.com/Michaelzhao9/cms-harness.git
@@ -182,6 +192,7 @@ cargo build --release
 
 | 变量 | 默认值 | 作用 |
 | --- | --- | --- |
+| `HC_HOST` | `127.0.0.1` | 监听地址（Docker 镜像里是 `0.0.0.0`） |
 | `HC_PORT` | `4200` | 端口 |
 | `HC_DATA` | `data` | 数据目录，上传的文件也在这里 |
 | `HC_DB` | `<HC_DATA>/harness.db` | 数据库文件 |
