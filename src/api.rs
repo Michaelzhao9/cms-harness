@@ -307,7 +307,7 @@ async fn mcp(State(app): State<Shared>, headers: HeaderMap, body: Bytes) -> Resp
         return StatusCode::ACCEPTED.into_response();
     };
     let params = req.get("params").cloned().unwrap_or(Value::Null);
-    let info = json!({ "name": "harness-cms", "version": env!("CARGO_PKG_VERSION") });
+    let info = json!({ "name": "cms-harness", "version": env!("CARGO_PKG_VERSION") });
     match req["method"].as_str().unwrap_or_default() {
         "initialize" => {
             let asked = params["protocolVersion"].as_str().unwrap_or_default();

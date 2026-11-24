@@ -1,7 +1,7 @@
 mod common;
 use axum::http::StatusCode;
 use common::*;
-use harness_cms::auth::Scope;
+use cms_harness::auth::Scope;
 use serde_json::json;
 
 #[tokio::test]
@@ -32,7 +32,7 @@ async fn mcp_gives_the_same_results_as_rest() {
 
     let (_, init) = post_json(&app, "/mcp", Some(&k), rpc("initialize", json!({ "protocolVersion": "2025-06-18", "capabilities": {} }))).await;
     assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
-    assert_eq!(init["result"]["serverInfo"]["name"], "harness-cms");
+    assert_eq!(init["result"]["serverInfo"]["name"], "cms-harness");
     assert!(init["result"]["capabilities"]["tools"].is_object());
     assert_eq!(post_json(&app, "/mcp", Some(&k), rpc("ping", json!({}))).await.1["result"], json!({}));
 

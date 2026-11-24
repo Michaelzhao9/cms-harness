@@ -56,7 +56,7 @@ fn failures(conn: &Connection, key: &str) -> rusqlite::Result<i64> {
 /// else `BAD_LOGIN` for both unknown emails and wrong passwords.
 pub fn login(conn: &Connection, email: &str, password: &str, client_key: &str) -> Result<String, String> {
     // Verified when the email is unknown, so both failures take the same time.
-    static DUMMY: LazyLock<String> = LazyLock::new(|| auth::hash_password("harness-cms dummy password"));
+    static DUMMY: LazyLock<String> = LazyLock::new(|| auth::hash_password("cms-harness dummy password"));
     let db = |e: rusqlite::Error| format!("读取数据库失败：{e}");
     let email = auth::normalize_email(email);
     let (email_key, client_key) = (format!("email:{email}"), format!("ip:{client_key}"));

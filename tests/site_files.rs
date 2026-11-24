@@ -1,8 +1,8 @@
 mod common;
 use axum::http::StatusCode;
 use common::*;
-use harness_cms::site::transpile;
-use harness_cms::Shared;
+use cms_harness::site::transpile;
+use cms_harness::Shared;
 use serde_json::{json, Value};
 use std::io::Write;
 
@@ -205,7 +205,7 @@ fn pages_render_with_their_layout_and_escape_values() {
     write(&app, "index.html", "{% extends \"layout.html\" %}{% block body %}{{ request.path }} {{ request.query.q }}{% endblock %}");
     publish_all(&app);
     let ctx = json!({ "request": { "path": "/", "query": { "q": "<b>" } } });
-    let out = harness_cms::site::render(&app.conn(), harness_cms::site::Mode::Live, "index.html", ctx).unwrap();
+    let out = cms_harness::site::render(&app.conn(), cms_harness::site::Mode::Live, "index.html", ctx).unwrap();
     assert_eq!(out.html, "<main>LAYOUT &#x2f; &lt;b&gt;</main>");
 }
 
@@ -307,7 +307,7 @@ fn b64(bytes: &[u8]) -> String {
 }
 
 fn upload(app: &Shared, zip: &[u8]) -> Result<Value, String> {
-    harness_cms::tools::call(app, &builder(), "upload_site_bundle", json!({ "zip_base64": b64(zip), "note": "整包上传" }))
+    cms_harness::tools::call(app, &builder(), "upload_site_bundle", json!({ "zip_base64": b64(zip), "note": "整包上传" }))
 }
 
 #[test]
@@ -325,7 +325,7 @@ fn a_bundle_carries_binary_assets_and_can_replace_the_site() {
     assert_eq!(content(&app, "old.html")["status"], "published");
     assert_eq!(content(&app, "assets/Logo-AbC.png")["content"], b64(png));
     // With replace, live files outside the bundle get a pending deletion in the same step; drafts stay.
-    let r = harness_cms::tools::call(&app, &builder(), "upload_site_bundle", json!({ "zip_base64": b64(&zip), "note": "替换", "replace": true })).unwrap();
+    let r = cms_harness::tools::call(&app, &builder(), "upload_site_bundle", json!({ "zip_base64": b64(&zip), "note": "替换", "replace": true })).unwrap();
     assert_eq!((r["written"].as_i64(), r["deleted"].as_i64()), (Some(0), Some(1)), "{r}");
     assert_eq!(content(&app, "old.html")["status"], "deleting");
     assert_eq!(content(&app, "draft-only.css")["status"], "draft");
@@ -415,7 +415,7 @@ fn bundles_are_size_limited() {
     assert!(e.contains("liar.txt"), "{e}");
 
     assert!(upload(&app, b"not a zip").unwrap_err().contains("zip"));
-    assert!(harness_cms::tools::call(&app, &builder(), "upload_site_bundle", json!({ "zip_base64": "***", "note": "n" })).unwrap_err().contains("base64"));
+    assert!(cms_harness::tools::call(&app, &builder(), "upload_site_bundle", json!({ "zip_base64": "***", "note": "n" })).unwrap_err().contains("base64"));
     assert_eq!(listed(&app), vec![]);
 }
 

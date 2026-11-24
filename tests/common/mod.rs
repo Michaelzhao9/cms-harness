@@ -1,9 +1,9 @@
 #![allow(dead_code)]
-use harness_cms::{store, App, Shared};
+use cms_harness::{store, App, Shared};
 use rand::Rng;
 
 pub fn app() -> Shared {
-    let dir = std::env::temp_dir().join(format!("harness-cms-test-{:016x}", rand::thread_rng().gen::<u64>()));
+    let dir = std::env::temp_dir().join(format!("cms-harness-test-{:016x}", rand::thread_rng().gen::<u64>()));
     std::fs::create_dir_all(&dir).unwrap();
     App::new(
         store::open(":memory:").unwrap(),
@@ -13,7 +13,7 @@ pub fn app() -> Shared {
     )
 }
 
-use harness_cms::auth::{Actor, Scope};
+use cms_harness::auth::{Actor, Scope};
 use serde_json::{json, Value};
 
 pub fn builder() -> Actor {
@@ -29,11 +29,11 @@ pub fn reader() -> Actor {
 }
 
 pub fn ok(app: &Shared, who: &Actor, tool: &str, args: Value) -> Value {
-    harness_cms::tools::call(app, who, tool, args).unwrap_or_else(|e| panic!("{tool} failed: {e}"))
+    cms_harness::tools::call(app, who, tool, args).unwrap_or_else(|e| panic!("{tool} failed: {e}"))
 }
 
 pub fn err(app: &Shared, who: &Actor, tool: &str, args: Value) -> String {
-    match harness_cms::tools::call(app, who, tool, args) {
+    match cms_harness::tools::call(app, who, tool, args) {
         Ok(v) => panic!("{tool} should have failed but returned {v}"),
         Err(e) => e,
     }
@@ -65,7 +65,7 @@ async fn send(app: &Shared, req: axum::http::request::Builder, key: Option<&str>
         Some(k) => req.header(header::AUTHORIZATION, format!("Bearer {k}")),
         None => req,
     };
-    let resp = harness_cms::api::router(app.clone()).oneshot(req.body(body).unwrap()).await.unwrap();
+    let resp = cms_harness::api::router(app.clone()).oneshot(req.body(body).unwrap()).await.unwrap();
     let (status, headers) = (resp.status(), resp.headers().clone());
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     (status, headers, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
@@ -82,7 +82,7 @@ pub async fn post_json(app: &Shared, path: &str, key: Option<&str>, body: Value)
 }
 
 pub fn key(app: &Shared, scopes: &[Scope]) -> String {
-    harness_cms::auth::create_key(&app.conn(), "test", scopes).unwrap()
+    cms_harness::auth::create_key(&app.conn(), "test", scopes).unwrap()
 }
 
 pub async fn post_raw(app: &Shared, path: &str, key: Option<&str>, body: &str) -> (StatusCode, Value) {
@@ -93,14 +93,14 @@ pub async fn post_raw(app: &Shared, path: &str, key: Option<&str>, body: &str) -
 
 /// The body of a GET as text.
 pub async fn get_text(app: &Shared, path: &str) -> String {
-    let resp = harness_cms::api::router(app.clone()).oneshot(Request::get(path).body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    let resp = cms_harness::api::router(app.clone()).oneshot(Request::get(path).body(axum::body::Body::empty()).unwrap()).await.unwrap();
     String::from_utf8(resp.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap()
 }
 
 // ---- admin UI helpers ----
 
 async fn send_text(app: &Shared, req: Request<axum::body::Body>) -> (StatusCode, HeaderMap, String) {
-    let resp = harness_cms::api::router(app.clone()).oneshot(req).await.unwrap();
+    let resp = cms_harness::api::router(app.clone()).oneshot(req).await.unwrap();
     let (status, headers) = (resp.status(), resp.headers().clone());
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     (status, headers, String::from_utf8_lossy(&bytes).into_owned())
@@ -110,13 +110,13 @@ async fn send_text(app: &Shared, req: Request<axum::body::Body>) -> (StatusCode,
 /// Returns the `hc_admin=<token>` cookie pair and the session's CSRF token.
 pub async fn admin_session(app: &Shared, role: &str) -> (String, String) {
     let email = format!("{role}@test");
-    harness_cms::auth::create_admin(&app.conn(), &email, role, Some("secret-pass")).unwrap();
+    cms_harness::auth::create_admin(&app.conn(), &email, role, Some("secret-pass")).unwrap();
     let (status, headers, body) = post_form(app, "/admin/login", None, &[("email", &email), ("password", "secret-pass")]).await;
     assert_eq!(status, StatusCode::SEE_OTHER, "login failed: {body}");
     let cookie = headers[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_string();
     let mut h = HeaderMap::new();
     h.insert(header::COOKIE, cookie.parse().unwrap());
-    let csrf = harness_cms::web::session::from_cookie(&app.conn(), &h).unwrap().csrf;
+    let csrf = cms_harness::web::session::from_cookie(&app.conn(), &h).unwrap().csrf;
     (cookie, csrf)
 }
 

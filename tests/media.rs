@@ -2,7 +2,7 @@ mod common;
 use axum::http::{header, Request, StatusCode};
 use base64::Engine;
 use common::*;
-use harness_cms::auth::Scope;
+use cms_harness::auth::Scope;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
@@ -22,11 +22,11 @@ fn stores_by_content_and_ignores_the_claimed_name() {
     assert!(a.starts_with("/uploads/") && a.ends_with(".png"), "{a}"); // real format wins over the name
     let again = ok(&app, &editor(), "upload_media", json!({ "filename": "../../x.png", "data_base64": b64(&bytes) }));
     assert_eq!(again["path"], a.as_str());
-    let (served, content_type) = harness_cms::media::read(&app, a.trim_start_matches("/uploads/")).unwrap();
+    let (served, content_type) = cms_harness::media::read(&app, a.trim_start_matches("/uploads/")).unwrap();
     assert_eq!((served, content_type), (bytes, "image/png"));
-    assert!(harness_cms::media::read(&app, "../harness.db").is_none());
+    assert!(cms_harness::media::read(&app, "../harness.db").is_none());
     for bad in ["", "A.png", "x/y.png", "..", &a["/uploads/".len()..].to_uppercase()] {
-        assert!(harness_cms::media::read(&app, bad).is_none(), "{bad}");
+        assert!(cms_harness::media::read(&app, bad).is_none(), "{bad}");
     }
 }
 
@@ -40,8 +40,8 @@ fn rejects_what_it_should() {
     assert!(err(&app, &e, "upload_media", json!({ "filename": "a.png", "data_base64": "***" })).contains("base64"));
     assert!(err(&app, &e, "upload_media", json!({ "filename": "a.png", "data_base64": "" })).contains("空"));
     assert!(err(&app, &reader(), "upload_media", json!({ "filename": "a.png", "data_base64": b64(&png(1, 1)) })).contains("write"));
-    assert!(harness_cms::media::check_pixels(8000, 6000).unwrap_err().contains("像素")); // 48 million
-    assert!(harness_cms::media::check_pixels(6000, 6000).is_ok());                        // 36 million
+    assert!(cms_harness::media::check_pixels(8000, 6000).unwrap_err().contains("像素")); // 48 million
+    assert!(cms_harness::media::check_pixels(6000, 6000).is_ok());                        // 36 million
     let big = [b"%PDF-".as_slice(), &vec![0u8; 5 * 1024 * 1024]].concat();
     assert!(err(&app, &e, "upload_media", json!({ "filename": "a.pdf", "data_base64": b64(&big) })).contains("5 MB"));
     // a truncated PNG header names the file
@@ -77,13 +77,13 @@ fn multipart(parts: &[(&str, &[u8])]) -> (String, Vec<u8>) {
     (format!("multipart/form-data; boundary={boundary}"), body)
 }
 
-async fn upload(app: &harness_cms::Shared, key: Option<&str>, parts: &[(&str, &[u8])]) -> (StatusCode, Value) {
+async fn upload(app: &cms_harness::Shared, key: Option<&str>, parts: &[(&str, &[u8])]) -> (StatusCode, Value) {
     let (ct, body) = multipart(parts);
     let mut req = Request::post("/api/v1/media").header(header::CONTENT_TYPE, ct);
     if let Some(k) = key {
         req = req.header(header::AUTHORIZATION, format!("Bearer {k}"));
     }
-    let resp = harness_cms::api::router(app.clone()).oneshot(req.body(axum::body::Body::from(body)).unwrap()).await.unwrap();
+    let resp = cms_harness::api::router(app.clone()).oneshot(req.body(axum::body::Body::from(body)).unwrap()).await.unwrap();
     let status = resp.status();
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))

@@ -1,22 +1,22 @@
-//! harness-cms: one binary, one SQLite file.
+//! cms-harness: one binary, one SQLite file.
 //!
-//!   harness-cms                                         serve on 127.0.0.1
-//!   harness-cms admin <email> [builder|editor]          create an admin or reset its password
-//!   harness-cms key <name> [write] [structure] [publish] print a new API key once
+//!   cms-harness                                         serve on 127.0.0.1
+//!   cms-harness admin <email> [builder|editor]          create an admin or reset its password
+//!   cms-harness key <name> [write] [structure] [publish] print a new API key once
 //!
 //! Settings come from the environment: HC_PORT (4200), HC_DATA (data), HC_DB (<HC_DATA>/harness.db),
-//! HC_ORIGIN (http://127.0.0.1:<port>), HC_SITE_NAME (harness-cms), HC_ADMIN_PASSWORD (for `admin`),
+//! HC_ORIGIN (http://127.0.0.1:<port>), HC_SITE_NAME (CMS Harness), HC_ADMIN_PASSWORD (for `admin`),
 //! HC_TRUST_PROXY (set to 1 behind a reverse proxy so login rate limits use X-Forwarded-For).
 
-use harness_cms::{api, auth, changes, store, App};
+use cms_harness::{api, auth, changes, store, App};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 const USAGE: &str = "用法：
-  harness-cms                                          启动服务
-  harness-cms admin <邮箱> [builder|editor]            新建管理员，或重置他的密码
-  harness-cms key <名字> [write] [structure] [publish]  生成一把接口密钥（只显示一次）";
+  cms-harness                                          启动服务
+  cms-harness admin <邮箱> [builder|editor]            新建管理员，或重置他的密码
+  cms-harness key <名字> [write] [structure] [publish]  生成一把接口密钥（只显示一次）";
 
 fn env(name: &str, default: &str) -> String {
     std::env::var(name).ok().filter(|v| !v.trim().is_empty()).unwrap_or_else(|| default.to_string())
@@ -112,11 +112,11 @@ fn serve(conn: rusqlite::Connection, data: PathBuf, port: String) -> ExitCode {
         return ExitCode::FAILURE;
     }
     let origin = env("HC_ORIGIN", &format!("http://127.0.0.1:{port}"));
-    let app = App::new(conn, data, origin.trim_end_matches('/').to_string(), env("HC_SITE_NAME", "harness-cms"));
-    if let Some(env) = harness_cms::llm::Settings::from_env() {
+    let app = App::new(conn, data, origin.trim_end_matches('/').to_string(), env("HC_SITE_NAME", "CMS Harness"));
+    if let Some(env) = cms_harness::llm::Settings::from_env() {
         let _ = app.env_model.set(env);
     }
-    let model = harness_cms::llm::effective(&app.conn());
+    let model = cms_harness::llm::effective(&app.conn());
     if let Some(settings) = model {
         app.set_model(settings.client());
     }
@@ -136,7 +136,7 @@ fn serve(conn: rusqlite::Connection, data: PathBuf, port: String) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
-        println!("harness-cms 已启动：http://{addr}");
+        println!("cms-harness 已启动：http://{addr}");
         // Stop on Ctrl-C, or on SIGTERM from a process manager such as systemd.
         let stop = async {
             #[cfg(unix)]

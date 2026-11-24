@@ -2,7 +2,7 @@ mod common;
 use common::*;
 use serde_json::json;
 
-fn setup(app: &harness_cms::Shared) -> (i64, i64) {
+fn setup(app: &cms_harness::Shared) -> (i64, i64) {
     let b = builder();
     ok(app, &b, "create_collection", json!({ "name": "people", "title": "人物", "note": "n",
         "fields": [{ "name": "name", "title": "姓名", "type": "text" }] }));

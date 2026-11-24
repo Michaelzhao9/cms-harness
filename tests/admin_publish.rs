@@ -1,10 +1,10 @@
 mod common;
 use axum::http::{header, HeaderMap, StatusCode};
 use common::*;
-use harness_cms::auth::{self, Scope};
-use harness_cms::changes::{self, Target};
-use harness_cms::web::{admin, session};
-use harness_cms::Shared;
+use cms_harness::auth::{self, Scope};
+use cms_harness::changes::{self, Target};
+use cms_harness::web::{admin, session};
+use cms_harness::Shared;
 use serde_json::{json, Value};
 
 /// Every admin page: no scripts, no inline styles the CSP would drop.
@@ -310,11 +310,11 @@ async fn the_last_builder_cannot_be_removed() {
 async fn the_model_key_is_never_rendered() {
     // A model set by the server's environment: shown read-only, its key never.
     let app = app();
-    let _ = app.env_model.set(harness_cms::llm::Settings {
-        provider: harness_cms::llm::Provider::Anthropic,
+    let _ = app.env_model.set(cms_harness::llm::Settings {
+        provider: cms_harness::llm::Provider::Anthropic,
         api_key: Some("sk-test-secret".into()),
         model: "claude-opus-5-5".into(),
-        base_url: harness_cms::llm::DEFAULT_ANTHROPIC_URL.into(),
+        base_url: cms_harness::llm::DEFAULT_ANTHROPIC_URL.into(),
     });
     news(&app);
     create(&app, json!({ "title": "一条" }));
@@ -354,7 +354,7 @@ async fn deleting_an_unpublished_record_asks_first() {
 
     let (status, headers, _) = post_form(&app, &format!("/admin/r/{fresh}/delete"), Some(&s), &[("confirm", "1")]).await;
     assert_eq!((status, location(&headers)), (StatusCode::SEE_OTHER, "/admin/c/news"));
-    assert!(harness_cms::tools::call(&app, &reader(), "get_record", json!({ "id": fresh })).is_err());
+    assert!(cms_harness::tools::call(&app, &reader(), "get_record", json!({ "id": fresh })).is_err());
 
     // A published record keeps its history: deleting it only marks it, without asking.
     let (status, headers, _) = post_form(&app, &format!("/admin/r/{live}/delete"), Some(&s), &[]).await;
@@ -481,10 +481,10 @@ fn an_old_database_gets_the_admin_prefs_column() {
         conn.execute_batch("CREATE TABLE admins(id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL);
             INSERT INTO admins(email, password_hash, role) VALUES('old@test', 'x', 'builder');").unwrap();
     }
-    let conn = harness_cms::store::open(path.to_str().unwrap()).unwrap();
+    let conn = cms_harness::store::open(path.to_str().unwrap()).unwrap();
     let prefs: String = conn.query_row("SELECT prefs FROM admins", [], |r| r.get(0)).unwrap();
     assert_eq!(prefs, "{}");
     drop(conn);
-    harness_cms::store::open(path.to_str().unwrap()).unwrap();
+    cms_harness::store::open(path.to_str().unwrap()).unwrap();
     let _ = std::fs::remove_file(&path);
 }

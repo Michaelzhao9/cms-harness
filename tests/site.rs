@@ -1,8 +1,8 @@
 mod common;
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use common::*;
-use harness_cms::auth::Scope;
-use harness_cms::Shared;
+use cms_harness::auth::Scope;
+use cms_harness::Shared;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use std::io::Write;
@@ -31,7 +31,7 @@ async fn fetch(app: &Shared, path: &str, headers: &[(&str, &str)]) -> (StatusCod
     for (k, v) in headers {
         req = req.header(*k, *v);
     }
-    let resp = harness_cms::api::router(app.clone()).oneshot(req.body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    let resp = cms_harness::api::router(app.clone()).oneshot(req.body(axum::body::Body::empty()).unwrap()).await.unwrap();
     let (status, h) = (resp.status(), resp.headers().clone());
     (status, h, resp.into_body().collect().await.unwrap().to_bytes().to_vec())
 }
@@ -306,7 +306,7 @@ async fn a_draft_template_shows_only_in_preview_and_only_for_an_admin() {
     // A made-up key is ignored, and the key dies with the session.
     let forged = [("cookie", "hc_preview=00ff"), ("sec-fetch-site", "cross-site"), ("sec-fetch-dest", "style")];
     assert_eq!(page(&app, "/style.css", &forged).await.2, "p{color:red}");
-    let csrf = harness_cms::web::session::from_cookie(&app.conn(), &{ let mut m = HeaderMap::new(); m.insert(header::COOKIE, cookie.parse().unwrap()); m }).unwrap().csrf;
+    let csrf = cms_harness::web::session::from_cookie(&app.conn(), &{ let mut m = HeaderMap::new(); m.insert(header::COOKIE, cookie.parse().unwrap()); m }).unwrap().csrf;
     post_form(&app, "/admin/logout", Some(&(cookie.clone(), csrf)), &[]).await;
     assert_eq!(page(&app, "/style.css", &framed).await.2, "p{color:red}");
     assert!(page(&app, "/?preview=1", &[("cookie", &cookie)]).await.2.contains("v1"));
@@ -425,7 +425,7 @@ async fn post_zip(app: &Shared, path: &str, key: Option<&str>, body: Vec<u8>) ->
     if let Some(k) = key {
         req = req.header(header::AUTHORIZATION, format!("Bearer {k}"));
     }
-    let resp = harness_cms::api::router(app.clone()).oneshot(req.body(axum::body::Body::from(body)).unwrap()).await.unwrap();
+    let resp = cms_harness::api::router(app.clone()).oneshot(req.body(axum::body::Body::from(body)).unwrap()).await.unwrap();
     let status = resp.status();
     (status, serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap_or(Value::Null))
 }

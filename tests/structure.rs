@@ -2,7 +2,7 @@ mod common;
 use common::*;
 use serde_json::json;
 
-fn seed(app: &harness_cms::Shared) -> Vec<i64> {
+fn seed(app: &cms_harness::Shared) -> Vec<i64> {
     news(app);
     let ids = ["a", "b", "c"].iter().map(|s| ok(app, &editor(), "create_record", json!({ "collection": "news", "note": "n",
         "data": { "title": format!("标题{s}"), "slug": s, "date": "2026-11-01" } }))["id"].as_i64().unwrap()).collect();

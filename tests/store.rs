@@ -1,5 +1,5 @@
 mod common;
-use harness_cms::store;
+use cms_harness::store;
 
 #[test]
 fn creates_all_tables_and_is_idempotent() {

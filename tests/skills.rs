@@ -1,4 +1,4 @@
-use harness_cms::skills::*;
+use cms_harness::skills::*;
 use std::io::Write;
 
 const MD: &str = "---\nname: brand-voice\ndescription: \"Write copy in the house style\"\n---\n\n# Brand voice\n\nUse short sentences.\n";

@@ -1,7 +1,7 @@
 mod common;
 use axum::http::{header, HeaderMap, StatusCode};
 use common::*;
-use harness_cms::{auth, store, web::session, App};
+use cms_harness::{auth, store, web::session, App};
 
 const ADMIN_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; connect-src 'self'; frame-src 'self'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'";
 
@@ -9,7 +9,7 @@ fn location(h: &HeaderMap) -> &str {
     h[header::LOCATION].to_str().unwrap()
 }
 
-async fn login(app: &harness_cms::Shared, email: &str, password: &str) -> (StatusCode, HeaderMap, String) {
+async fn login(app: &cms_harness::Shared, email: &str, password: &str) -> (StatusCode, HeaderMap, String) {
     post_form(app, "/admin/login", None, &[("email", email), ("password", password)]).await
 }
 
@@ -40,7 +40,7 @@ async fn login_sets_a_strict_http_only_cookie_and_redirects() {
 
 #[tokio::test]
 async fn https_origin_adds_secure_and_hsts() {
-    let dir = std::env::temp_dir().join(format!("harness-cms-test-https-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("cms-harness-test-https-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let app = App::new(store::open(":memory:").unwrap(), dir, "https://cms.example".into(), "站".into());
     assert!(app.secure_cookies);
@@ -264,8 +264,8 @@ fn forwarded_for_is_only_trusted_behind_a_proxy() {
     let peer: Option<std::net::SocketAddr> = Some("10.0.0.1:5555".parse().unwrap());
     let mut h = HeaderMap::new();
     h.insert("x-forwarded-for", "6.6.6.6, 9.9.9.9".parse().unwrap());
-    assert_eq!(harness_cms::web::client_key(&h, peer, false), "10.0.0.1");
-    assert_eq!(harness_cms::web::client_key(&h, peer, true), "9.9.9.9");
-    assert_eq!(harness_cms::web::client_key(&HeaderMap::new(), peer, true), "10.0.0.1");
-    assert_eq!(harness_cms::web::client_key(&HeaderMap::new(), None, false), "unknown");
+    assert_eq!(cms_harness::web::client_key(&h, peer, false), "10.0.0.1");
+    assert_eq!(cms_harness::web::client_key(&h, peer, true), "9.9.9.9");
+    assert_eq!(cms_harness::web::client_key(&HeaderMap::new(), peer, true), "10.0.0.1");
+    assert_eq!(cms_harness::web::client_key(&HeaderMap::new(), None, false), "unknown");
 }

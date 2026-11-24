@@ -1,26 +1,26 @@
 mod common;
 use axum::http::{header, HeaderMap, StatusCode};
 use common::*;
-use harness_cms::web::{admin, session};
+use cms_harness::web::{admin, session};
 use serde_json::{json, Value};
 
-fn user(app: &harness_cms::Shared, cookie: &str) -> session::AdminUser {
+fn user(app: &cms_harness::Shared, cookie: &str) -> session::AdminUser {
     let mut h = HeaderMap::new();
     h.insert(header::COOKIE, cookie.parse().unwrap());
     session::from_cookie(&app.conn(), &h).unwrap()
 }
 
-fn nav_of(app: &harness_cms::Shared, cookie: &str) -> Value {
+fn nav_of(app: &cms_harness::Shared, cookie: &str) -> Value {
     let u = user(app, cookie);
     admin::nav(&app.conn(), &u, "web")
 }
 
-fn products(app: &harness_cms::Shared) {
+fn products(app: &cms_harness::Shared) {
     ok(app, &builder(), "create_collection", json!({ "name": "products", "title": "产品", "note": "n",
         "fields": [{ "name": "name", "title": "名称", "type": "text" }] }));
 }
 
-fn record(app: &harness_cms::Shared, collection: &str, title: &str) -> Value {
+fn record(app: &cms_harness::Shared, collection: &str, title: &str) -> Value {
     ok(app, &editor(), "create_record", json!({ "collection": collection, "note": "n", "data": { "title": title } }))["id"].clone()
 }
 

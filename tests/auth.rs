@@ -1,4 +1,4 @@
-use harness_cms::{auth::*, store};
+use cms_harness::{auth::*, store};
 
 #[test]
 fn roles_map_to_scopes() {

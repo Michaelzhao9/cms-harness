@@ -1,4 +1,4 @@
-// harness-cms admin: the one script the admin loads. Every page works without it; this only enhances:
+// cms-harness admin: the one script the admin loads. Every page works without it; this only enhances:
 // the chat (sending without a reload, the event stream, sizes, toasts), the site preview (history, change
 // numbers, pick mode) and forms that show their buttons once something changed. Plain ES2020, no build step.
 

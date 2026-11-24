@@ -1,8 +1,8 @@
 mod common;
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use common::*;
-use harness_cms::web::session;
-use harness_cms::Shared;
+use cms_harness::web::session;
+use cms_harness::Shared;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
@@ -69,7 +69,7 @@ async fn post_multipart(app: &Shared, path: &str, cookie: Option<&str>, parts: &
     if let Some(c) = cookie {
         req = req.header(header::COOKIE, c);
     }
-    let resp = harness_cms::api::router(app.clone()).oneshot(req.body(axum::body::Body::from(body)).unwrap()).await.unwrap();
+    let resp = cms_harness::api::router(app.clone()).oneshot(req.body(axum::body::Body::from(body)).unwrap()).await.unwrap();
     let (status, headers) = (resp.status(), resp.headers().clone());
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     (status, headers, String::from_utf8_lossy(&bytes).into_owned())
@@ -142,7 +142,7 @@ async fn a_record_can_be_edited_by_hand_and_lands_as_a_draft() {
     assert_eq!(item["actor"], "editor@test", "{item}");
     assert_eq!(item["note"], "后台手动修改", "{item}");
     assert_eq!(item["fields"], json!(["date"]), "{item}");
-    let (_, _, live) = get(&app, &format!("/api/v1/content/news/{id}"), Some(&key(&app, &[harness_cms::auth::Scope::Read]))).await;
+    let (_, _, live) = get(&app, &format!("/api/v1/content/news/{id}"), Some(&key(&app, &[cms_harness::auth::Scope::Read]))).await;
     assert_eq!(live["date"], "2026-12-01", "the live copy waits for publish");
 
     let (_, _, page) = get_with(&app, &format!("/admin/r/{id}?saved=1"), Some(&s.0)).await;
@@ -175,7 +175,7 @@ async fn a_record_can_be_edited_by_hand_and_lands_as_a_draft() {
     assert_eq!(status, StatusCode::OK);
     let (status, headers, _) = post_form(&app, &format!("/admin/r/{fresh}/delete"), Some(&s), &[("confirm", "1")]).await;
     assert_eq!((status, location(&headers)), (StatusCode::SEE_OTHER, "/admin/c/news"));
-    assert!(harness_cms::tools::call(&app, &builder(), "get_record", json!({ "id": fresh })).is_err());
+    assert!(cms_harness::tools::call(&app, &builder(), "get_record", json!({ "id": fresh })).is_err());
     // Delete a published one: it waits for publish.
     let (_, headers, _) = post_form(&app, &format!("/admin/r/{timed}/delete"), Some(&s), &[("note", "过期了")]).await;
     assert_eq!(location(&headers), format!("/admin/r/{timed}"));
@@ -186,7 +186,7 @@ async fn a_record_can_be_edited_by_hand_and_lands_as_a_draft() {
     // The status filter behind the tabs is a query_records argument.
     let deleting = ok(&app, &builder(), "query_records", json!({ "collection": "news", "status": ["deleting"] }));
     assert_eq!((deleting["total"].as_i64(), deleting["items"][0]["id"].as_i64()), (Some(1), Some(timed)));
-    assert!(harness_cms::tools::call(&app, &builder(), "query_records", json!({ "collection": "news", "status": ["gone"] })).is_err());
+    assert!(cms_harness::tools::call(&app, &builder(), "query_records", json!({ "collection": "news", "status": ["gone"] })).is_err());
 
     // Discard goes back to the live copy.
     let (status, _, _) = post_form(&app, &format!("/admin/r/{id}/discard"), Some(&s), &[]).await;
@@ -324,7 +324,7 @@ async fn a_post_without_csrf_changes_nothing() {
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{path} without a session");
             let req = Request::post(path.as_str()).header(header::CONTENT_TYPE, "application/x-www-form-urlencoded").header(header::COOKIE, &s.0);
             let body = fields.iter().map(|(k, v)| format!("{k}={}", v.replace(' ', "+"))).collect::<Vec<_>>().join("&");
-            let resp = harness_cms::api::router(app.clone()).oneshot(req.body(axum::body::Body::from(body)).unwrap()).await.unwrap();
+            let resp = cms_harness::api::router(app.clone()).oneshot(req.body(axum::body::Body::from(body)).unwrap()).await.unwrap();
             assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{path} with token {token:?}");
             let mut parts: Vec<(&str, Option<&str>, &[u8])> = vec![("seen", None, seen.as_bytes()), ("title", None, "改了".as_bytes()),
                 ("upload:cover", Some("a.png"), &file), ("file", Some("a.png"), &file)];
@@ -374,12 +374,12 @@ async fn an_editor_cannot_reach_structure_actions() {
     let mut h = HeaderMap::new();
     h.insert(header::COOKIE, s.0.parse().unwrap());
     let actor = session::from_cookie(&app.conn(), &h).unwrap().actor();
-    let e = harness_cms::tools::call(&app, &actor, "create_collection", json!({ "name": "sneaky", "title": "偷偷建", "note": "n",
+    let e = cms_harness::tools::call(&app, &actor, "create_collection", json!({ "name": "sneaky", "title": "偷偷建", "note": "n",
         "fields": [{ "name": "title", "title": "标题", "type": "text" }] })).unwrap_err();
     assert!(e.contains("structure"), "{e}");
-    let e = harness_cms::tools::call(&app, &actor, "discard_draft", json!({ "target": "view:all_news" })).unwrap_err();
+    let e = cms_harness::tools::call(&app, &actor, "discard_draft", json!({ "target": "view:all_news" })).unwrap_err();
     assert!(e.contains("structure"), "{e}");
-    assert!(harness_cms::tools::call(&app, &builder(), "get_collection", json!({ "name": "sneaky" })).is_err());
+    assert!(cms_harness::tools::call(&app, &builder(), "get_collection", json!({ "name": "sneaky" })).is_err());
 }
 
 #[tokio::test]
@@ -435,7 +435,7 @@ async fn media_upload_from_the_record_form_sets_the_field() {
     let path = record(&app, id)["data"]["cover"].as_str().unwrap().to_string();
     assert!(path.starts_with("/uploads/") && path.ends_with(".png"), "{path}");
     let name = path.trim_start_matches("/uploads/").to_string();
-    assert!(harness_cms::media::read(&app, &name).is_some());
+    assert!(cms_harness::media::read(&app, &name).is_some());
 
     let (_, _, page) = get_with(&app, &format!("/admin/r/{id}"), Some(&s.0)).await;
     assert_clean(&page);

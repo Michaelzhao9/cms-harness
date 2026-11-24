@@ -1,10 +1,10 @@
 mod common;
 
 use common::*;
-use harness_cms::chat::{self, StepKind};
-use harness_cms::llm::{Block, BoxFut, Message, Model, Reply, Role, Stop, ToolDef, Usage};
-use harness_cms::web::session::AdminUser;
-use harness_cms::Shared;
+use cms_harness::chat::{self, StepKind};
+use cms_harness::llm::{Block, BoxFut, Message, Model, Reply, Role, Stop, ToolDef, Usage};
+use cms_harness::web::session::AdminUser;
+use cms_harness::Shared;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -225,7 +225,7 @@ async fn a_running_turn_refuses_a_second_message_and_does_not_hold_the_database(
 
     // The model is blocked; a content read still goes through.
     let a = app.clone();
-    let read = tokio::time::timeout(Duration::from_secs(2), tokio::task::spawn_blocking(move || harness_cms::tools::call(&a, &builder(), "list_collections", json!({}))))
+    let read = tokio::time::timeout(Duration::from_secs(2), tokio::task::spawn_blocking(move || cms_harness::tools::call(&a, &builder(), "list_collections", json!({}))))
         .await
         .expect("the database is free while the model thinks")
         .unwrap();
@@ -299,7 +299,7 @@ async fn image_attachments_are_uploaded_and_other_files_refused() {
 async fn installed_skills_are_offered_and_readable() {
     let app = app();
     let md = "---\nname: brand-voice\ndescription: 用品牌语气写文案\n---\n\n句子要短。\n";
-    harness_cms::skills::install(&app.conn(), vec![("SKILL.md".into(), md.into())], "upload", "b@test").unwrap();
+    cms_harness::skills::install(&app.conn(), vec![("SKILL.md".into(), md.into())], "upload", "b@test").unwrap();
     let m = with_model(&app, Scripted {
         replies: Mutex::new(VecDeque::from([tool("s1", "use_skill", json!({"name": "brand-voice"})), done("好")])),
         ..Default::default()

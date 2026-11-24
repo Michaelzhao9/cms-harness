@@ -1,9 +1,9 @@
 mod common;
 use common::*;
-use harness_cms::auth::Scope;
+use cms_harness::auth::Scope;
 use serde_json::{json, Value};
 
-async fn tool(app: &harness_cms::Shared, key: &str, name: &str, args: Value) -> Value {
+async fn tool(app: &cms_harness::Shared, key: &str, name: &str, args: Value) -> Value {
     let (_, out) = post_json(app, "/mcp", Some(key), json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": { "name": name, "arguments": args } })).await;
     assert_eq!(out["result"]["isError"], false, "{name}: {out}");

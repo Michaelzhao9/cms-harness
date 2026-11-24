@@ -1,4 +1,4 @@
-# harness-cms
+# CMS Harness
 
 [中文](#中文) · [English](#english)
 
@@ -14,8 +14,8 @@
 
 ```sh
 cargo build --release
-./target/release/harness-cms key 我的agent write structure publish   # 打印一把密钥，只显示一次
-./target/release/harness-cms                                          # 启动，监听 127.0.0.1:4200
+./target/release/cms-harness key 我的agent write structure publish   # 打印一把密钥，只显示一次
+./target/release/cms-harness                                          # 启动，监听 127.0.0.1:4200
 ```
 
 对外提供服务时，请在前面放一个反向代理（例如 nginx）负责 HTTPS。服务只监听本机地址。
@@ -27,7 +27,7 @@ cargo build --release
 ```json
 {
   "mcpServers": {
-    "harness-cms": {
+    "cms-harness": {
       "type": "http",
       "url": "http://127.0.0.1:4200/mcp",
       "headers": { "Authorization": "Bearer hc_..." }
@@ -94,8 +94,8 @@ cargo build --release
 | `HC_DATA` | `data` | 数据目录，上传的文件也在这里 |
 | `HC_DB` | `<HC_DATA>/harness.db` | 数据库文件 |
 | `HC_ORIGIN` | `http://127.0.0.1:<端口>` | 对外地址 |
-| `HC_SITE_NAME` | `harness-cms` | 站点名称 |
-| `HC_ADMIN_PASSWORD` | 无 | `harness-cms admin` 使用的密码，不设则随机生成 |
+| `HC_SITE_NAME` | `CMS Harness` | 站点名称 |
+| `HC_ADMIN_PASSWORD` | 无 | `cms-harness admin` 使用的密码，不设则随机生成 |
 
 ### 当前范围
 
@@ -119,8 +119,8 @@ Requires Rust 1.85 or newer.
 
 ```sh
 cargo build --release
-./target/release/harness-cms key my-agent write structure publish   # prints a key once
-./target/release/harness-cms                                        # serves on 127.0.0.1:4200
+./target/release/cms-harness key my-agent write structure publish   # prints a key once
+./target/release/cms-harness                                        # serves on 127.0.0.1:4200
 ```
 
 Put a reverse proxy (nginx, Caddy) in front for HTTPS. The server only listens on the loopback address.
@@ -132,7 +132,7 @@ For an MCP client with HTTP transport:
 ```json
 {
   "mcpServers": {
-    "harness-cms": {
+    "cms-harness": {
       "type": "http",
       "url": "http://127.0.0.1:4200/mcp",
       "headers": { "Authorization": "Bearer hc_..." }
@@ -157,7 +157,7 @@ Query parameters: `field=value` (equals); `field__ne`, `__gt`, `__gte`, `__lt`, 
 
 ### Environment
 
-`HC_PORT` (4200), `HC_DATA` (`data`), `HC_DB` (`<HC_DATA>/harness.db`), `HC_ORIGIN` (`http://127.0.0.1:<port>`), `HC_SITE_NAME` (`harness-cms`), `HC_ADMIN_PASSWORD` (used by `harness-cms admin`; random when unset).
+`HC_PORT` (4200), `HC_DATA` (`data`), `HC_DB` (`<HC_DATA>/harness.db`), `HC_ORIGIN` (`http://127.0.0.1:<port>`), `HC_SITE_NAME` (`CMS Harness`), `HC_ADMIN_PASSWORD` (used by `cms-harness admin`; random when unset).
 
 ### Scope of this release
 

@@ -1,4 +1,4 @@
-/* harness-cms preview: change markers drawn over the page. Loaded only by preview pages. */
+/* cms-harness preview: change markers drawn over the page. Loaded only by preview pages. */
 :root { --mark: #f5b700; }
 #hc-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 2147483647; }
 #hc-overlay .hc-box { position: absolute; border-radius: 4px; box-shadow: 0 0 0 1px var(--mark); opacity: .35;

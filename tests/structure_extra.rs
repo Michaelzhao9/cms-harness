@@ -2,7 +2,7 @@ mod common;
 use common::*;
 use serde_json::json;
 
-fn add(app: &harness_cms::Shared, title: &str, slug: &str, tag: Option<&str>) -> i64 {
+fn add(app: &cms_harness::Shared, title: &str, slug: &str, tag: Option<&str>) -> i64 {
     let mut data = json!({ "title": title, "slug": slug });
     if let Some(tag) = tag {
         data["tag"] = json!(tag); // left out entirely when there is none: an explicit null would count as "cleared"
@@ -78,7 +78,7 @@ fn a_name_pending_deletion_is_simply_taken() {
     assert!(e.contains("已存在") && !e.contains("restore_version"), "{e}");
 }
 
-fn items(app: &harness_cms::Shared) {
+fn items(app: &cms_harness::Shared) {
     ok(app, &builder(), "create_collection", json!({ "name": "items", "title": "条目", "note": "n", "fields": [
         { "name": "name", "title": "名称", "type": "text" },
         { "name": "views", "title": "浏览", "type": "number" },
@@ -86,11 +86,11 @@ fn items(app: &harness_cms::Shared) {
     ] }));
 }
 
-fn item(app: &harness_cms::Shared, data: serde_json::Value) -> i64 {
+fn item(app: &cms_harness::Shared, data: serde_json::Value) -> i64 {
     ok(app, &editor(), "create_record", json!({ "collection": "items", "note": "n", "data": data }))["id"].as_i64().unwrap()
 }
 
-fn draft_of(app: &harness_cms::Shared, id: i64) -> serde_json::Value {
+fn draft_of(app: &cms_harness::Shared, id: i64) -> serde_json::Value {
     let json: String = app.conn().query_row("SELECT coalesce(draft, published) FROM records WHERE id = ?1", [id], |r| r.get(0)).unwrap();
     serde_json::from_str(&json).unwrap()
 }

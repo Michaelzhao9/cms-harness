@@ -2,9 +2,9 @@ mod common;
 
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use common::*;
-use harness_cms::chat;
-use harness_cms::llm::{self, Block, BoxFut, Message, Model, Reply, Stop, ToolDef, Usage};
-use harness_cms::Shared;
+use cms_harness::chat;
+use cms_harness::llm::{self, Block, BoxFut, Message, Model, Reply, Stop, ToolDef, Usage};
+use cms_harness::Shared;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
@@ -51,7 +51,7 @@ fn with_model(app: &Shared, replies: Vec<Reply>, gate: Option<Arc<Notify>>) -> A
 fn token_hash(app: &Shared, cookie: &str) -> String {
     let mut h = HeaderMap::new();
     h.insert(header::COOKIE, cookie.parse().unwrap());
-    harness_cms::web::session::from_cookie(&app.conn(), &h).unwrap().token_hash
+    cms_harness::web::session::from_cookie(&app.conn(), &h).unwrap().token_hash
 }
 
 async fn idle(app: &Shared, token: &str) -> chat::Conversation {
@@ -104,7 +104,7 @@ async fn post_multipart(app: &Shared, path: &str, s: &(String, String), fields: 
         .header(header::COOKIE, s.0.as_str())
         .body(axum::body::Body::from(body))
         .unwrap();
-    let resp = harness_cms::api::router(app.clone()).oneshot(req).await.unwrap();
+    let resp = cms_harness::api::router(app.clone()).oneshot(req).await.unwrap();
     let (status, headers) = (resp.status(), resp.headers().clone());
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     (status, headers, String::from_utf8_lossy(&bytes).into_owned())
@@ -116,7 +116,7 @@ async fn event(app: &Shared, cookie: &str, last: Option<&str>) -> (String, Value
     if let Some(l) = last {
         req = req.header("last-event-id", l);
     }
-    let resp = harness_cms::api::router(app.clone()).oneshot(req.body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    let resp = cms_harness::api::router(app.clone()).oneshot(req.body(axum::body::Body::empty()).unwrap()).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(resp.headers()[header::CONTENT_TYPE], "text/event-stream");
     assert_eq!(resp.headers()[header::CACHE_CONTROL], "no-store");
@@ -205,7 +205,7 @@ async fn a_posted_message_runs_a_turn_and_the_event_stream_sends_steps_and_chang
     assert!(page.contains("<span class=\"count\">1</span>"), "{page}");
     // An answer that has nothing new waits, then says so with a comment line and no event.
     let req = Request::get("/admin/chat/events?wait=1").header(header::COOKIE, s.0.as_str()).header("last-event-id", last.as_str());
-    let resp = harness_cms::api::router(app.clone()).oneshot(req.body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    let resp = cms_harness::api::router(app.clone()).oneshot(req.body(axum::body::Body::empty()).unwrap()).await.unwrap();
     let text = String::from_utf8(resp.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
     assert!(text.starts_with("retry: ") && text.contains("\n: ") && !text.contains("data: "), "{text}");
 }
@@ -350,7 +350,7 @@ async fn a_skill_installed_by_upload_is_listed_and_the_chat_sees_it() {
     idle(&app, &token).await;
     assert!(m.seen.lock().unwrap()[0].0.contains("brand-voice"));
     // The chat itself has no way to install one.
-    let actor = harness_cms::web::session::from_cookie(&app.conn(), &{
+    let actor = cms_harness::web::session::from_cookie(&app.conn(), &{
         let mut h = HeaderMap::new();
         h.insert(header::COOKIE, s.0.parse().unwrap());
         h
@@ -366,9 +366,9 @@ async fn a_skill_installed_by_upload_is_listed_and_the_chat_sees_it() {
     assert_eq!(status, StatusCode::OK);
     assert_clean(&page);
     assert!(page.contains("删除技能“brand-voice”？") && page.contains("name=\"confirm\" value=\"1\""), "{page}");
-    assert_eq!(harness_cms::skills::list(&app.conn()).unwrap().len(), 1);
+    assert_eq!(cms_harness::skills::list(&app.conn()).unwrap().len(), 1);
     assert_eq!(post_form(&app, "/admin/settings/skills/brand-voice/delete", Some(&s), &[("confirm", "1")]).await.0, StatusCode::SEE_OTHER);
-    assert!(harness_cms::skills::list(&app.conn()).unwrap().is_empty());
+    assert!(cms_harness::skills::list(&app.conn()).unwrap().is_empty());
     // A broken upload is refused with the page.
     let (status, _, page) = post_multipart(&app, "/admin/settings/skills/install", &s, &[], &[("zip", "x.zip", b"not a zip")]).await;
     assert!(status == StatusCode::BAD_REQUEST && page.contains("压缩包打不开"), "{page}");
@@ -381,12 +381,12 @@ async fn admin_js_and_the_logo_are_served_and_pages_carry_only_the_external_scri
     assert_eq!(status, StatusCode::OK);
     assert_eq!(h[header::CONTENT_TYPE], "text/javascript; charset=utf-8");
     assert!(js.len() > 1000);
-    harness_cms::site::check_file("admin.js", &js).unwrap();
+    cms_harness::site::check_file("admin.js", &js).unwrap();
     let (status, h, svg) = get_with(&app, "/admin/static/logo.svg", None).await;
     assert_eq!((status, h[header::CONTENT_TYPE].to_str().unwrap()), (StatusCode::OK, "image/svg+xml"));
     assert!(svg.starts_with("<svg"));
     let (_, h, login) = get_with(&app, "/admin/login", None).await;
-    assert_eq!(h[header::CONTENT_SECURITY_POLICY], harness_cms::web::ADMIN_CSP);
+    assert_eq!(h[header::CONTENT_SECURITY_POLICY], cms_harness::web::ADMIN_CSP);
     assert!(login.contains("rel=\"icon\" href=\"/admin/static/logo.svg\"") && login.contains("class=\"logo\""), "{login}");
     assert_clean(&login);
     let id = seed(&app);

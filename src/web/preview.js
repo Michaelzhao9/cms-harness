@@ -1,4 +1,4 @@
-// harness-cms preview: draws change markers over the page and talks to the admin that frames it.
+// cms-harness preview: draws change markers over the page and talks to the admin that frames it.
 //
 // The page runs in a sandbox without allow-same-origin, so its own origin is opaque ("null"). It never reaches the
 // admin's DOM: the only channel is postMessage with window.parent. Outgoing messages are addressed to the site's
