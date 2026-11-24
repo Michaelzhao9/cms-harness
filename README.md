@@ -1,62 +1,83 @@
-# CMS Harness
+<p align="center">
+  <img src="docs/images/banner.svg" alt="CMS Harness: say what you want, the AI builds it as a draft, you publish." width="100%">
+</p>
 
-[中文](#中文) · [English](#english)
+<p align="center">
+  <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-1d1d1f"></a>
+  <img alt="Rust 1.85+" src="https://img.shields.io/badge/rust-1.85%2B-1d1d1f">
+  <img alt="One binary + SQLite" src="https://img.shields.io/badge/one%20binary-SQLite-f5b700">
+  <img alt="MCP server" src="https://img.shields.io/badge/MCP-built%20in-1d1d1f">
+  <img alt="中文 / English" src="https://img.shields.io/badge/UI-中文%20%2F%20English-1d1d1f">
+</p>
 
-## 中文
+<p align="center"><b>English</b> · <a href="README.zh-CN.md">中文</a></p>
 
-一个完全独立运行、让 AI 来管理的网站后台。部署一个可执行文件，就有了网站、后台和内置的对话助手：在后台里直接说“首页标题改成……”“加一个预约表单”“网站加个会员登录”，AI 就会去改内容、改页面、建后台界面。你自己的 agent（Claude Code、Codex 或任何支持 MCP 的客户端）也能接进来做同样的事。
+**CMS Harness is a website and its admin in one Rust binary, built to be run by AI.** Open the admin and say *"turn the home page into a studio page"*, *"add a booking form"* or *"let visitors sign up"*. The built-in assistant changes the content, the pages and the admin screens. Every change is a draft until a person presses **Publish**. Your own agent (Claude Code, Codex or any MCP client) can do the same work through the built-in MCP server.
 
-所有修改先存为草稿，只在后台的预览里看得到；点「发布」才上线。每次发布都留有历史，可以恢复。
+It needs no external services. One executable and one SQLite file serve the public site, the admin, the chat, member accounts and the API.
 
-### 快速开始
+<p align="center">
+  <img src="docs/images/workbench-en.webp" alt="The admin: the chat on the left built a studio home page; the preview on the right marks what changed; Publish shows 2 pending changes." width="100%">
+</p>
 
-需要 Rust 1.85 或更新版本。
+## How it works
+
+| 1. Say it | 2. Look at the draft | 3. Publish |
+| --- | --- | --- |
+| Type what you want in the chat, or pick elements in the preview and ask about them. | The assistant writes content, pages and admin screens as **drafts**. The preview marks each change; the live site does not move. | Review the list, uncheck what you don't want, publish. Every release is kept and can be restored. |
+
+## What you get
+
+- **AI that builds, people who publish.** The assistant cannot publish. It treats text in records, pages and uploads as data, never as instructions.
+- **Drafts everywhere.** Content, collections, pages, admin screens and settings are drafts until published. The live site always shows the published version, whoever visits.
+- **A real website.** Pages are HTML with `{{ }}` templates, plus CSS, JavaScript, JSX and TypeScript (transpiled on the fly). React, Vue or Three.js load through an import map, with no build step. You can also upload a site built with Vite.
+- **Admin screens that follow the site.** When the site gains a form, members or orders, the assistant builds the screen to manage them in the same turn. When the feature goes, the screen goes too. Turn on member login and **Members** appears by itself.
+- **Members and access rules.** Sign-up and login for visitors, kept apart from admin accounts. Each collection says who can read it (public, members, each member their own, private) and who can submit to it.
+- **Any model.** Claude, OpenAI, Gemini, DeepSeek, Qwen, Kimi, GLM, Doubao, SiliconFlow, Mistral, xAI, Groq, OpenRouter, a local Ollama or LM Studio, or any OpenAI-compatible API. Paste a key and it lists the models you can use.
+- **Skills.** Install a skill folder (with a `SKILL.md`) from GitHub or a zip. The chat reads it when the task needs it.
+- **Your agent, too.** A built-in MCP server and a REST API with scoped keys (`read`, `write`, `structure`, `publish`).
+- **Chinese and English.** The admin switches in Settings. The chat replies in the admin's language. Built-in pages follow the visitor's browser, and have a 中文 / EN switch.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/publish-en.webp" alt="Publish review: each pending change with its old and new value."></td>
+    <td width="50%"><img src="docs/images/table-en.webp" alt="A collection as a table, with filters for changed and draft records."></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Review before publishing: every change, old against new.</sub></td>
+    <td align="center"><sub>Content tables the assistant builds and keeps in step with the site.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/login-en.webp" alt="The admin sign-in page."></td>
+    <td width="50%"><img src="docs/images/welcome.webp" alt="A fresh site: one welcome page with its name and a link to the admin."></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>The admin sign-in.</sub></td>
+    <td align="center"><sub>A fresh deploy: one page, until you ask for more.</sub></td>
+  </tr>
+</table>
+
+## Quick start
+
+You need Rust 1.85 or newer.
 
 ```sh
+git clone https://github.com/Michaelzhao9/cms-harness.git
+cd cms-harness
 cargo build --release
-./target/release/cms-harness admin 你的邮箱                           # 新建后台管理员，打印密码，只显示一次
-./target/release/cms-harness                                          # 启动，监听 127.0.0.1:4200
+./target/release/cms-harness admin you@example.com    # creates an admin and prints its password once
+./target/release/cms-harness                          # serves on 127.0.0.1:4200
 ```
 
-打开 `http://127.0.0.1:4200/admin` 登录。网站本身在 `http://127.0.0.1:4200/`。
+Sign in at `http://127.0.0.1:4200/admin`. The site is at `http://127.0.0.1:4200/`.
 
-对外提供服务时，请在前面放一个反向代理（例如 nginx）负责 HTTPS。服务只监听本机地址。
+To use the chat, open **Settings → Chat model**, pick a service, paste a key and press **Detect**. You can also set `LLM_PROVIDER` (`anthropic` or `openai`), `LLM_API_KEY`, `LLM_MODEL` and `LLM_BASE_URL` in the environment. Without a model, the admin and the API still work, but there is no chat.
 
-### 对话助手用的模型
+To serve the site publicly, put a reverse proxy (nginx, Caddy) in front for HTTPS. The server only listens on the local address. Set `HC_ORIGIN` to the public address.
 
-在 后台 → 设置 → 对话用的模型 里选一家服务、填密钥、点「检测」，就能看到这把密钥能用的所有型号，选一个保存。内置 Anthropic Claude、OpenAI、Google Gemini、DeepSeek、通义千问、Kimi、智谱 GLM、豆包、硅基流动、Mistral、xAI、Groq、OpenRouter，以及本机的 Ollama、LM Studio 和任何兼容 OpenAI 的接口。也可以用环境变量 `LLM_PROVIDER`（`anthropic` 或 `openai`）、`LLM_API_KEY`、`LLM_MODEL`、`LLM_BASE_URL` 配置，环境变量优先。不配置模型时，后台和接口照常可用，只是没有对话。
+## Connect your agent
 
-对话助手不能发布：它做的每一处修改都是草稿，由人点「发布」上线。它把记录、网页、上传文件里的文字当数据，不当指令。
-
-### 网站
-
-网站由“网站文件”组成：HTML（可以用 `{{ }}` 取内容，比如 `collection("news")`、`record("news", 3)`、当前会员 `member`）、CSS、JavaScript，以及 JSX、TypeScript、TSX（程序自动转换）。React、Vue、Three.js 等库通过 import map 从 `https://esm.sh` 加载，不需要打包；用 Vite 等工具打包好的网站也可以整个上传（工具 `upload_site_bundle`，图片、字体一并上传）。没有对应文件的地址会用内置的简单页面显示公开的集合。
-
-网站永远只显示已发布的内容，不管谁来访问、带什么登录信息。草稿只在后台的预览里看得到。
-
-### 会员和访问规则
-
-工具 `set_member_login` 打开会员注册登录后，网站就有 `/account/signup`、`/account/login`、`/account/logout` 页面和 `/api/v1/members/*` 接口，后台左边自动出现「用户管理」；关掉后它自动消失。会员和后台管理员是两套账号，会员登录不能进后台。
-
-每个集合可以设定：
-- 谁能看（`read`）：`public` 所有人、`members` 登录会员、`owner` 每个会员只看自己的、`private` 只有后台和接口密钥（默认）。
-- 谁能从网站提交（`create`）：`none`（默认）、`members`、`public`。提交的内容直接上线并记下提交人，后台左边会显示“N 条新”。网站表单提交到 `POST /<集合>/new`，接口提交到 `POST /api/v1/content/<集合>`。
-
-### 后台界面
-
-左边的后台界面由对话助手按需要建：网站加了会产生数据的功能（表单、会员、评论、订单……），同一轮里就会建好对应的管理界面；功能删掉时界面也一起删掉。界面可以是表格、卡片或列表，可以按单选字段分组（工具 `set_view`）。
-
-### 技能
-
-后台 → 设置 → 技能 里可以安装技能（一个带 `SKILL.md` 的文件夹：GitHub 文件夹链接、zip 或上传），存在后台的数据库里。对话遇到相关的事会自己去读。技能里的脚本只当参考，不会被运行；技能只能由管理员安装，对话助手自己不能装。
-
-### 网址
-
-后台 → 设置 → 网址 可以选网站和后台用同一个网址（默认），或者后台用单独的网址（比如 `admin.example.com`）。网站会运行不是你自己写的脚本时，建议分开，原因见 [SECURITY.md](SECURITY.md)。
-
-### 接入 agent
-
-支持 HTTP 传输的 MCP 客户端，配置如下：
+Create a key with `cms-harness key <name> [write] [structure] [publish]`, then add the server to any MCP client that speaks HTTP:
 
 ```json
 {
@@ -70,145 +91,100 @@ cargo build --release
 }
 ```
 
-也可以直接用 REST：`GET /api/v1/tools` 列出这把密钥能用的工具和参数说明，`POST /api/v1/tools/<工具名>` 调用。
+Or use REST: `GET /api/v1/tools` lists the tools this key can call with their parameters. `POST /api/v1/tools/<name>` calls one.
 
-### 前台读取内容
+## Reference
 
-`GET /api/v1/content/<集合>` 返回已发布的记录，`GET /api/v1/content/<集合>/<编号>` 返回一条。按集合的“谁能看”规则：公开的不需要密钥；会员能看的需要会员登录或密钥；只看自己的，会员只拿到自己的记录；其余需要有效密钥。
+<details>
+<summary><b>Website pages</b></summary>
 
-| 参数 | 作用 |
+A fresh site has one built-in page: a welcome with the site's name and a link to the admin. Every other page comes from **site files** that the assistant (or your agent) writes:
+
+- HTML with templates: `collection("news", limit=10, sort="-date")`, `record("news", 3)`, the signed-in `member`, `site.name`.
+- CSS, JavaScript, and JSX / TypeScript / TSX, which are transpiled when served.
+- Libraries from `https://esm.sh` through an import map (`set_site_settings`), so no bundler is needed. A site built elsewhere can be uploaded in one piece (`upload_site_bundle`).
+
+The live site always shows the published version, whatever cookies or headers a visitor sends. Drafts only appear in the admin's preview.
+</details>
+
+<details>
+<summary><b>Members and access rules</b></summary>
+
+`set_member_login` turns visitor accounts on. The site then has `/account/signup`, `/account/login` and `/account/logout`, and the `/api/v1/members/*` endpoints. **Members** appears in the admin. Members cannot sign in to the admin.
+
+Each collection sets:
+- who can read it (`read`): `public`, `members`, `owner` (each member sees their own), or `private` (default: admin and keys only);
+- who can submit to it from the site (`create`): `none` (default), `members` or `public`. Submissions go live at once, record who sent them, and show as "N new" in the admin. Forms post to `POST /<collection>/new`; the API takes `POST /api/v1/content/<collection>`.
+</details>
+
+<details>
+<summary><b>Reading content from your own front end</b></summary>
+
+`GET /api/v1/content/<collection>` returns published records and `GET /api/v1/content/<collection>/<id>` returns one, following the collection's `read` rule.
+
+| Parameter | Meaning |
 | --- | --- |
-| `字段=值` | 等于 |
-| `字段__ne` `__gt` `__gte` `__lt` `__lte` `__contains` | 不等于、大于、大于等于、小于、小于等于、包含 |
-| `sort=字段`、`sort=-字段` | 排序，`-` 表示倒序 |
-| `limit`、`offset` | 分页，`limit` 为 1 到 100 |
-| `expand=字段` | 把关联字段展开成目标记录 |
+| `field=value` | equals |
+| `field__ne` `__gt` `__gte` `__lt` `__lte` `__contains` | not equal, greater, at least, less, at most, contains |
+| `sort=field`, `sort=-field` | sort, `-` for descending |
+| `limit`, `offset` | paging, `limit` from 1 to 100 |
+| `expand=field` | replace a relation id with the record |
 
-只有声明了 `index` 或 `unique` 的字段能用来筛选和排序。展开关联时，如果目标集合不公开而请求没有带密钥，这个字段保持为编号。
+Only fields declared with `index` or `unique` can filter and sort.
+</details>
 
-### 上传文件
+<details>
+<summary><b>Uploads</b></summary>
 
-`POST /api/v1/media`，multipart 表单，文件放在名为 `file` 的字段里，需要带 write 权限的密钥，单个文件最大 20 MB。也可以用工具 `upload_media` 以 base64 传（最大 5 MB）。支持 JPEG、PNG、GIF、WebP 和 PDF，按文件内容判断格式，不看扩展名；图片最大四千万像素。
+`POST /api/v1/media` with a multipart field named `file` and a key with `write`, up to 20 MB, or the `upload_media` tool (base64, up to 5 MB). JPEG, PNG, GIF, WebP and PDF are accepted, judged by content rather than extension. Files are stored by content hash at `/uploads/<hash>.<ext>` and cached for a long time. Uploads are public, so do not upload private files.
+</details>
 
-返回的路径形如 `/uploads/<32 位十六进制>.png`，直接用 `GET` 读取。文件名由内容决定，同一个文件只存一份，长期缓存。上传的文件是公开的，不随集合的公开设置变化，不要上传需要保密的文件。
+<details>
+<summary><b>Tools</b></summary>
 
-### 工具
-
-| 工具 | 权限 | 作用 |
+| Tool | Permission | What it does |
 | --- | --- | --- |
-| `list_collections` | read | 列出集合 |
-| `get_collection` | read | 查看一个集合的定义 |
-| `create_collection` | structure | 新建集合 |
-| `update_collection` | structure | 增改删字段、改集合设置 |
-| `delete_collection` | structure | 删除集合（记录保留，可恢复） |
-| `create_record` | write | 新建记录 |
-| `update_record` | write | 修改记录 |
-| `delete_record` | write | 删除记录（可恢复） |
-| `get_record` | read | 读一条记录 |
-| `query_records` | read | 查询记录 |
-| `list_pending` | read | 列出待发布的改动 |
-| `publish` | publish | 发布 |
-| `list_versions` | read | 查看发布历史 |
-| `restore_version` | write | 把历史版本放回草稿 |
-| `discard_draft` | write | 丢弃草稿 |
-| `list_views` | read | 列出后台界面声明 |
-| `set_view` | structure | 新建或修改后台界面声明 |
-| `delete_view` | structure | 删除后台界面声明 |
-| `get_site_notes` | read | 读站点说明 |
-| `set_site_notes` | structure | 修改站点说明 |
-| `upload_media` | write | 上传图片或 PDF |
-| `list_site_files` `get_site_file` | read | 列出、读取网站文件 |
-| `write_site_file` `delete_site_file` `upload_site_bundle` | structure | 写、删网站文件，上传整个打包好的网站 |
-| `get_site_settings` | read | 读网站的 import map 和脚本来源 |
-| `set_site_settings` | structure | 设 import map 和脚本来源（草稿，发布后生效） |
-| `set_member_login` | structure | 打开或关闭会员登录（草稿） |
-| `list_members` | read | 列出会员（不含密码） |
-| `set_member_status` | write | 停用或恢复会员 |
+| `list_collections` `get_collection` | read | list collections, read one |
+| `create_collection` `update_collection` `delete_collection` | structure | create, change, delete (records are kept) |
+| `get_record` `query_records` | read | read records |
+| `create_record` `update_record` `delete_record` | write | write records |
+| `list_pending` `list_versions` | read | pending changes, release history |
+| `publish` | publish | publish |
+| `restore_version` `discard_draft` | write | put a version back as a draft, drop a draft |
+| `list_views` / `set_view` `delete_view` | read / structure | admin screens |
+| `get_site_notes` / `set_site_notes` | read / structure | notes for the assistant |
+| `list_site_files` `get_site_file` | read | read site files |
+| `write_site_file` `delete_site_file` `upload_site_bundle` | structure | write site files, upload a built site |
+| `get_site_settings` / `set_site_settings` | read / structure | site name, import map, script origins |
+| `set_member_login` | structure | turn member accounts on or off |
+| `list_members` / `set_member_status` | read / write | list members, disable or enable one |
+| `upload_media` | write | upload an image or PDF |
 
-改动结构、界面、网站文件和站点说明需要 structure 权限。read 权限总是包含。用 `cms-harness key <名字> [write] [structure] [publish]` 生成密钥。
+Every key can read. Changing structure, screens, site files and notes needs `structure`.
+</details>
 
-### 环境变量
+<details>
+<summary><b>Environment</b></summary>
 
-| 变量 | 默认值 | 作用 |
+| Variable | Default | Meaning |
 | --- | --- | --- |
-| `HC_PORT` | `4200` | 端口 |
-| `HC_DATA` | `data` | 数据目录，上传的文件也在这里 |
-| `HC_DB` | `<HC_DATA>/harness.db` | 数据库文件 |
-| `HC_ORIGIN` | `http://127.0.0.1:<端口>` | 对外地址。必须和浏览器地址栏里的地址完全一致（包括 http/https 和端口），否则后台和网站表单的提交会被拒绝 |
-| `HC_SITE_NAME` | `CMS Harness` | 站点名称 |
-| `HC_ADMIN_PASSWORD` | 无 | `cms-harness admin` 使用的密码，不设则随机生成 |
-| `HC_TRUST_PROXY` | 无 | 反向代理和本程序在同一台机器上时不用设（程序自动认它加的 `X-Forwarded-For`）；代理在别的机器上时设为 `1`，登录、注册和提交的频率限制才会按访客区分 |
-| `LLM_PROVIDER` `LLM_API_KEY` `LLM_MODEL` `LLM_BASE_URL` | 无 | 对话助手用的模型，见上文；`LLM_API_KEY` 不设时读 `ANTHROPIC_API_KEY` |
-| `HC_ADMIN_ORIGIN` | 无 | 后台单独的网址（比如 `https://admin.example.com`），设了就是“分开网址”；设成 `off` 强制“同一个网址”。会盖过 设置 → 网址 里的选择。进不去后台时也可以运行 `cms-harness admin-origin off` 切回同一个网址，正在运行的服务马上生效 |
+| `HC_PORT` | `4200` | port |
+| `HC_DATA` | `data` | data folder, uploads included |
+| `HC_DB` | `<HC_DATA>/harness.db` | database file |
+| `HC_ORIGIN` | `http://127.0.0.1:<port>` | the public address, exactly as the browser shows it |
+| `HC_SITE_NAME` | `CMS Harness` | the name until one is set in Settings |
+| `HC_ADMIN_PASSWORD` | random | password for `cms-harness admin` |
+| `HC_TRUST_PROXY` | unset | `1` when the reverse proxy runs on another machine |
+| `HC_ADMIN_ORIGIN` | unset | a separate admin address (`https://admin.example.com`), or `off` |
+| `LLM_PROVIDER` `LLM_API_KEY` `LLM_MODEL` `LLM_BASE_URL` | unset | the chat model; overrides Settings |
 
-用 nginx 时，在 `location` 里加上 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` 和 `proxy_set_header Host $host;`，否则所有访客会被当成同一个人计算频率限制。Caddy 默认就会加。
+With nginx, add `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` and `proxy_set_header Host $host;` so rate limits tell visitors apart. Caddy does this by default.
+</details>
 
-### 许可证
+## Security
 
-本项目以 [AGPL-3.0](LICENSE) 发布。用它搭建的网站、通过接口读取内容的前台、存在数据库里的内容，都不是本项目的衍生作品，不受这份许可证约束；只有修改了本项目代码并对外提供服务时，才需要公开你的修改。
+Read [SECURITY.md](SECURITY.md) before you run scripts on the site that you did not write. It explains when to give the admin its own address (**Settings → Address**).
 
-贡献代码需要签署贡献者授权协议，见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+## License
 
-## English
-
-A website backend that runs entirely on its own and is managed by AI. Deploy one binary and you have a website, an admin and a built-in chat: say "change the home headline", "add a booking form" or "add member login" and it edits content, pages and admin screens. Your own agent (Claude Code, Codex, any MCP client) can connect and do the same.
-
-Every change is a draft that only the admin's preview shows; publishing makes it live. Every release keeps history you can restore from.
-
-### Quick start
-
-Requires Rust 1.85 or newer.
-
-```sh
-cargo build --release
-./target/release/cms-harness admin you@example.com                 # creates an admin, prints the password once
-./target/release/cms-harness                                        # serves on 127.0.0.1:4200
-```
-
-The admin is at `/admin`, the website at `/`. The chat's model is set in 设置 → 对话用的模型 (pick a service, paste a key, detect its models) or with `LLM_PROVIDER` (`anthropic`|`openai`), `LLM_API_KEY`, `LLM_MODEL`, `LLM_BASE_URL`. The chat never publishes.
-
-The website is made of site files: HTML with `{{ }}` content tags, CSS, JS, and JSX/TS/TSX transpiled on the fly; React, Vue or Three.js load through an import map from esm.sh, and a built site (Vite and the like) uploads as a zip. The live site serves only published content to everyone; drafts show only in the admin's preview.
-
-`set_member_login` turns on member sign-up and login (`/account/*`, `/api/v1/members/*`) and the admin gains 用户管理 while it is on. Collections set who may read (`public`, `members`, `owner`, `private`) and who may add from the site (`none`, `members`, `public`; live at once, owner stamped). Skills (folders with a `SKILL.md`) are installed in 设置 and read by the chat; nothing in them runs. See [SECURITY.md](SECURITY.md) for site and admin addresses.
-
-Put a reverse proxy (nginx, Caddy) in front for HTTPS. The server only listens on the loopback address.
-
-### Connect an agent
-
-For an MCP client with HTTP transport:
-
-```json
-{
-  "mcpServers": {
-    "cms-harness": {
-      "type": "http",
-      "url": "http://127.0.0.1:4200/mcp",
-      "headers": { "Authorization": "Bearer hc_..." }
-    }
-  }
-}
-```
-
-Or use REST: `GET /api/v1/tools` lists the tools your key may call with their JSON Schemas; `POST /api/v1/tools/<name>` calls one.
-
-### Read content from your site
-
-`GET /api/v1/content/<collection>` returns published records; `GET /api/v1/content/<collection>/<id>` returns one, following the collection's read rule (public: anyone; members: a logged-in member or a key; owner: a member's own records or a key; private: a key).
-
-Uploads: `POST /api/v1/media` (multipart, field `file`, write scope, up to 20 MB) or the `upload_media` tool (base64, up to 5 MB). JPEG, PNG, GIF, WebP and PDF are accepted, detected from the content. Files are served at `/uploads/<32 hex>.<ext>`, named by content, cached long-term, and public regardless of collection settings.
-
-Query parameters: `field=value` (equals); `field__ne`, `__gt`, `__gte`, `__lt`, `__lte`, `__contains`; `sort=field` or `sort=-field`; `limit` (1 to 100) and `offset`; `expand=field` for relation fields. Only fields declared with `index` or `unique` can be filtered or sorted on.
-
-### Tools
-
-Collections, records, publishing and history, admin views (`set_view` with table, cards or list layouts), site notes, uploads, site files (`list_site_files`, `get_site_file`, `write_site_file`, `delete_site_file`, `upload_site_bundle`), site settings (`get_site_settings`, `set_site_settings`) and members (`set_member_login`, `list_members`, `set_member_status`). Scopes are `read` (always included), `write`, `structure` and `publish`; the table in the Chinese section lists which tool needs which.
-
-### Environment
-
-`HC_PORT` (4200), `HC_DATA` (`data`), `HC_DB` (`<HC_DATA>/harness.db`), `HC_ORIGIN` (`http://127.0.0.1:<port>`), `HC_SITE_NAME` (`CMS Harness`), `HC_ADMIN_PASSWORD` (used by `cms-harness admin`; random when unset), `HC_TRUST_PROXY` (`1` when the proxy runs on another machine). With nginx add `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` so rate limits tell visitors apart. `HC_ADMIN_ORIGIN`: the admin's own origin (e.g. `https://admin.example.com`) for separate site and admin addresses, or `off` to force one shared address; it overrides 设置 → 网址. `cms-harness admin-origin <url|off>` changes the saved choice and applies to a running server at once.
-
-### License
-
-[AGPL-3.0](LICENSE). Sites built with it, front ends that read content over the API, and the content stored in it are not derivative works and are not covered by this license; only changes to this project's own code, offered as a service, must be shared.
-
-Contributions require a contributor license agreement; see [CONTRIBUTING.md](CONTRIBUTING.md).
+[AGPL-3.0](LICENSE). Sites built with CMS Harness, front ends that read its API, and the content in its database are not derivative works. You only need to share your changes if you modify CMS Harness itself and offer it as a service. Contributions need a CLA; see [CONTRIBUTING.md](CONTRIBUTING.md).

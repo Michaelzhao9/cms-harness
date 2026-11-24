@@ -369,6 +369,8 @@ fn step_label(name: &str, input: &Value) -> String {
         "delete_site_file" => format!("删除页面文件 {}", s("path")),
         "set_view" => format!("修改界面 {}", s("name")),
         "set_site_notes" => "修改站点说明".into(),
+        "set_site_settings" => "修改网站设置".into(),
+        "set_member_login" => "设置会员登录".into(),
         USE_SKILL => format!("使用技能 {}", s("name")),
         READ_SKILL_FILE => format!("查看技能 {} 的 {}", s("name"), s("path")),
         ASK_USER => "向你提问".into(),
@@ -388,6 +390,12 @@ fn write_target(name: &str, input: &Value, result: &Value) -> Option<(String, Op
         "write_site_file" | "delete_site_file" => input["path"].as_str().map(|p| (format!("file:{p}"), None)),
         "set_view" | "delete_view" => coll.map(|n| (format!("view:{n}"), None)),
         "set_site_notes" => Some(("notes".into(), None)),
+        // ponytail: one setting per call in the change list (the name first); list each if calls often change several.
+        "set_site_settings" => ["name", "import_map", "script_origins"]
+            .into_iter()
+            .find(|k| input.get(*k).is_some())
+            .map(|k| (format!("setting:{}", if k == "name" { "site_name" } else { k }), None)),
+        "set_member_login" => Some(("setting:member_login".into(), None)),
         "restore_version" | "discard_draft" => input["target"].as_str().map(|t| (t.to_string(), None)),
         _ => None,
     }
