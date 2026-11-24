@@ -4,10 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>登录 · {{ site_name }}</title>
+<link rel="icon" href="/admin/static/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/admin/static/admin.css?v={{ css_v }}">
 </head>
 <body class="plain">
 <main class="login">
+<img class="logo" src="/admin/static/logo.svg" alt="" width="48" height="48">
 <h1>登录 {{ site_name }} 后台</h1>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 <form method="post" action="/admin/login">

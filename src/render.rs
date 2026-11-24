@@ -6,9 +6,11 @@ use sha2::{Digest, Sha256};
 use std::sync::LazyLock;
 
 pub const ADMIN_CSS: &str = include_str!("web/admin.css");
+pub const ADMIN_JS: &str = include_str!("web/admin.js");
 
 /// Short content hash of the stylesheet: pages link `admin.css?v=<this>`, so the long cache never serves a stale copy.
 pub static CSS_VERSION: LazyLock<String> = LazyLock::new(|| hex::encode(Sha256::digest(ADMIN_CSS))[..12].to_string());
+pub static JS_VERSION: LazyLock<String> = LazyLock::new(|| hex::encode(Sha256::digest(ADMIN_JS))[..12].to_string());
 
 static ADMIN: LazyLock<Environment<'static>> = LazyLock::new(|| {
     let mut env = Environment::new();
@@ -18,6 +20,8 @@ static ADMIN: LazyLock<Environment<'static>> = LazyLock::new(|| {
         ("base.html", include_str!("web/templates/base.html")),
         ("nav.html", include_str!("web/templates/nav.html")),
         ("home.html", include_str!("web/templates/home.html")),
+        ("chat.html", include_str!("web/templates/chat.html")),
+        ("chat_log.html", include_str!("web/templates/chat_log.html")),
         ("collection.html", include_str!("web/templates/collection.html")),
         ("record.html", include_str!("web/templates/record.html")),
         ("media.html", include_str!("web/templates/media.html")),
@@ -29,6 +33,7 @@ static ADMIN: LazyLock<Environment<'static>> = LazyLock::new(|| {
         env.add_template(name, source).expect("embedded admin template parses");
     }
     env.add_global("css_v", CSS_VERSION.as_str());
+    env.add_global("js_v", JS_VERSION.as_str());
     env
 });
 

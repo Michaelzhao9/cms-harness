@@ -57,6 +57,7 @@ pub(super) fn tool(app: &App, user: &AdminUser, name: &str, args: Value) -> Resu
 /// The context `base.html` needs around a page's own.
 pub(super) fn shell(app: &App, user: &AdminUser, current: &str, mut ctx: Value) -> Value {
     let nav = nav(&app.conn(), user, current);
+    ctx["chat"] = super::chat::view(app, user);
     ctx["site_name"] = json!(app.site_name);
     ctx["csrf"] = json!(user.csrf);
     ctx["nav"] = nav;
@@ -504,7 +505,7 @@ fn record_page(app: &App, user: &AdminUser, id: i64, params: &Params, typed: Opt
 pub(super) struct Posted {
     pub(super) fields: HashMap<String, Vec<String>>,
     /// (input name, file name, bytes); empty file inputs are left out.
-    files: Vec<(String, String, Vec<u8>)>,
+    pub(super) files: Vec<(String, String, Vec<u8>)>,
 }
 
 impl Posted {
@@ -644,7 +645,8 @@ fn finish_blocking(app: &App, user: &AdminUser, id: i64, posted: Posted, delete:
         let ctx = json!({
             "heading": "删除这条草稿？",
             "message": format!("“{}”从没发布过，删除后不会留下历史版本，也不能找回。", record_title(&def, &current, id)),
-            "id": id,
+            "action": format!("/admin/r/{id}/delete"),
+            "back": format!("/admin/r/{id}"),
             "note": posted.note(DELETE_NOTE),
             "button": "确认删除",
         });

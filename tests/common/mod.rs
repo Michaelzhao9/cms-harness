@@ -152,3 +152,16 @@ pub async fn post_form_with(app: &Shared, path: &str, session: Option<&(String, 
     }
     send_text(app, req.body(axum::body::Body::from(form_encode(&all))).unwrap()).await
 }
+
+/// Every `<script` on an admin page is the one external `admin.js`, with nothing inside; no inline styles.
+pub fn assert_only_admin_js(page: &str) {
+    for (i, _) in page.match_indices("<script") {
+        let rest = &page[i..];
+        assert!(rest.starts_with("<script type=\"module\" src=\"/admin/static/admin.js?v="), "unexpected script: {}", &rest[..rest.len().min(160)]);
+        let end = rest.find('>').unwrap();
+        assert!(rest[end + 1..].starts_with("</script>"), "script with content: {}", &rest[..rest.len().min(160)]);
+    }
+    for bad in ["<style", "style="] {
+        assert!(!page.contains(bad), "page contains {bad}: {page}");
+    }
+}

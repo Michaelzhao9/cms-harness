@@ -4,29 +4,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+{% if workbench and chat.running %}<noscript><meta http-equiv="refresh" content="2"></noscript>
+{% endif -%}
 <title>{% block title %}后台{% endblock %} · {{ site_name }}</title>
+<link rel="icon" href="/admin/static/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/admin/static/admin.css?v={{ css_v }}">
+<script type="module" src="/admin/static/admin.js?v={{ js_v }}"></script>
 </head>
 <body class="mark-{{ nav.mark }}">
-<div class="shell{% if nav.collapsed %} collapsed{% endif %}">
+<div class="shell chat-{{ nav.chat }}{% if nav.collapsed %} collapsed{% endif %}{% if chat.running %} busy{% endif %}{% if workbench %} workbench{% endif %}" data-chat-id="{{ chat.id }}">
 {% include "nav.html" %}
-<aside class="chat" aria-label="对话">
-<div class="chat-bar">
-<form method="post" action="/admin/prefs">
-<input type="hidden" name="csrf" value="{{ csrf }}">
-<input type="hidden" name="nav" value="{{ 'open' if nav.collapsed else 'collapsed' }}">
-<button type="submit" class="ib" aria-label="{{ '展开导航' if nav.collapsed else '收起导航' }}">{{ i.icon("sidebar-simple", 20) }}</button>
-</form>
-<form method="post" action="/admin/chat/new">
-<input type="hidden" name="csrf" value="{{ csrf }}">
-<button type="submit" class="ib" aria-label="新对话">{{ i.icon("plus", 18) }}</button>
-</form>
-</div>
-{% block chat %}{% endblock %}
-</aside>
+{% include "chat.html" %}
 <main class="main">
 {% block main %}{% endblock %}
 </main>
 </div>
+<div class="toasts" aria-live="polite" data-toasts></div>
 </body>
 </html>

@@ -37,9 +37,7 @@ fn record(app: &Shared, id: i64) -> Value {
 
 /// Every admin page: no scripts, no inline styles the CSP would drop.
 fn assert_clean(page: &str) {
-    for bad in ["<script", "<style", "style="] {
-        assert!(!page.contains(bad), "page contains {bad}: {page}");
-    }
+    assert_only_admin_js(page);
 }
 
 /// The value of the first `name="<name>" value="…"` attribute pair.
@@ -364,7 +362,7 @@ async fn an_editor_cannot_reach_structure_actions() {
         }
         // Every form posts to a record-level route or the shell's own.
         for action in page.split("action=\"").skip(1).map(|a| &a[..a.find('"').unwrap()]) {
-            let allowed = ["/admin/prefs", "/admin/chat/new", "/admin/c/news/new", "/admin/media"].contains(&action)
+            let allowed = ["/admin/prefs", "/admin/chat", "/admin/chat/new", "/admin/chat/stop", "/admin/c/news/new", "/admin/media"].contains(&action)
                 || action.strip_prefix("/admin/r/").is_some_and(|rest| {
                     let n = rest.trim_end_matches("/delete").trim_end_matches("/discard");
                     n.parse::<i64>().is_ok()

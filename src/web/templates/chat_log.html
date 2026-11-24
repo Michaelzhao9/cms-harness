@@ -1,0 +1,58 @@
+{#- The conversation, also sent whole by the event stream. Needs `chat` (web::chat::view) and `csrf`. -#}
+{%- import "icons.html" as i -%}
+{%- if not chat.turns -%}
+{%- if not chat.model -%}
+<div class="setup">
+<h2>还没有配置对话用的模型</h2>
+{% if chat.builder %}<p>到<a href="/admin/settings#s-model">设置 → 对话用的模型</a>选一家服务、填上密钥；也可以在服务器上设置环境变量 LLM_API_KEY 后重启。</p>
+{%- else %}<p>请搭建者到<a href="/admin/settings#s-model">设置 → 对话用的模型</a>里配置，或者在服务器上设置环境变量 LLM_API_KEY。</p>{% endif %}
+<p class="small">不用对话时，后台的其他功能照常可用。</p>
+</div>
+{%- else -%}
+<div class="empty">
+<h2>想改哪里，直接说</h2>
+{% for t in ["看看网站现在有哪些内容", "检查一下有哪些改动还没发布", "把首页的介绍改得更简短一些"] -%}
+<form method="post" action="/admin/chat"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="tip" name="text" value="{{ t }}"><span class="grow">{{ t }}</span>{{ i.icon("arrow-up", 15) }}</button></form>
+{% endfor -%}
+</div>
+{%- endif -%}
+{%- else -%}
+{%- for t in chat.turns %}
+<div class="turn">
+{% if t.text or t.images %}<div class="bubble">{{ t.text }}{% if t.images %}<span class="att">附了 {{ t.images }} 张图</span>{% endif %}</div>{% endif %}
+{% if t.steps -%}
+<details class="steps" data-k="{{ t.k }}"{% if t.running %} open{% endif %}>
+<summary>{{ i.icon("caret-right", 11) }}<b>过程</b><span>{{ t.steps|length }} 步</span></summary>
+<ol>
+{% for s in t.steps %}<li class="step {{ s.kind }}{% if s.error %} failed{% endif %}"><span class="dot" aria-hidden="true"></span><span>{{ s.label }}{% if s.error %}<span class="why">没做成：{{ s.error }}</span>{% endif %}</span></li>
+{% endfor -%}
+</ol>
+</details>
+{%- endif %}
+{% for r in t.replies %}<p class="reply">{{ r }}</p>
+{% endfor -%}
+{% if t.streaming %}<p class="reply live">{{ t.streaming }}</p>{% endif %}
+{% if t.changes -%}
+<div class="card changes">
+<div class="card-head"><span class="t">改动</span><span class="sum">{{ t.changes|length }} 处</span>{% if chat.pending %}<a class="txt" href="/admin/publish">去发布</a>{% endif %}</div>
+{% for c in t.changes %}<a class="chg" href="{{ c.href|safe }}"{% if c.n %} data-n="{{ c.n }}"{% endif %}{% if c.page %} data-page="{{ c.page|safe }}"{% endif %}>
+{%- if c.n %}<span class="pin">{{ c.n }}</span>{% else %}<span class="pin done" title="已上线或已放弃">{{ i.icon("check", 10) }}</span>{% endif -%}
+<span class="what"><span class="crumb">{{ c.crumb|join(" · ") }}{% if c.field %} · {{ c.field }}{% endif %}</span>
+{%- if c.before %}<s>{{ c.before }}</s>{% endif %}{% if c.after %}<b>{{ c.after }}</b>{% endif %}</span>{{ i.icon("caret-right", 14) }}</a>
+{% endfor -%}
+</div>
+{%- endif %}
+{% if t.question -%}
+<div class="ask">
+<p class="q">{{ t.question.text }}</p>
+{% if t.question.options %}<form class="opts" method="post" action="/admin/chat"><input type="hidden" name="csrf" value="{{ csrf }}">
+{% for o in t.question.options %}<button type="submit" class="opt" name="text" value="{{ o }}">{{ o }}</button>
+{% endfor %}</form>{% endif %}
+</div>
+{%- endif %}
+{% if t.error %}<p class="note bad" role="alert">{{ t.error }}</p>{% endif %}
+{% if t.stopped %}<p class="stopped">已停下。说一声“继续”可以接着做。</p>{% endif %}
+{% if t.ok and (t.steps or t.replies) %}<p class="ok">{{ i.icon("check", 14) }}这一轮做完了{% if t.changes %}，改动都是草稿，发布后访客才看得到{% endif %}。</p>{% endif %}
+</div>
+{%- endfor %}
+{%- endif %}

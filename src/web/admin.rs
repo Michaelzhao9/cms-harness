@@ -1,7 +1,6 @@
 //! Admin pages: the shared nav, the shell's home page, the nav preference, the publish review and the release history.
 
 use super::content::{self, Out};
-use super::page;
 use super::session::{self, AdminUser};
 use crate::auth::Scope;
 use crate::changes::{self, Target};
@@ -61,20 +60,12 @@ pub fn nav(conn: &Connection, user: &AdminUser, current: &str) -> Value {
         "current": current,
         "collapsed": user.prefs["nav"] == "collapsed",
         "mark": mark,
-        "chat": if user.prefs["chat"] == "floating" { "floating" } else { "docked" },
+        "chat": user.prefs["chat"].as_str().filter(|c| CHAT_MODES.contains(c)).unwrap_or("docked"),
         // Task 11 turns this on with member login.
         "members": false,
         // A database error leaves the nav without collections rather than failing the page.
         "collections": nav_collections(conn).unwrap_or_default(),
     })
-}
-
-/// The workbench: chat column and the site preview.
-pub async fn home(State(app): State<Shared>, Extension(user): Extension<AdminUser>) -> Response {
-    let a = app.clone();
-    let u = user.clone();
-    let nav = tokio::task::spawn_blocking(move || nav(&a.conn(), &u, "web")).await.unwrap_or(Value::Null);
-    page(StatusCode::OK, "home.html", json!({ "site_name": app.site_name, "origin": app.origin, "csrf": user.csrf, "nav": nav }))
 }
 
 #[derive(Deserialize)]
@@ -83,10 +74,15 @@ pub struct PrefsForm {
     csrf: String,
     #[serde(default)]
     nav: String,
+    #[serde(default)]
+    chat: String,
 }
 
+/// The chat's sizes: the left panel, the bar at the bottom of the work area, the round button.
+pub const CHAT_MODES: [&str; 3] = ["docked", "floating", "mini"];
+
 /// The path to go back to: the `Referer` when it is one of our own `/admin` pages, else `/admin`.
-fn back_to(origin: &str, headers: &HeaderMap) -> String {
+pub(super) fn back_to(origin: &str, headers: &HeaderMap) -> String {
     headers
         .get(header::REFERER)
         .and_then(|v| v.to_str().ok())
@@ -100,11 +96,13 @@ pub async fn prefs(State(app): State<Shared>, Extension(user): Extension<AdminUs
     if let Err(s) = session::check_csrf(&user, &f.csrf) {
         return (s, "表单已失效，请刷新页面后再试。").into_response();
     }
-    if !matches!(f.nav.as_str(), "collapsed" | "open") {
-        return (StatusCode::BAD_REQUEST, "导航只能收起（collapsed）或展开（open）。").into_response();
-    }
+    let (key, value) = match (f.nav.as_str(), f.chat.as_str()) {
+        ("collapsed" | "open", "") => ("nav", f.nav),
+        ("", c) if CHAT_MODES.contains(&c) => ("chat", f.chat),
+        _ => return (StatusCode::BAD_REQUEST, "导航只能收起（collapsed）或展开（open）；对话只能是 docked、floating 或 mini。").into_response(),
+    };
     let a = app.clone();
-    let saved = tokio::task::spawn_blocking(move || session::set_pref(&a.conn(), &user.token_hash, "nav", &f.nav))
+    let saved = tokio::task::spawn_blocking(move || session::set_pref(&a.conn(), &user.token_hash, key, &value))
         .await
         .unwrap_or_else(|e| Err(format!("服务器内部错误：{e}")));
     match saved {

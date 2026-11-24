@@ -12,7 +12,7 @@
 {% endfor -%}
 {% if done.more %}<li class="by">另有 {{ done.more }} 项</li>{% endif %}
 </ul>
-<div class="actions"><a class="btn2" href="/admin/releases">看发布记录</a><a class="txt" href="/admin">回到网页</a></div>
+<div class="actions"><a class="btn2" href="/admin/releases">看发布记录</a><a class="txt" href="/admin?published=1">回到网页</a></div>
 </section>
 {%- else -%}
 <form class="review" method="post" action="/admin/publish" aria-labelledby="pub-h">

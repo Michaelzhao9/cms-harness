@@ -28,11 +28,9 @@ fn location(h: &HeaderMap) -> &str {
     h[header::LOCATION].to_str().unwrap()
 }
 
-/// Every admin page a test renders goes through here: no scripts, and no inline styles the CSP would drop.
+/// Every admin page a test renders goes through here: only the external admin.js, and no inline styles the CSP would drop.
 fn assert_clean(page: &str) {
-    for bad in ["<script", "<style", "style="] {
-        assert!(!page.contains(bad), "page contains {bad}: {page}");
-    }
+    assert_only_admin_js(page);
 }
 
 #[tokio::test]
@@ -135,7 +133,7 @@ async fn collapsing_the_nav_is_remembered_for_the_session() {
     let app = app();
     let b = admin_session(&app, "builder").await;
     let e = admin_session(&app, "editor").await;
-    let shell = |body: &str| if body.contains("class=\"shell collapsed\"") { "collapsed" } else { "open" };
+    let shell = |body: &str| if body.contains("class=\"shell chat-docked collapsed") { "collapsed" } else { "open" };
     let referer = |path: &str| format!("http://127.0.0.1:4200{path}");
 
     assert_eq!(shell(&get_with(&app, "/admin", Some(&b.0)).await.2), "open");

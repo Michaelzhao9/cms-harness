@@ -113,6 +113,9 @@ fn serve(conn: rusqlite::Connection, data: PathBuf, port: String) -> ExitCode {
     }
     let origin = env("HC_ORIGIN", &format!("http://127.0.0.1:{port}"));
     let app = App::new(conn, data, origin.trim_end_matches('/').to_string(), env("HC_SITE_NAME", "harness-cms"));
+    if let Some(env) = harness_cms::llm::Settings::from_env() {
+        let _ = app.env_model.set(env);
+    }
     let model = harness_cms::llm::effective(&app.conn());
     if let Some(settings) = model {
         app.set_model(settings.client());

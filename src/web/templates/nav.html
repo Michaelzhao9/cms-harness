@@ -3,6 +3,14 @@
 <a class="{{ cls }}" href="{{ href|safe }}"{% if nav.current == key %} aria-current="page"{% endif %}{% if nav.collapsed %} title="{{ label }}"{% endif %}>{{ i.icon(icon) }}<span class="label">{{ label }}</span></a>
 {%- endmacro -%}
 <nav class="nav" aria-label="导航">
+<div class="brand">
+<img class="logo" src="/admin/static/logo.svg" alt="" width="22" height="22"><span class="label">{{ site_name }}</span>
+<form class="navtoggle" method="post" action="/admin/prefs">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="nav" value="{{ 'open' if nav.collapsed else 'collapsed' }}">
+<button type="submit" class="ib sm" aria-label="{{ '展开导航' if nav.collapsed else '收起导航' }}">{{ i.icon("sidebar-simple", 18) }}</button>
+</form>
+</div>
 {{ item("/admin", "web", "网页", "browser") }}
 <span class="rule" aria-hidden="true"></span>
 <span class="cap">内容与表单</span>

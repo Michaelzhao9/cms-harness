@@ -1,6 +1,7 @@
 //! The admin web UI: router, session gate, Origin check and security headers.
 
 pub mod admin;
+pub mod chat;
 pub mod content;
 pub mod session;
 pub mod settings;
@@ -18,13 +19,19 @@ use serde_json::json;
 use session::AdminUser;
 use std::net::SocketAddr;
 
-pub const ADMIN_CSP: &str =
-    "default-src 'none'; style-src 'self'; img-src 'self' https: data:; frame-src 'self'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'";
+pub const ADMIN_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; connect-src 'self'; frame-src 'self'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'";
+
+/// The admin's mark, also its favicon.
+pub const LOGO_SVG: &str = include_str!("logo.svg");
 
 pub fn router(app: Shared) -> Router {
     Router::new()
-        .route("/admin", get(admin::home))
+        .route("/admin", get(chat::home))
         .route("/admin/prefs", post(admin::prefs))
+        .route("/admin/chat", post(chat::post).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
+        .route("/admin/chat/new", post(chat::new))
+        .route("/admin/chat/stop", post(chat::stop))
+        .route("/admin/chat/events", get(chat::events))
         .route("/admin/c/{name}", get(content::collection_list))
         .route("/admin/c/{name}/new", post(content::create).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
         .route("/admin/v/{name}", get(content::view_list))
@@ -44,9 +51,15 @@ pub fn router(app: Shared) -> Router {
         .route("/admin/settings/admins/{id}/reset", post(settings::reset_admin))
         .route("/admin/settings/admins/{id}/delete", post(settings::remove_admin))
         .route("/admin/settings/appearance", post(settings::appearance))
+        .route("/admin/settings/model", post(settings::save_model))
+        .route("/admin/settings/model/detect", post(settings::detect_models))
+        .route("/admin/settings/skills/install", post(settings::install_skill).layer(DefaultBodyLimit::max(settings::SKILL_BODY_LIMIT)))
+        .route("/admin/settings/skills/{name}/{action}", post(settings::skill_action))
         .route("/admin/login", get(login_page).post(login))
         .route("/admin/logout", post(logout))
         .route("/admin/static/admin.css", get(css))
+        .route("/admin/static/admin.js", get(js))
+        .route("/admin/static/logo.svg", get(logo))
         .route("/_hc/preview.js", get(site::preview_js))
         .route("/_hc/preview.css", get(site::preview_css))
         .fallback(site::serve)
@@ -124,6 +137,15 @@ async fn css() -> Response {
     (headers, render::ADMIN_CSS).into_response()
 }
 
+async fn js() -> Response {
+    let headers = [(header::CONTENT_TYPE, "text/javascript; charset=utf-8"), (header::CACHE_CONTROL, "public, max-age=31536000, immutable")];
+    (headers, render::ADMIN_JS).into_response()
+}
+
+async fn logo() -> Response {
+    ([(header::CONTENT_TYPE, "image/svg+xml"), (header::CACHE_CONTROL, "public, max-age=86400")], LOGO_SVG).into_response()
+}
+
 async fn login_page(State(app): State<Shared>) -> Response {
     page(StatusCode::OK, "login.html", json!({ "site_name": app.site_name }))
 }
@@ -169,6 +191,7 @@ async fn logout(State(app): State<Shared>, Extension(user): Extension<AdminUser>
     if let Err(s) = session::check_csrf(&user, &f.csrf) {
         return (s, "表单已失效，请刷新页面后再试。").into_response();
     }
+    crate::chat::reset(&app, &user.token_hash);
     let a = app.clone();
     let _ = tokio::task::spawn_blocking(move || session::logout(&a.conn(), &user.token_hash)).await;
     ([(header::SET_COOKIE, session::clear_cookie(app.secure_cookies))], Redirect::to("/admin/login")).into_response()

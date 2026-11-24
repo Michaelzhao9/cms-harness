@@ -66,14 +66,30 @@ pub struct Conversation {
     pub streaming: String,
     /// Bumped on every update; the event stream sends a fresh view when it moves.
     pub revision: u64,
+    /// The admin pressed 停下: the loop ends at its next check. Cleared when the next turn starts.
+    pub stopped: bool,
+    /// Where each turn starts in `messages`, `steps` and `changes`, so the transcript can be shown turn by turn.
+    pub turns: Vec<TurnMark>,
     pending_ask: Option<String>,
     pending_results: Vec<Block>,
+}
+
+/// One admin message: what they wrote and where its turn starts in the conversation's lists.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct TurnMark {
+    pub text: String,
+    pub images: usize,
+    pub messages: usize,
+    pub steps: usize,
+    pub changes: usize,
 }
 
 #[derive(Default)]
 pub struct Store {
     conversations: Mutex<HashMap<String, Conversation>>,
     next_id: AtomicU64,
+    /// Woken on every update and reset: the event stream and a waiting stop listen on it.
+    changed: tokio::sync::Notify,
 }
 
 impl Store {
@@ -87,6 +103,8 @@ impl Store {
         let conv = all.entry(token_hash.to_string()).or_insert_with(|| Conversation { id: self.next_id.fetch_add(1, Ordering::Relaxed) + 1, ..Default::default() });
         let out = f(conv);
         conv.revision += 1;
+        drop(all);
+        self.changed.notify_waiters();
         out
     }
 
@@ -97,6 +115,8 @@ impl Store {
             Some(c) if c.id == id => {
                 f(c);
                 c.revision += 1;
+                drop(all);
+                self.changed.notify_waiters();
                 true
             }
             _ => false,
@@ -105,6 +125,44 @@ impl Store {
 
     pub fn reset(&self, token_hash: &str) {
         self.conversations.lock().unwrap_or_else(|e| e.into_inner()).remove(token_hash);
+        self.changed.notify_waiters();
+    }
+
+    /// `(id, revision, running)` without copying the conversation.
+    pub fn version(&self, token_hash: &str) -> (u64, u64, bool) {
+        let all = self.conversations.lock().unwrap_or_else(|e| e.into_inner());
+        all.get(token_hash).map_or((0, 0, false), |c| (c.id, c.revision, c.running))
+    }
+
+    /// True when the loop for conversation `id` should end: reset, or stopped by the admin.
+    fn halted(&self, token_hash: &str, id: u64) -> bool {
+        let all = self.conversations.lock().unwrap_or_else(|e| e.into_inner());
+        all.get(token_hash).is_none_or(|c| c.id != id || c.stopped)
+    }
+
+    /// Waits until the session's conversation changes (or `max` passes). Registers before checking, so a change
+    /// between the caller's read and this call is not missed: `seen` is the `(id, revision)` the caller has.
+    pub async fn wait_change(&self, token_hash: &str, seen: (u64, u64), max: std::time::Duration) {
+        let wait = self.changed.notified();
+        tokio::pin!(wait);
+        wait.as_mut().enable();
+        let (id, rev, _) = self.version(token_hash);
+        if (id, rev) != seen {
+            return;
+        }
+        let _ = tokio::time::timeout(max, wait).await;
+    }
+
+    async fn until_halted(&self, token_hash: &str, id: u64) {
+        loop {
+            let wait = self.changed.notified();
+            tokio::pin!(wait);
+            wait.as_mut().enable();
+            if self.halted(token_hash, id) {
+                return;
+            }
+            wait.await;
+        }
     }
 }
 
@@ -128,6 +186,13 @@ pub fn reset(app: &Shared, token_hash: &str) {
     app.chat.reset(token_hash);
 }
 
+/// Stops the running turn: the loop ends at its next check (a model call in flight is dropped). False when
+/// nothing was running.
+pub fn stop(app: &Shared, token_hash: &str) -> bool {
+    let (id, _, running) = app.chat.version(token_hash);
+    running && app.chat.update(token_hash, id, |c| c.stopped = true)
+}
+
 /// Adds the admin's message and runs the turn in the background. `ctx` names what the admin is looking at
 /// (`record:12`, `page:/news`, picked elements …).
 pub fn start(app: Shared, user: &AdminUser, text: String, attachments: Vec<Attachment>, ctx: Option<String>) -> Result<(), String> {
@@ -136,6 +201,7 @@ pub fn start(app: Shared, user: &AdminUser, text: String, attachments: Vec<Attac
     if text.is_empty() && attachments.is_empty() {
         return Err("请先写下想改什么。".into());
     }
+    let mark = TurnMark { text: text.clone(), images: attachments.len(), ..Default::default() };
     let mut blocks = vec![];
     for a in &attachments {
         let media_type = image_type(&a.filename).ok_or_else(|| format!("“{}”不是图片：对话里只能附 PNG、JPG、GIF 或 WebP 图片。", a.filename))?;
@@ -162,7 +228,9 @@ pub fn start(app: Shared, user: &AdminUser, text: String, attachments: Vec<Attac
         }
         c.question = None;
         c.error = None;
+        c.stopped = false;
         c.running = true;
+        c.turns.push(TurnMark { messages: c.messages.len(), steps: c.steps.len(), changes: c.changes.len(), ..mark });
         c.messages.push(Message { role: Role::User, content });
         Ok(c.id)
     })?;
@@ -420,19 +488,33 @@ async fn run(app: Shared, token: String, id: u64, actor: Actor, ctx: Option<Stri
             }
         });
     };
+    let stopped = |app: &Shared| app.chat.update(&token, id, |c| {
+        c.running = false;
+        c.streaming.clear();
+    });
     for _ in 0..MAX_MODEL_CALLS {
         let messages = app.chat.get(&token);
         if messages.id != id {
             return; // reset while running
         }
+        if messages.stopped {
+            stopped(&app);
+            return;
+        }
         let (a, t) = (app.clone(), token.clone());
         let sink: crate::llm::TextSink = Arc::new(move |piece: &str| {
             a.chat.update(&t, id, |c| c.streaming.push_str(piece));
         });
-        // The model call holds no lock: the store copy above is all it reads.
-        let reply: Reply = match model.stream(&system, &tools_list, &messages.messages, sink).await {
-            Ok(r) => r,
-            Err(e) => return finish(&app, Some(e)),
+        // The model call holds no lock: the store copy above is all it reads. 停下 or a reset drops it mid-flight.
+        let reply: Reply = tokio::select! {
+            r = model.stream(&system, &tools_list, &messages.messages, sink) => match r {
+                Ok(r) => r,
+                Err(e) => return finish(&app, Some(e)),
+            },
+            _ = app.chat.until_halted(&token, id) => {
+                stopped(&app);
+                return;
+            }
         };
         let stop = reply.stop.clone();
         let uses: Vec<(String, String, Value)> = reply.tool_uses().map(|(i, n, v)| (i.to_string(), n.to_string(), v.clone())).collect();
@@ -446,7 +528,14 @@ async fn run(app: Shared, token: String, id: u64, actor: Actor, ctx: Option<Stri
             Stop::ToolUse => {
                 let mut results = vec![];
                 let mut ask: Option<(String, Question)> = None;
+                let mut halted = false;
                 for (tool_id, name, input) in &uses {
+                    // Checked before every tool: a stop or reset leaves the rest of the batch undone.
+                    halted = halted || app.chat.halted(&token, id);
+                    if halted {
+                        results.push(Block::ToolResult { tool_use_id: tool_id.clone(), content: "管理员让这一轮停下了，这一步没有做。".into(), is_error: true });
+                        continue;
+                    }
                     if name == ASK_USER && ask.is_none() {
                         let q = Question {
                             text: input["question"].as_str().unwrap_or("").to_string(),
@@ -458,6 +547,18 @@ async fn run(app: Shared, token: String, id: u64, actor: Actor, ctx: Option<Stri
                     }
                     let turn = Turn { app: &app, token: &token, id, actor: &actor, tools: &tools_list };
                     results.push(run_tool(&turn, tool_id, name, input).await);
+                }
+                if halted {
+                    // The history must stay valid for the next turn: every tool_use gets its result.
+                    if let Some((ask_id, _)) = ask {
+                        results.push(Block::ToolResult { tool_use_id: ask_id, content: "管理员让这一轮停下了。".into(), is_error: true });
+                    }
+                    app.chat.update(&token, id, |c| {
+                        c.messages.push(Message { role: Role::User, content: results });
+                        c.running = false;
+                        c.streaming.clear();
+                    });
+                    return;
                 }
                 if let Some((ask_id, q)) = ask {
                     app.chat.update(&token, id, |c| {

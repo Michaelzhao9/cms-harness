@@ -3,7 +3,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use common::*;
 use harness_cms::{auth, store, web::session, App};
 
-const ADMIN_CSP: &str = "default-src 'none'; style-src 'self'; img-src 'self' https: data:; frame-src 'self'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'";
+const ADMIN_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; connect-src 'self'; frame-src 'self'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'";
 
 fn location(h: &HeaderMap) -> &str {
     h[header::LOCATION].to_str().unwrap()

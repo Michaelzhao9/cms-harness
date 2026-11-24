@@ -9,9 +9,7 @@ use serde_json::{json, Value};
 
 /// Every admin page: no scripts, no inline styles the CSP would drop.
 fn assert_clean(page: &str) {
-    for bad in ["<script", "<style", "style="] {
-        assert!(!page.contains(bad), "page contains {bad}: {page}");
-    }
+    assert_only_admin_js(page);
 }
 
 fn location(h: &HeaderMap) -> &str {
@@ -310,9 +308,14 @@ async fn the_last_builder_cannot_be_removed() {
 
 #[tokio::test]
 async fn the_model_key_is_never_rendered() {
-    // There is no settings struct yet: the model settings are read from the environment.
-    std::env::set_var("LLM_API_KEY", "sk-test-secret");
+    // A model set by the server's environment: shown read-only, its key never.
     let app = app();
+    let _ = app.env_model.set(harness_cms::llm::Settings {
+        provider: harness_cms::llm::Provider::Anthropic,
+        api_key: Some("sk-test-secret".into()),
+        model: "claude-opus-5-5".into(),
+        base_url: harness_cms::llm::DEFAULT_ANTHROPIC_URL.into(),
+    });
     news(&app);
     create(&app, json!({ "title": "一条" }));
     let s = admin_session(&app, "builder").await;
@@ -321,8 +324,7 @@ async fn the_model_key_is_never_rendered() {
         assert_eq!(status, StatusCode::OK, "{path}");
         assert!(!page.contains("sk-test-secret"), "{path} shows the model key: {page}");
         if path == "/admin/settings" {
-            let model = std::env::var("LLM_MODEL").ok().filter(|m| !m.is_empty()).unwrap_or_else(|| "claude-opus-5-5".into());
-            assert!(page.contains("已设置") && page.contains(&model), "{page}");
+            assert!(page.contains("已设置") && page.contains("claude-opus-5-5"), "{page}");
         }
     }
 }

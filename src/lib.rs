@@ -15,7 +15,7 @@ pub mod web;
 
 use rusqlite::Connection;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 
 pub type Shared = Arc<App>;
 
@@ -30,6 +30,8 @@ pub struct App {
     /// Admin chat conversations, in memory only.
     pub chat: chat::Store,
     model: RwLock<Option<Arc<dyn llm::Model>>>,
+    /// The chat model the server's environment sets (`LLM_*`), set once at startup; 设置 shows it read-only.
+    pub env_model: OnceLock<llm::Settings>,
 }
 
 impl App {
@@ -42,6 +44,7 @@ impl App {
             conn: Mutex::new(conn),
             chat: chat::Store::default(),
             model: RwLock::new(None),
+            env_model: OnceLock::new(),
         })
     }
 

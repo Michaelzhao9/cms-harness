@@ -313,3 +313,37 @@ async fn installed_skills_are_offered_and_readable() {
     assert!(!r[0].2 && r[0].1.contains("句子要短"), "{r:?}");
     assert_eq!(c.steps[0].label, "使用技能 brand-voice");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stop_ends_a_running_turn_and_the_next_turn_works() {
+    let app = app();
+    let gate = Arc::new(Notify::new());
+    let m = with_model(&app, Scripted { replies: Mutex::new(VecDeque::from([done("不会用到"), done("第二轮")])), gate: Some(gate.clone()), ..Default::default() });
+    let u = admin("builder");
+    assert!(!chat::stop(&app, &u.token_hash), "nothing runs yet");
+    chat::start(app.clone(), &u, "改个标题".into(), vec![], None).unwrap();
+    for _ in 0..200 {
+        if !m.seen.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(chat::stop(&app, &u.token_hash));
+    // The model call in flight is dropped: the gate is never opened and the turn still ends.
+    let c = idle(&app, &u.token_hash).await;
+    assert!(c.stopped && c.error.is_none() && c.streaming.is_empty(), "{c:?}");
+    assert_eq!(c.messages.len(), 1);
+    assert_eq!(c.turns.len(), 1);
+    assert_eq!(c.turns[0].text, "改个标题");
+    // The next turn starts clean and its history is still valid.
+    let g2 = gate.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        g2.notify_one();
+    });
+    chat::start(app.clone(), &u, "再试一次".into(), vec![], None).unwrap();
+    let c = idle(&app, &u.token_hash).await;
+    assert!(!c.stopped && c.error.is_none(), "{c:?}");
+    assert_eq!(c.turns.iter().map(|t| (t.text.as_str(), t.messages)).collect::<Vec<_>>(), vec![("改个标题", 0), ("再试一次", 1)]);
+    assert_eq!(m.seen.lock().unwrap().len(), 2);
+}
