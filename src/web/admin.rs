@@ -199,18 +199,12 @@ fn describe(app: &App, p: &Value, target: &Target) -> (Vec<String>, Vec<Value>, 
             let (old, new) = (on(crate::changes::setting(&conn, key, false)), on(crate::changes::setting(&conn, key, true)));
             (vec!["设置".into(), title], vec![json!({ "field": "状态", "old": changed.then_some(old), "new": new })], None)
         }
-        // The import map and script origins decide what code the live site runs: the reviewer sees exactly what.
+        // The import map and script origins decide what code the live site runs: the reviewer sees every entry that
+        // changes, each in full, never a cut-off dump that padding could push the dangerous line out of.
         Target::Setting(key) => {
             let conn = app.conn();
-            let show = |v: Value| -> String {
-                if v.is_null() {
-                    return UNSET.into();
-                }
-                let text = serde_json::to_string_pretty(&v).unwrap_or_default();
-                if text.chars().count() > 1200 { format!("{}…", text.chars().take(1200).collect::<String>()) } else { text }
-            };
             let (old, new) = (crate::changes::setting(&conn, key, false), crate::changes::setting(&conn, key, true));
-            (vec!["设置".into(), title], vec![json!({ "field": "内容", "old": (!old.is_null()).then(|| show(old)), "new": show(new), "code": true })], None)
+            (vec!["设置".into(), title], setting_pairs(key, &old, &new), None)
         }
         // Path and line counts only: a file can be a megabyte long.
         Target::File(path) => {
@@ -380,4 +374,45 @@ pub async fn restore(State(app): State<Shared>, Extension(user): Extension<Admin
         }
     })
     .await
+}
+
+/// Old against new for each entry of an import map (`imports.<specifier>`, `scopes.<scope>.<specifier>`) or each
+/// script origin that is added or removed. Unchanged entries are left out; changed ones are shown in full.
+fn setting_pairs(key: &str, old: &Value, new: &Value) -> Vec<Value> {
+    let gone = || Some("（去掉）".to_string());
+    if key == "script_origins" {
+        let list = |v: &Value| v.as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect::<Vec<_>>();
+        let (o, n) = (list(old), list(new));
+        let mut out: Vec<Value> = n.iter().filter(|x| !o.contains(x)).map(|x| json!({ "field": "允许加载脚本", "old": null, "new": x })).collect();
+        out.extend(o.iter().filter(|x| !n.contains(x)).map(|x| json!({ "field": "不再允许", "old": x, "new": gone() })));
+        if new.is_null() {
+            out.push(json!({ "field": "脚本来源", "old": null, "new": "恢复默认（https://esm.sh）" }));
+        }
+        return out;
+    }
+    let flat = |v: &Value| {
+        let mut m = std::collections::BTreeMap::new();
+        for (k, url) in v["imports"].as_object().into_iter().flatten() {
+            m.insert(k.clone(), url.as_str().map(String::from).unwrap_or_else(|| url.to_string()));
+        }
+        for (scope, entries) in v["scopes"].as_object().into_iter().flatten() {
+            for (k, url) in entries.as_object().into_iter().flatten() {
+                m.insert(format!("{k}（只在 {scope} 下）"), url.as_str().map(String::from).unwrap_or_else(|| url.to_string()));
+            }
+        }
+        m
+    };
+    let (o, n) = (flat(old), flat(new));
+    let mut out = vec![];
+    for (k, url) in &n {
+        if o.get(k) != Some(url) {
+            out.push(json!({ "field": k, "old": o.get(k), "new": url }));
+        }
+    }
+    for (k, url) in &o {
+        if !n.contains_key(k) {
+            out.push(json!({ "field": k, "old": url, "new": gone() }));
+        }
+    }
+    out
 }

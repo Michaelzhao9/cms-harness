@@ -250,3 +250,16 @@ async fn concurrent_wrong_passwords_still_lock_after_five() {
     }
     assert!(wrong <= 5, "{wrong} guesses got through; the limit is 5");
 }
+
+#[tokio::test]
+async fn a_no_referrer_page_on_the_site_can_still_post_its_forms() {
+    let app = app();
+    login_on(&app);
+    let same = [("origin", "null"), ("sec-fetch-site", "same-origin")];
+    let (s, _, _) = post_form_with(&app, "/account/signup", None, &[("email", "nr@example.com"), ("password", "long-enough-1")], &same).await;
+    assert_eq!(s, StatusCode::SEE_OTHER, "our own page with a no-referrer policy");
+    let framed = [("origin", "null"), ("sec-fetch-site", "cross-site")];
+    let (s, _, body) = post_form_with(&app, "/account/login", None, &[("email", "nr@example.com"), ("password", "long-enough-1")], &framed).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert!(body.contains("预览框"));
+}

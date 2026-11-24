@@ -138,10 +138,10 @@ cargo build --release
 | `HC_SITE_NAME` | `CMS Harness` | 站点名称 |
 | `HC_ADMIN_PASSWORD` | 无 | `cms-harness admin` 使用的密码，不设则随机生成 |
 | `HC_TRUST_PROXY` | 无 | 反向代理和本程序在同一台机器上时不用设（程序自动认它加的 `X-Forwarded-For`）；代理在别的机器上时设为 `1`，登录、注册和提交的频率限制才会按访客区分 |
-
-用 nginx 时，在 `location` 里加上 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` 和 `proxy_set_header Host $host;`，否则所有访客会被当成同一个人计算频率限制。Caddy 默认就会加。
 | `LLM_PROVIDER` `LLM_API_KEY` `LLM_MODEL` `LLM_BASE_URL` | 无 | 对话助手用的模型，见上文；`LLM_API_KEY` 不设时读 `ANTHROPIC_API_KEY` |
 | `HC_ADMIN_ORIGIN` | 无 | 后台单独的网址（比如 `https://admin.example.com`），设了就是“分开网址”；设成 `off` 强制“同一个网址”。会盖过 设置 → 网址 里的选择。进不去后台时也可以运行 `cms-harness admin-origin off` 切回同一个网址，正在运行的服务马上生效 |
+
+用 nginx 时，在 `location` 里加上 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` 和 `proxy_set_header Host $host;`，否则所有访客会被当成同一个人计算频率限制。Caddy 默认就会加。
 
 ### 许可证
 

@@ -90,10 +90,12 @@ pub async fn guard(State(app): State<Shared>, mut req: Request, next: Next) -> R
     if req.method() == Method::POST && !keyed {
         let here = req.extensions().get::<Address>().map_or(app.origin.as_str(), |a| a.here.as_str());
         if let Some(origin) = req.headers().get(header::ORIGIN) {
-            if origin.as_bytes() == b"null" {
+            let same_site_fetch = req.headers().get("sec-fetch-site").is_some_and(|v| v == "same-origin");
+            if origin.as_bytes() == b"null" && !same_site_fetch {
                 return (StatusCode::FORBIDDEN, "这里是后台里隔离的预览框，不能提交表单：请在新标签页打开网站再提交。").into_response();
             }
-            if origin.as_bytes() != here.as_bytes() {
+            // `Origin: null` with Sec-Fetch-Site: same-origin is our own page with a no-referrer policy.
+            if origin.as_bytes() != b"null" && origin.as_bytes() != here.as_bytes() {
                 return (StatusCode::FORBIDDEN, format!("请求来源与这个网址（{here}）不一致，已拒绝。请在这个网址的页面上提交。")).into_response();
             }
         }

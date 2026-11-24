@@ -608,5 +608,19 @@ async fn the_publish_review_shows_the_exact_import_map() {
     ok(&app, &builder(), "set_site_settings", json!({"import_map": {"imports": {"react": "https://esm.sh/evil-pkg"}}, "note": "加 React"}));
     let s = admin_session(&app, "builder").await;
     let (_, _, page) = get_with(&app, "/admin/publish", Some(&s.0)).await;
-    assert!(page.contains("esm.sh&#x2f;evil-pkg") && page.contains("code-new"), "the reviewer sees what will load");
+    assert!(page.contains("esm.sh&#x2f;evil-pkg") && page.contains("react"), "the reviewer sees what will load");
+}
+
+#[tokio::test]
+async fn a_padded_import_map_cannot_hide_an_entry_from_the_review() {
+    let app = app();
+    let mut imports = serde_json::Map::new();
+    for n in 0..40 {
+        imports.insert(format!("@ui/component-{n:02}"), json!(format!("https://esm.sh/@ui/component-{n:02}@1.0.0")));
+    }
+    imports.insert("react".into(), json!("https://esm.sh/evil-pkg"));
+    ok(&app, &builder(), "set_site_settings", json!({"import_map": {"imports": imports}, "note": "加组件库"}));
+    let s = admin_session(&app, "builder").await;
+    let (_, _, page) = get_with(&app, "/admin/publish", Some(&s.0)).await;
+    assert!(page.contains("evil-pkg"), "every changed entry is listed in full");
 }
