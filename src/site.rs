@@ -238,6 +238,7 @@ pub fn sitemap(conn: &Connection, origin: &str) -> Result<String, String> {
             .map_err(fail)?;
         urls.push((url, lastmod.map(|d| d.chars().take(10).collect())));
     }
+    urls.extend(crate::routes::public_pages(conn));
     // A site without its own home page still has the built-in welcome.
     if !urls.iter().any(|(u, _)| u == "/") {
         urls.insert(0, ("/".into(), None));
@@ -245,7 +246,7 @@ pub fn sitemap(conn: &Connection, origin: &str) -> Result<String, String> {
     let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
     let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
     for (url, lastmod) in urls {
-        out.push_str(&format!("  <url><loc>{}{}</loc>", esc(origin), esc(&url)));
+        out.push_str(&format!("  <url><loc>{}{}</loc>", esc(origin), esc(&crate::routes::encode(&url))));
         if let Some(d) = lastmod {
             out.push_str(&format!("<lastmod>{d}</lastmod>"));
         }
@@ -299,7 +300,7 @@ pub fn visible_def(conn: &Connection, mode: Mode, name: &str, viewer: crate::acc
 }
 
 /// A collection's definition as `mode` sees it, whoever may read it.
-fn any_def(conn: &Connection, mode: Mode, name: &str) -> Result<Option<CollectionDef>, String> {
+pub fn any_def(conn: &Connection, mode: Mode, name: &str) -> Result<Option<CollectionDef>, String> {
     if !crate::schema::valid_name(name) {
         return Ok(None);
     }
@@ -427,9 +428,13 @@ impl Server<'_> {
                 _ => None,
             };
             let mut fields = vec![("id".to_string(), json!(row.id), false, None)];
+            fields.push(("url".to_string(), json!(crate::routes::url_for(self.conn, self.mode, &def, row.id, &row.doc)), false, None));
             for f in &def.fields {
-                let v = row.doc.get(&f.name).cloned().unwrap_or(Value::Null);
+                let mut v = row.doc.get(&f.name).cloned().unwrap_or(Value::Null);
                 let changed = live_copy.as_ref().is_none_or(|old| old.get(&f.name) != Some(&v));
+                if let (FieldType::Richtext, Value::String(html)) = (&f.kind, &v) {
+                    v = Value::String(crate::routes::expand_refs(self.conn, self.mode, html, self.viewer));
+                }
                 fields.push((f.name.clone(), v, f.kind == FieldType::Richtext, mark.filter(|_| changed)));
             }
             out.push(Rec(fields));
@@ -569,6 +574,7 @@ fn render_thread(asker: Asker, mode: Mode, page: &str, ctx: Value) -> Result<Str
         let recs = a.records(Ask::Search { q, collection, limit })?;
         Ok(minijinja::Value::from(recs.into_iter().map(|r| to_template(r, &l)).collect::<Vec<_>>()))
     });
+    let (route_asker, route_last) = (asker.clone(), last.clone());
     let (a, l) = (asker, last.clone());
     env.add_function("record", move |name: String, id: i64| {
         let recs = a.records(Ask::Records { collection: name, filter: Value::Null, sort: None, limit: 1, offset: 0, id: Some(id) })?;
@@ -587,7 +593,19 @@ fn render_thread(asker: Asker, mode: Mode, page: &str, ctx: Value) -> Result<Str
             Ok(())
         });
     }
-    env.get_template(page).and_then(|t| t.render(minijinja::Value::from_serialize(&ctx))).map_err(|e| template_error(&e))
+    let ctx_value = minijinja::Value::from_serialize(&ctx);
+    // A record's page: the record is `item`, read like `record()` reads it (so the preview marks its changes).
+    let ctx_value = match (ctx["route"]["collection"].as_str(), ctx["route"]["id"].as_i64()) {
+        (Some(c), Some(id)) => {
+            let recs = route_asker
+                .records(Ask::Records { collection: c.to_string(), filter: Value::Null, sort: None, limit: 1, offset: 0, id: Some(id) })
+                .map_err(|e| template_error(&e))?;
+            let item = recs.into_iter().next().map_or(minijinja::Value::from(()), |r| to_template(r, &route_last));
+            minijinja::context! { item => item, ..ctx_value }
+        }
+        _ => ctx_value,
+    };
+    env.get_template(page).and_then(|t| t.render(ctx_value)).map_err(|e| template_error(&e))
 }
 
 /// A rendered page. In preview, `page_changes` are the marks of changed files that shaped the whole page

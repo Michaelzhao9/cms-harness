@@ -90,7 +90,8 @@ pub fn save_draft(conn: &Connection, actor: &Actor, target: &Target, doc: &Value
     let (table, key, val, has_dd) = target.row();
     let doc = doc.to_string();
     let reset = if has_dd { ", draft_deleted = 0" } else { "" };
-    let reset = format!("{reset}{}", touch(target));
+    let slug = if matches!(target, Target::Record(_)) { ", draft_slug = NULL" } else { "" };
+    let reset = format!("{reset}{slug}{}", touch(target));
     let n = conn
         .execute(
             &format!("UPDATE {table} SET draft = ?1, draft_actor = ?2, draft_note = ?3{reset} WHERE {key} = ?4"),
@@ -978,6 +979,9 @@ fn run_publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
         .collect();
 
     let mut problems: Vec<String> = vec![];
+    // For the dead-link check: records this release takes offline, and site files it puts live.
+    let mut gone_ids: Vec<i64> = vec![];
+    let mut live_files: Vec<String> = vec![];
     let mut touched: Vec<String> = vec![];
     let mut released: Vec<(i64, String)> = vec![];
     // collections whose definition went live or was deleted in this release
@@ -1007,16 +1011,24 @@ fn run_publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
             Target::Record(id) => {
                 let collection: String = tx.query_row("SELECT collection FROM records WHERE id = ?1", [id], |r| r.get(0)).map_err(fail)?;
                 let live = if s.draft_deleted { None } else { Some(live_copy_of(&tx, *id, &collection, s.draft.as_deref(), &mut problems)?) };
-                tx.execute(&format!("UPDATE records SET published = ?2, {clear}, updated_at = datetime('now') WHERE id = ?1"), params![id, live])
+                tx.execute(
+                    &format!("UPDATE records SET published = ?2, slug = coalesce(draft_slug, slug), draft_slug = NULL, {clear}, updated_at = datetime('now') WHERE id = ?1"),
+                    params![id, live],
+                )
                     .map_err(fail)?;
                 if !s.draft_deleted {
                     released.push((*id, collection.clone()));
+                } else {
+                    gone_ids.push(*id);
                 }
                 touched.push(collection);
             }
             Target::View(_) | Target::Notes | Target::File(_) | Target::Setting(_) => {
                 if let Target::View(n) = target {
                     views.push(n.clone());
+                }
+                if let (Target::File(path), false) = (target, s.draft_deleted) {
+                    live_files.push(path.clone());
                 }
                 let copy = if s.draft_deleted { "published = NULL" } else { "published = draft" };
                 tx.execute(&format!("UPDATE {table} SET {copy}, {clear} WHERE {key} = ?1"), [val]).map_err(fail)?;
@@ -1036,6 +1048,7 @@ fn run_publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
     let scope: Vec<String> = touched.iter().cloned().chain(defs.iter().map(|(n, _)| n.clone())).collect();
     check_views(&tx, &views, &scope, &mut problems)?;
     crate::site::check_live(&tx, &mut problems)?;
+    check_links(&tx, &released, &live_files, &gone_ids, &mut problems)?;
     if !problems.is_empty() {
         let mut seen = std::collections::HashSet::new();
         problems.retain(|p| seen.insert(p.clone()));
@@ -1189,6 +1202,50 @@ pub fn stage_file(conn: &Connection, actor: &Actor, path: &str, content: &str, n
 
 pub fn setting_title(key: &str) -> &'static str {
     SETTINGS.iter().find(|(n, _)| *n == key).map_or("设置", |(_, t)| *t)
+}
+
+/// Record ids named by `/_r/<id>` links in `text`.
+fn refs_in(text: &str) -> Vec<i64> {
+    text.match_indices("/_r/")
+        .filter_map(|(i, _)| text[i + 4..].chars().take_while(char::is_ascii_digit).collect::<String>().parse().ok())
+        .collect()
+}
+
+/// No dead links: what this release puts live may only link (`/_r/<id>`) to records that are live after it, and
+/// a record it takes offline may not be linked from anything that stays live.
+fn check_links(conn: &Connection, released: &[(i64, String)], files: &[String], gone: &[i64], problems: &mut Vec<String>) -> Result<(), String> {
+    let fail = |e: rusqlite::Error| format!("检查链接失败：{e}");
+    let live = |id: i64| -> Result<bool, String> {
+        conn.query_row("SELECT published IS NOT NULL FROM records WHERE id = ?1", [id], |r| r.get::<_, bool>(0)).optional().map_err(fail).map(|v| v.unwrap_or(false))
+    };
+    let mut sources: Vec<(String, String)> = vec![];
+    for (id, _) in released {
+        let doc: Option<String> = conn.query_row("SELECT published FROM records WHERE id = ?1", [id], |r| r.get(0)).map_err(fail)?;
+        sources.push((format!("record:{id}"), doc.unwrap_or_default()));
+    }
+    for path in files {
+        let doc: Option<String> = conn.query_row("SELECT published FROM site_files WHERE path = ?1", [path], |r| r.get(0)).map_err(fail)?;
+        sources.push((format!("file:{path}"), doc.unwrap_or_default()));
+    }
+    for (from, text) in &sources {
+        for id in refs_in(text) {
+            if !live(id)? {
+                problems.push(format!("{from} 链接到 record:{id}，它不在线上：请把它一起发布，或先去掉这个链接。"));
+            }
+        }
+    }
+    for id in gone {
+        // Stored documents are JSON: the quote after the id is escaped.
+        let needle = format!("%/_r/{id}\\\"%");
+        let mut stmt = conn
+            .prepare("SELECT 'record:' || id FROM records WHERE published LIKE ?1 AND id != ?2 UNION ALL SELECT 'file:' || path FROM site_files WHERE published LIKE ?1")
+            .map_err(fail)?;
+        let users: Vec<String> = stmt.query_map(params![needle, id], |r| r.get(0)).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;
+        for from in users {
+            problems.push(format!("record:{id} 还被 {from} 链接着，删掉会留下死链：请先改掉那个链接，或一起发布。"));
+        }
+    }
+    Ok(())
 }
 
 /// A site option: the live value, or with `effective` the draft if there is one (a pending deletion reads as unset).

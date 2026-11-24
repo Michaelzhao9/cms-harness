@@ -16,6 +16,7 @@ pub mod members;
 pub mod access;
 pub mod backup;
 pub mod i18n;
+pub mod routes;
 pub mod schedule;
 pub mod search;
 pub mod web;

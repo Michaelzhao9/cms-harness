@@ -98,6 +98,7 @@ pub fn submit(conn: &Connection, collection: &str, data: &Value, who: &Submitter
     )
     .map_err(db)?;
     let id = tx.last_insert_rowid();
+    crate::routes::assign(&tx, &def, id, &doc)?;
     tx.execute("INSERT INTO releases(actor, note) VALUES (?1, '访客提交')", [&actor]).map_err(db)?;
     let release = tx.last_insert_rowid();
     tx.execute(

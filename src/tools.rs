@@ -139,8 +139,8 @@ fn dispatch(app: &App, conn: &Connection, actor: &Actor, name: &str, args: Value
         "create_collection" => create_collection(conn, actor, parse(name, args)?),
         "update_collection" => update_collection(conn, actor, parse(name, args)?),
         "delete_collection" => delete_collection(conn, actor, parse(name, args)?),
-        "create_record" => create_record(conn, actor, parse(name, args)?),
-        "update_record" => update_record(conn, actor, parse(name, args)?),
+        "create_record" => create_record(conn, actor, &app.origin, parse(name, args)?),
+        "update_record" => update_record(conn, actor, &app.origin, parse(name, args)?),
         "delete_record" => delete_record(conn, actor, parse(name, args)?),
         "get_record" => get_record(conn, parse(name, args)?),
         "query_records" => query_records(conn, parse(name, args)?),
@@ -238,6 +238,9 @@ struct CreateCollection {
     read: Option<crate::schema::Read>,
     /// Who may add records from the site, live at once: none (default), members, public.
     create: Option<crate::schema::Create>,
+    /// Where each record's page lives, like "/news/{slug}"; "/<name>/{slug}" when left out. Pages appear once the
+    /// site has a detail template: "<name>/_item.html" or the site-wide "_item.html".
+    url: Option<String>,
     fields: Vec<FieldDef>,
     note: String,
 }
@@ -273,6 +276,8 @@ struct UpdateCollection {
     read: Option<crate::schema::Read>,
     /// none, members or public.
     create: Option<crate::schema::Create>,
+    /// Where each record's page lives, like "/news/{slug}" or "/products/{category.slug}/{slug}"; "" for the default.
+    url: Option<String>,
     add_fields: Option<Vec<FieldDef>>,
     change_fields: Option<Vec<FieldChange>>,
     remove_fields: Option<Vec<String>>,
@@ -362,6 +367,7 @@ fn create_collection(conn: &Connection, actor: &Actor, a: CreateCollection) -> R
             create: a.create.unwrap_or_default(),
         },
         fields: a.fields,
+        url: a.url.filter(|u| !u.trim().is_empty()),
     };
     let taken = conn
         .query_row("SELECT 1 FROM collections WHERE name = ?1", [&def.name], |_| Ok(()))
@@ -398,6 +404,9 @@ fn update_collection(conn: &Connection, actor: &Actor, a: UpdateCollection) -> R
     }
     if let Some(c) = a.create {
         def.access.create = c;
+    }
+    if let Some(u) = a.url {
+        def.url = Some(u.trim().to_string()).filter(|u| !u.is_empty());
     }
     for f in a.add_fields.unwrap_or_default() {
         if def.field(&f.name).is_some() {
@@ -465,6 +474,8 @@ fn delete_collection(conn: &Connection, actor: &Actor, a: DeleteCollection) -> R
 struct CreateRecord {
     collection: String,
     data: Value,
+    /// The record's address segment; made from its title when left out.
+    slug: Option<String>,
     note: String,
 }
 
@@ -473,6 +484,8 @@ struct CreateRecord {
 struct UpdateRecord {
     id: i64,
     data: Value,
+    /// A new address segment (a draft until published; the old address keeps redirecting).
+    slug: Option<String>,
     note: String,
 }
 
@@ -549,7 +562,17 @@ fn check_relations(conn: &Connection, def: &CollectionDef, changed: &Value) -> R
     Ok(())
 }
 
-fn create_record(conn: &Connection, actor: &Actor, a: CreateRecord) -> Result<Value, String> {
+/// Links in rich text that point at a record's page on this site are kept as `/_r/<id>`, so they follow the record.
+fn own_links(conn: &Connection, origin: &str, def: &CollectionDef, mut doc: Value) -> Value {
+    for f in def.fields.iter().filter(|f| f.kind == crate::schema::FieldType::Richtext) {
+        if let Some(Value::String(html)) = doc.get_mut(&f.name) {
+            *html = crate::routes::link_refs(conn, origin, html);
+        }
+    }
+    doc
+}
+
+fn create_record(conn: &Connection, actor: &Actor, origin: &str, a: CreateRecord) -> Result<Value, String> {
     let note = check_note(&a.note)?;
     let def = changes::effective_def(conn, &a.collection)?;
     if def.single && changes::record_count(conn, &a.collection)? > 0 {
@@ -558,11 +581,16 @@ fn create_record(conn: &Connection, actor: &Actor, a: CreateRecord) -> Result<Va
     let doc = crate::schema::fill_defaults(&def, normalize(&def, &json!({}), &a.data)?)?;
     changes::check_unique(conn, &def, None, &doc, false)?;
     check_relations(conn, &def, &doc)?;
+    let doc = own_links(conn, origin, &def, doc);
     let id = changes::insert_record(conn, actor, &a.collection, &doc, note)?;
-    Ok(json!({ "id": id, "status": load_record(conn, id)?.status() }))
+    let slug = match a.slug.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) => crate::routes::rename(conn, &a.collection, id, s).map(|_| s.to_string())?,
+        None => crate::routes::assign(conn, &def, id, &doc)?,
+    };
+    Ok(json!({ "id": id, "slug": slug, "status": load_record(conn, id)?.status() }))
 }
 
-fn update_record(conn: &Connection, actor: &Actor, a: UpdateRecord) -> Result<Value, String> {
+fn update_record(conn: &Connection, actor: &Actor, origin: &str, a: UpdateRecord) -> Result<Value, String> {
     let note = check_note(&a.note)?;
     let row = load_record(conn, a.id)?;
     if row.status() == "deleting" {
@@ -578,10 +606,13 @@ fn update_record(conn: &Connection, actor: &Actor, a: UpdateRecord) -> Result<Va
         }
         (None, None) => json!({}),
     };
-    let doc = normalize(&def, &base, &a.data)?;
+    let doc = own_links(conn, origin, &def, normalize(&def, &base, &a.data)?);
     changes::check_unique(conn, &def, Some(a.id), &doc, false)?;
     check_relations(conn, &def, &a.data)?;
     changes::save_draft(conn, actor, &Target::Record(a.id), &doc, note)?;
+    if let Some(s) = a.slug.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        crate::routes::rename(conn, &row.collection, a.id, s)?;
+    }
     Ok(json!({ "id": a.id, "status": load_record(conn, a.id)?.status() }))
 }
 

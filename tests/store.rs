@@ -7,7 +7,7 @@ fn creates_all_tables_and_is_idempotent() {
     let names: Vec<String> = conn
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").unwrap()
         .query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
-    assert_eq!(names, ["admin_sessions", "admins", "api_keys", "collections", "login_attempts", "member_attempts", "member_sessions", "members", "notes", "options", "preview_tokens", "records", "releases", "schedules", "search", "search_config", "search_content", "search_data", "search_docsize", "search_idx", "site_files", "site_settings", "versions", "views", "web_search"]);
+    assert_eq!(names, ["admin_sessions", "admins", "api_keys", "collections", "login_attempts", "member_attempts", "member_sessions", "members", "notes", "options", "preview_tokens", "records", "releases", "schedules", "search", "search_config", "search_content", "search_data", "search_docsize", "search_idx", "site_files", "site_settings", "url_history", "versions", "views", "web_search"]);
     conn.execute_batch(store::SCHEMA).unwrap(); // second run must not fail
 }
 

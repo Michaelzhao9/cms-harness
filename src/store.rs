@@ -60,11 +60,17 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     if !conn.prepare("SELECT 1 FROM pragma_table_info('admins') WHERE name = 'prefs'")?.exists([])? {
         conn.execute_batch("ALTER TABLE admins ADD COLUMN prefs TEXT NOT NULL DEFAULT '{}'")?;
     }
+    // Record pages: each record's slug (live, and a pending change), and the slugs records used to have.
+    if !conn.prepare("SELECT 1 FROM pragma_table_info('records') WHERE name = 'slug'")?.exists([])? {
+        conn.execute_batch("ALTER TABLE records ADD COLUMN slug TEXT; ALTER TABLE records ADD COLUMN draft_slug TEXT;")?;
+    }
+    conn.execute_batch(crate::routes::SCHEMA)?;
     // Full-text search: the functions its triggers call, then the index, filled for records published before it.
     crate::search::register(&conn)?;
     conn.execute_batch(crate::search::SCHEMA)?;
     crate::search::backfill(&conn)?;
     conn.execute_batch(crate::schedule::SCHEMA)?;
     conn.execute_batch(crate::websearch::SCHEMA)?;
+    crate::routes::backfill(&conn).map_err(|e| anyhow::anyhow!(e))?;
     Ok(conn)
 }

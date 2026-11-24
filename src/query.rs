@@ -92,7 +92,7 @@ fn check_filter(def: &CollectionDef, field: &str, op: Op, v: &Value) -> Result<(
     if let Some(f) = f.filter(|f| matches!(f.kind, FieldType::Date | FieldType::Select)) {
         // reuse the record validator on a one-field definition so dates and options are judged the same way
         let one = CollectionDef { name: def.name.clone(), title: String::new(), single: false, access: Default::default(),
-            fields: vec![FieldDef { required: false, ..f.clone() }] };
+            fields: vec![FieldDef { required: false, ..f.clone() }], url: None };
         normalize(&one, &Value::Null, &serde_json::json!({ field: v }))
             .map_err(|e| format!("筛选字段“{field}”的值不合法：{e}"))?;
     }

@@ -169,12 +169,31 @@ impl Visit<'_> {
 
     fn route(&self, rel: &str) -> Result<Response, String> {
         for name in candidates(rel) {
-            if site::check_path(&name).is_err() {
+            // Detail templates are pages for records, not pages of their own.
+            if site::check_path(&name).is_err() || name == "_item.html" || name.ends_with("/_item.html") {
                 continue;
             }
             if let Some(content) = site::file(self.conn, self.mode, &name)? {
                 return self.file(&name, content);
             }
+        }
+        // A record's page, or a link that names a record (`/_r/<id>`): found by its collection's address pattern;
+        // an old or non-canonical address redirects to where the record is now.
+        let viewer = self.member.as_ref().and_then(|m| m["id"].as_i64()).map_or(crate::access::Viewer::Anon, crate::access::Viewer::Member);
+        let segments: Vec<String> = rel.trim_end_matches('/').split('/').map(crate::routes::decode).collect();
+        let found = match segments.as_slice() {
+            [r, id] if r == "_r" => match id.parse::<i64>().ok().and_then(|id| crate::routes::by_id(self.conn, self.mode, id, viewer)) {
+                Some(f) => return Ok(self.redirect(&f.canonical)),
+                None => return Ok(self.not_found()),
+            },
+            [one] if one.is_empty() => None,
+            _ => crate::routes::resolve(self.conn, self.mode, &segments, viewer),
+        };
+        if let Some(f) = found {
+            if crate::routes::decode(&format!("/{}", rel.trim_end_matches('/'))) != f.canonical {
+                return Ok(self.redirect(&f.canonical));
+            }
+            return Ok(self.page(&f.template, json!({ "route": { "collection": f.collection, "id": f.id } }), StatusCode::OK));
         }
         // No file: the sitemap and robots.txt, the one built-in page (the welcome on `/`) and, when member login is
         // on, the account pages. A site file of the same name always wins.
@@ -237,6 +256,12 @@ impl Visit<'_> {
             return Ok(self.finish((StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response(), None));
         }
         Ok(self.finish(([(header::CONTENT_TYPE, site::content_type(name)), (header::ETAG, etag.as_str())], body).into_response(), None))
+    }
+
+    /// A permanent redirect to `path` on this site (under the preview's prefix in preview).
+    fn redirect(&self, path: &str) -> Response {
+        let to = format!("{}{}", self.base, crate::routes::encode(path));
+        self.finish((StatusCode::MOVED_PERMANENTLY, [(header::LOCATION, to)]).into_response(), None)
     }
 
     /// Renders a template into a page: the import map and, in preview, the preview's assets go after `<head>`.

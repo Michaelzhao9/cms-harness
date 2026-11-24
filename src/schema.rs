@@ -98,6 +98,9 @@ pub struct CollectionDef {
     #[serde(default)]
     pub access: Access,
     pub fields: Vec<FieldDef>,
+    /// Where each record's page lives, like `/news/{slug}`; `/{name}/{slug}` when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 impl CollectionDef {
@@ -165,6 +168,9 @@ pub fn check_def(def: &CollectionDef) -> Result<(), String> {
         if let Some(d) = &f.default {
             check_default(f, d)?;
         }
+    }
+    if let Some(p) = &def.url {
+        crate::routes::check_pattern(def, p)?;
     }
     Ok(())
 }
