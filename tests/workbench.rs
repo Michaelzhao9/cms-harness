@@ -120,11 +120,30 @@ async fn event(app: &Shared, cookie: &str, last: Option<&str>) -> (String, Value
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(resp.headers()[header::CONTENT_TYPE], "text/event-stream");
     assert_eq!(resp.headers()[header::CACHE_CONTROL], "no-store");
-    let text = String::from_utf8(resp.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
+    let text = first_event(resp, std::time::Duration::from_secs(5)).await.expect("an event");
     let id = text.lines().find_map(|l| l.strip_prefix("id: ")).unwrap_or_else(|| panic!("no id: {text}")).to_string();
     let data = text.lines().find_map(|l| l.strip_prefix("data: ")).unwrap_or_else(|| panic!("no data: {text}"));
-    assert!(text.starts_with("retry: "), "{text}");
+    assert!(text.contains("retry: "), "{text}");
     (id, serde_json::from_str(data).unwrap())
+}
+
+/// The stream stays open: reads it until the first event that carries data, or gives up after `max`.
+async fn first_event(resp: axum::response::Response, max: std::time::Duration) -> Option<String> {
+    let mut body = resp.into_body();
+    let mut text = String::new();
+    let read = async {
+        while let Some(Ok(frame)) = body.frame().await {
+            if let Some(bytes) = frame.data_ref() {
+                text.push_str(&String::from_utf8_lossy(bytes));
+            }
+            if let Some(end) = text.find("\n\n").filter(|_| text.contains("data: ")) {
+                let _ = end;
+                return Some(text.clone());
+            }
+        }
+        None
+    };
+    tokio::time::timeout(max, read).await.ok().flatten()
 }
 
 /// Keeps opening a gated model until the test ends.
@@ -203,11 +222,10 @@ async fn a_posted_message_runs_a_turn_and_the_event_stream_sends_steps_and_chang
     let (_, _, page) = get_with(&app, "/admin", Some(&s.0)).await;
     assert!(!page.contains("http-equiv=\"refresh\"") && page.contains("class=\"ok\"") && page.contains(&format!("修改记录 #{id}")), "{page}");
     assert!(page.contains("<span class=\"count\">1</span>"), "{page}");
-    // An answer that has nothing new waits, then says so with a comment line and no event.
-    let req = Request::get("/admin/chat/events?wait=1").header(header::COOKIE, s.0.as_str()).header("last-event-id", last.as_str());
+    // A stream that has seen the latest revision stays open and sends nothing until something changes.
+    let req = Request::get("/admin/chat/events").header(header::COOKIE, s.0.as_str()).header("last-event-id", last.as_str());
     let resp = cms_harness::api::router(app.clone()).oneshot(req.body(axum::body::Body::empty()).unwrap()).await.unwrap();
-    let text = String::from_utf8(resp.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
-    assert!(text.starts_with("retry: ") && text.contains("\n: ") && !text.contains("data: "), "{text}");
+    assert!(first_event(resp, std::time::Duration::from_millis(600)).await.is_none(), "nothing new, no event");
 }
 
 #[tokio::test(flavor = "multi_thread")]

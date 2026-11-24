@@ -286,28 +286,34 @@ fn parse_seen(s: &str) -> Option<(u64, u64)> {
     Some((a.parse().ok()?, b.parse().ok()?))
 }
 
-/// Server-sent events, one per answer: the browser's `EventSource` asks again after `retry:` with the
-/// `Last-Event-ID` it saw, and the answer waits until the conversation has moved past it.
-// ponytail: one event per request (long-poll over EventSource), because a held-open stream needs a `Stream`
-// type from a crate the plan does not list (futures-core); switch to `axum::response::Sse` if it is added.
+/// Server-sent events: one held-open stream per tab while a turn runs. It sends the conversation view at once
+/// (unless the browser already has this revision) and again every time it changes, so streamed text arrives as
+/// it is written. `since` (or `Last-Event-ID` after a reconnect) is the revision the browser has.
 pub async fn events(State(app): State<Shared>, Extension(user): Extension<AdminUser>, headers: HeaderMap, Query(q): Query<Vec<(String, String)>>) -> Response {
+    use axum::response::sse::{Event, KeepAlive, Sse};
     let get = |k: &str| q.iter().find(|(key, _)| key == k).map(|(_, v)| v.as_str());
     let seen = headers.get("last-event-id").and_then(|v| v.to_str().ok()).or_else(|| get("since")).and_then(parse_seen);
-    let wait = get("wait").and_then(|w| w.parse::<u64>().ok()).unwrap_or(LONGEST_WAIT).clamp(1, LONGEST_WAIT);
-    if let Some(seen) = seen {
-        app.chat.wait_change(&user.token_hash, seen, Duration::from_secs(wait)).await;
-    }
-    let (id, rev, _) = app.chat.version(&user.token_hash);
-    let body = if seen == Some((id, rev)) {
-        format!("retry: {RETRY_MS}\n: 还没有新消息\n\n")
-    } else {
-        let a = app.clone();
-        let mut view = tokio::task::spawn_blocking(move || view(&a, &user)).await.unwrap_or(Value::Null);
-        view["html"] = json!(log_html(&view));
-        view["turns"] = Value::Null;
-        format!("retry: {RETRY_MS}\nid: {}\ndata: {view}\n\n", view["id"].as_str().unwrap_or_default())
-    };
-    ([(header::CONTENT_TYPE, "text/event-stream"), (header::CACHE_CONTROL, "no-store")], body).into_response()
+    let state = (app, user, seen);
+    let stream = futures_util::stream::unfold(state, |(app, user, seen)| async move {
+        loop {
+            if let Some(seen) = seen {
+                app.chat.wait_change(&user.token_hash, seen, Duration::from_secs(LONGEST_WAIT)).await;
+            }
+            let (id, rev, _) = app.chat.version(&user.token_hash);
+            if seen == Some((id, rev)) {
+                continue; // nothing new yet: keep waiting (the keep-alive comment holds the line open)
+            }
+            let (a, u) = (app.clone(), user.clone());
+            let mut view = tokio::task::spawn_blocking(move || view(&a, &u)).await.unwrap_or(Value::Null);
+            view["html"] = json!(log_html(&view));
+            view["turns"] = Value::Null;
+            let event = Event::default().id(view["id"].as_str().unwrap_or_default()).retry(Duration::from_millis(RETRY_MS as u64)).data(view.to_string());
+            return Some((Ok::<_, std::convert::Infallible>(event), (app, user, Some((id, rev)))));
+        }
+    });
+    let mut resp = Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
+    resp.headers_mut().insert(header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-store"));
+    resp
 }
 
 #[cfg(test)]
