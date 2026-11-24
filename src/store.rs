@@ -33,7 +33,7 @@ CREATE INDEX IF NOT EXISTS versions_target ON versions(target, id);
 CREATE TABLE IF NOT EXISTS admin_sessions(token_hash TEXT PRIMARY KEY, admin_id INTEGER NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
   csrf TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')), expires_at TEXT NOT NULL, prefs TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS preview_tokens(token_hash TEXT PRIMARY KEY,
-  session TEXT NOT NULL REFERENCES admin_sessions(token_hash) ON DELETE CASCADE, expires_at TEXT NOT NULL);
+  session TEXT NOT NULL REFERENCES admin_sessions(token_hash) ON DELETE CASCADE, expires_at TEXT NOT NULL, created_at TEXT);
 CREATE TABLE IF NOT EXISTS login_attempts(key TEXT NOT NULL, at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE INDEX IF NOT EXISTS login_attempts_key ON login_attempts(key, at);
 ";
@@ -44,6 +44,9 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     // In-memory databases cannot use WAL; ignore that failure.
     let _ = conn.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()));
     conn.execute_batch(SCHEMA)?;
+    if !conn.prepare("SELECT 1 FROM pragma_table_info('preview_tokens') WHERE name = 'created_at'")?.exists([])? {
+        conn.execute_batch("ALTER TABLE preview_tokens ADD COLUMN created_at TEXT")?;
+    }
     // Records added by visitors or members carry their owner and when they came in.
     if !conn.prepare("SELECT 1 FROM pragma_table_info('records') WHERE name = 'owner'")?.exists([])? {
         conn.execute_batch("ALTER TABLE records ADD COLUMN owner INTEGER; ALTER TABLE records ADD COLUMN submitted_at TEXT;")?;

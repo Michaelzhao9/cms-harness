@@ -77,8 +77,18 @@ pub fn submit(conn: &Connection, collection: &str, data: &Value, who: &Submitter
     if recent >= limit {
         return Err("提交太频繁，请过一会儿再试。".into());
     }
-    let doc = fill_defaults(&def, normalize(&def, &json!({}), data)?)?;
-    changes::check_unique(conn, &def, None, &doc, true)?;
+    let mut doc = fill_defaults(&def, normalize(&def, &json!({}), data)?)?;
+    for f in def.fields.iter().filter(|f| f.kind == FieldType::Richtext) {
+        if let Some(html) = doc.get(&f.name).and_then(Value::as_str) {
+            let clean = ammonia::Builder::default().rm_tags(["img"]).clean(html).to_string();
+            doc[&f.name] = json!(clean);
+        }
+    }
+    // The generic message: the real one names the other record's id and value, which a visitor must not learn.
+    if let Err(e) = changes::check_unique(conn, &def, None, &doc, true) {
+        let field = def.fields.iter().find(|f| e.contains(&format!("“{}”", f.name))).map_or("填写的内容", |f| f.title.as_str());
+        return Err(format!("“{field}”这个值已经有人用过了。"));
+    }
     check_live_relations(conn, &def, &doc)?;
     conn.execute("INSERT INTO member_attempts(key) VALUES (?1)", [&key]).map_err(db)?;
     let tx = conn.unchecked_transaction().map_err(db)?;

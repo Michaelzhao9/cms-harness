@@ -189,11 +189,13 @@ async fn switching_checks_the_new_address_first_and_the_old_one_redirects_for_a_
     // The ping's nonce was good once.
     assert_eq!(on(&app, new_host, "/_hc/ping", None, None, &[]).await.0, StatusCode::NOT_FOUND);
 
-    // For a while the old address sends the admin to the new one, and forms still open there keep working.
+    // For a while the old address sends the admin to the new one; it takes no admin POSTs (a site script could
+    // hold an old CSRF token).
     let (status, h, _) = on(&app, "", "/admin/settings?x=1", Some(&s.0), None, &[]).await;
     assert_eq!((status, location(&h)), (StatusCode::SEE_OTHER, format!("{new}/admin/settings?x=1")));
-    let (status, _, _) = on(&app, "", "/admin/prefs", Some(&s.0), Some(&[("nav", "open"), ("csrf", &s.1)]), &[("origin", SITE)]).await;
-    assert_eq!(status, StatusCode::SEE_OTHER);
+    let (status, _, body) = on(&app, "", "/admin/prefs", Some(&s.0), Some(&[("nav", "open"), ("csrf", &s.1)]), &[("origin", SITE)]).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(body.contains(&new), "{body}");
     assert_eq!(on(&app, new_host, "/admin/login", None, None, &[]).await.0, StatusCode::OK);
     // Then it is gone.
     *app.old_admin_until.lock().unwrap() = Some(Instant::now() - Duration::from_secs(1));

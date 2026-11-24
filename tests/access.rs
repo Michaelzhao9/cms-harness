@@ -168,3 +168,33 @@ async fn members_only_content_on_the_site() {
     assert_eq!(get_with(&app, "/notes", None).await.0, StatusCode::NOT_FOUND);
     assert_eq!(get_with(&app, "/notes", Some(&m)).await.0, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn visitor_submissions_leak_nothing_and_carry_no_images() {
+    let app = app();
+    ok(&app, &builder(), "create_collection", json!({"name": "signups", "title": "报名", "read": "private", "create": "public", "note": "x",
+        "fields": [{"name": "email", "title": "邮箱", "type": "text", "unique": true}, {"name": "intro", "title": "介绍", "type": "richtext"}]}));
+    publish_all(&app);
+    let (s, v) = post(&app, "/api/v1/content/signups", json!({"email": "victim@x.y", "intro": "<p>你好<img src=\"https://tracker.example/p.gif\"></p>"}), None).await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let id = v["id"].as_i64().unwrap();
+    let doc: String = app.conn().query_row("SELECT published FROM records WHERE id = ?1", [id], |r| r.get(0)).unwrap();
+    assert!(doc.contains("你好") && !doc.contains("<img"), "{doc}");
+    let (s, v) = post(&app, "/api/v1/content/signups", json!({"email": "victim@x.y"}), None).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let e = v["error"].as_str().unwrap();
+    assert!(e.contains("已经有人用过") && !e.contains("victim") && !e.contains(&id.to_string()), "{e}");
+}
+
+#[tokio::test]
+async fn a_screen_over_a_collection_clears_its_new_badge() {
+    let app = app();
+    setup(&app, "private", "public");
+    ok(&app, &builder(), "set_view", json!({"name": "note_log", "title": "留言记录", "collection": "notes", "columns": ["text"], "note": "x"}));
+    publish_all(&app);
+    let session = admin_session(&app, "builder").await;
+    post(&app, "/api/v1/content/notes", json!({"text": "新留言"}), None).await;
+    assert!(get_with(&app, "/admin", Some(&session.0)).await.2.contains("1 条新"));
+    get_with(&app, "/admin/v/note_log", Some(&session.0)).await;
+    assert!(!get_with(&app, "/admin", Some(&session.0)).await.2.contains("条新"));
+}

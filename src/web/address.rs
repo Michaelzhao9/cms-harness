@@ -109,7 +109,8 @@ pub fn route(app: &App, admin: Option<String>, req: &Request) -> Result<Address,
         let grace = app.old_admin_until.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|until| Instant::now() < until);
         return match (grace, matches!(*req.method(), Method::GET | Method::HEAD)) {
             (true, true) => Err(Box::new(Redirect::to(&format!("{admin}{target}")).into_response())),
-            (true, false) => Ok(Address { admin: Some(admin), here: app.origin.clone() }),
+            // A script on the site may hold an old CSRF token: the old address takes no admin POSTs at all.
+            (true, false) => Err(Box::new((StatusCode::FORBIDDEN, format!("后台已经搬到 {admin}：请在新网址重新打开后台再提交。")).into_response())),
             (false, _) => Err(Box::new((StatusCode::NOT_FOUND, "找不到这个页面。").into_response())),
         };
     }

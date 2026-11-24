@@ -269,3 +269,12 @@ fn forwarded_for_is_only_trusted_behind_a_proxy() {
     assert_eq!(cms_harness::web::client_key(&HeaderMap::new(), peer, true), "10.0.0.1");
     assert_eq!(cms_harness::web::client_key(&HeaderMap::new(), None, false), "unknown");
 }
+
+#[tokio::test]
+async fn a_planted_cookie_with_the_same_name_does_not_log_the_admin_out() {
+    let app = app();
+    let (cookie, _) = admin_session(&app, "builder").await;
+    let mut h = axum::http::HeaderMap::new();
+    h.insert(axum::http::header::COOKIE, format!("hc_admin=planted; {cookie}").parse().unwrap());
+    assert!(cms_harness::web::session::from_cookie(&app.conn(), &h).is_some());
+}

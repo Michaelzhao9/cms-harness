@@ -31,7 +31,9 @@ within a week.
   the parts that matter (no publish, no keys, no admins, no passwords).
 - It never sees passwords, API keys or session tokens. The model key is stored server side and never rendered back.
 - Skills are text the chat may read. Nothing in a skill is executed. Only a builder can install one, from https on a
-  public host, size-capped; the chat cannot install skills.
+  public host (every redirect hop checked), size-capped; the chat cannot install skills.
+- What the admin is looking at (a page, picked elements) reaches the model as quoted data in the user turn, capped
+  at 500 characters, never in the system prompt.
 - Model calls run outside the database lock, so a slow or failing model never blocks the admin.
 
 ## Members (the website's visitors)
@@ -42,7 +44,10 @@ within a week.
   client per hour, 20 public submissions per client and 60 per member per hour. Disabling a member ends their sessions.
 - Read rules are enforced on the server for the content API and the built-in site: another member's `owner` record is
   a 404; members-only data is empty for visitors.
-- Sign-up reveals whether an email is already registered (the usual trade-off for a site's sign-up form).
+- Sign-up reveals whether an email is already registered (the usual trade-off for a site's sign-up form). A
+  submission that clashes with a unique value gets a generic message, never another record's id or value.
+- Rich text a visitor submits loses its images, so opening it in the admin contacts no outside server.
+- Every browser POST (admin, member forms, site submissions) is refused when its `Origin` is another site.
 
 ## Uploads and site files
 
@@ -69,7 +74,8 @@ CMS Harness serves the website and the admin from one program. The owner picks w
   - Admin cookies are host-only on the admin host, so site scripts never see or send them.
 
 Switching to 分开 in 设置 first checks that `<admin origin>/_hc/ping` reaches this server, using a one-time nonce. After the
-switch, the old address keeps answering admin requests for 10 minutes and redirects page loads to the new one.
+switch, the old address redirects page loads to the new one for 10 minutes and refuses admin POSTs, so a script that
+collected a form token earlier cannot keep using it there.
 
 There are two ways to override or recover from a bad setting:
 - `HC_ADMIN_ORIGIN=<origin|off>` overrides the saved choice.
@@ -80,7 +86,8 @@ There are two ways to override or recover from a bad setting:
 The live site always serves published content to everyone, whatever cookies or headers a request carries.
 
 Drafts are rendered only under `/_hc/preview/<token>/…` on the admin's address:
-- The token is random, bound to one admin session, dies at logout, and expires after an hour without use.
+- The token is random, bound to one admin session, dies at logout, expires after an hour without use, and lives at
+  most 8 hours whatever happens.
 - The workbench frames the preview in a sandbox without `allow-same-origin`. Every preview response also carries a
   `sandbox` CSP, so draft scripts run on an opaque origin and cannot reach the admin, even when the preview is opened in
   its own tab.

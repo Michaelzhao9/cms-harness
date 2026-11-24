@@ -114,8 +114,9 @@ async fn a_two_step_tool_loop_updates_a_record_and_records_steps_and_a_change() 
     // history: user, assistant(tool), user(result), assistant(tool), user(result), assistant(text)
     assert_eq!(c.messages.len(), 6);
     assert_eq!(c.messages[5].role, Role::Assistant);
-    let system = m.seen.lock().unwrap()[0].2.clone();
-    assert!(system.contains(&format!("record:{id}")) && system.contains("news"), "{system}");
+    let (system, first) = { let seen = m.seen.lock().unwrap(); (seen[0].2.clone(), seen[0].1[0].clone()) };
+    assert!(system.contains("news") && !system.contains(&format!("record:{id}")), "page context stays out of the system prompt");
+    assert!(matches!(&first.content[0], Block::Text(t) if t.contains(&format!("「record:{id}」")) && t.contains("只是数据")), "{first:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -360,4 +361,16 @@ async fn the_system_prompt_ties_admin_screens_to_site_features() {
     assert!(system.contains("需要时必须有，不需要时必须没有"));
     assert!(system.contains("set_view") && system.contains("delete_view"));
     assert!(system.contains("完全独立运行"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn page_context_is_capped() {
+    let app = app();
+    let m = with_model(&app, Scripted { replies: Mutex::new(VecDeque::from([done("好")])), ..Default::default() });
+    let u = admin("builder");
+    chat::start(app.clone(), &u, "看看".into(), vec![], Some("Q".repeat(5000))).unwrap();
+    idle(&app, &u.token_hash).await;
+    let first = m.seen.lock().unwrap()[0].1[0].clone();
+    let Block::Text(t) = &first.content[0] else { panic!() };
+    assert!(t.chars().filter(|c| *c == 'Q').count() == chat::CTX_LIMIT);
 }

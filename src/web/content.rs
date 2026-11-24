@@ -732,12 +732,7 @@ pub async fn collection_list(State(app): State<Shared>, Extension(mut user): Ext
     blocking(move || {
         // Opening the list marks its submissions as seen, so the nav's "N 条新" clears.
         if crate::schema::valid_name(&name) {
-            let conn = app.conn();
-            if let Ok(now) = conn.query_row("SELECT datetime('now')", [], |r| r.get::<_, String>(0)) {
-                if super::session::set_admin_pref(&conn, user.id, &format!("seen_{name}"), &now).is_ok() {
-                    user.prefs[format!("seen_{name}")] = json!(now);
-                }
-            }
+            mark_seen(&app, &mut user, &name);
         }
         collection_page(&app, &user, &name, &params, None)
     })
@@ -749,8 +744,30 @@ pub async fn members_list(State(app): State<Shared>, Extension(user): Extension<
     blocking(move || members_page(&app, &user, &params, None)).await
 }
 
-pub async fn view_list(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Path(name): Path<String>, Query(params): Query<Params>) -> Response {
-    blocking(move || view_page(&app, &user, &name, &params)).await
+pub async fn view_list(State(app): State<Shared>, Extension(mut user): Extension<AdminUser>, Path(name): Path<String>, Query(params): Query<Params>) -> Response {
+    blocking(move || {
+        // A screen over a collection shows its submissions: opening it clears that collection's "N 条新" too.
+        let over: Option<String> = app
+            .conn()
+            .query_row("SELECT json_extract(coalesce(draft, published), '$.collection') FROM views WHERE name = ?1", [&name], |r| r.get(0))
+            .ok()
+            .flatten();
+        if let Some(c) = over.filter(|c| crate::schema::valid_name(c)) {
+            mark_seen(&app, &mut user, &c);
+        }
+        view_page(&app, &user, &name, &params)
+    })
+    .await
+}
+
+/// Records that this admin has looked at `collection`'s submissions.
+fn mark_seen(app: &App, user: &mut AdminUser, collection: &str) {
+    let conn = app.conn();
+    if let Ok(now) = conn.query_row("SELECT datetime('now')", [], |r| r.get::<_, String>(0)) {
+        if super::session::set_admin_pref(&conn, user.id, &format!("seen_{collection}"), &now).is_ok() {
+            user.prefs[format!("seen_{collection}")] = json!(now);
+        }
+    }
 }
 
 pub async fn record(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Path(id): Path<i64>, Query(params): Query<Params>) -> Response {

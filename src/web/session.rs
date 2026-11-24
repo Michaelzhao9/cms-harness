@@ -104,6 +104,19 @@ pub fn logout(conn: &Connection, token_hash: &str) {
 }
 
 /// The value of the cookie `name`, from any `Cookie` header.
+/// Every value sent for the cookie `name`, in order. A site on a parent domain can plant a same-named cookie with a
+/// longer path that the browser sends first, so callers that authenticate try them all.
+pub fn cookie_values(headers: &HeaderMap, name: &str) -> Vec<String> {
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|pair| pair.trim().strip_prefix(name)?.strip_prefix('=').map(str::to_string))
+        .filter(|t| !t.is_empty())
+        .collect()
+}
+
 pub fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get_all(header::COOKIE)
@@ -116,7 +129,11 @@ pub fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
 
 /// The logged-in admin, or `None`. An expired session is deleted when seen.
 pub fn from_cookie(conn: &Connection, headers: &HeaderMap) -> Option<AdminUser> {
-    let token_hash = sha256_hex(&cookie_value(headers, COOKIE)?);
+    cookie_values(headers, COOKIE).iter().find_map(|t| from_token(conn, t))
+}
+
+fn from_token(conn: &Connection, token: &str) -> Option<AdminUser> {
+    let token_hash = sha256_hex(token);
     let (user, live) = conn
         .query_row(
             "SELECT a.id, a.email, a.role, s.csrf, json_patch(a.prefs, s.prefs), s.expires_at > datetime('now')
@@ -157,17 +174,22 @@ pub fn issue_preview(conn: &Connection, token_hash: &str) -> Result<String, Stri
     let mut bytes = [0u8; 16];
     OsRng.fill_bytes(&mut bytes);
     let token = hex::encode(bytes);
-    conn.execute("INSERT INTO preview_tokens(token_hash, session, expires_at) VALUES(?1, ?2, datetime('now', '+1 hour'))", params![sha256_hex(&token), token_hash])
+    conn.execute(
+        "INSERT INTO preview_tokens(token_hash, session, expires_at, created_at) VALUES(?1, ?2, datetime('now', '+1 hour'), datetime('now'))",
+        params![sha256_hex(&token), token_hash],
+    )
         .map_err(db)?;
     Ok(token)
 }
 
-/// True when the token is live (and its session too); each use keeps it alive for another hour.
+/// True when the token is live (and its session too); each use keeps it alive for another hour, at most 8 hours
+/// after it was issued: a draft script that reads the token out of its URL cannot keep it alive for weeks.
 pub fn use_preview(conn: &Connection, token: &str) -> bool {
     let ok = token.len() == 32 && token.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
     ok && conn
         .execute(
-            "UPDATE preview_tokens SET expires_at = datetime('now', '+1 hour') WHERE token_hash = ?1 AND expires_at > datetime('now')
+            "UPDATE preview_tokens SET expires_at = min(datetime('now', '+1 hour'), datetime(coalesce(created_at, expires_at), '+8 hours'))
+             WHERE token_hash = ?1 AND expires_at > datetime('now') AND coalesce(created_at, expires_at) > datetime('now', '-8 hours')
              AND session IN (SELECT token_hash FROM admin_sessions WHERE expires_at > datetime('now'))",
             [sha256_hex(token)],
         )

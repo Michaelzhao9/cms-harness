@@ -177,9 +177,25 @@ pub fn enabled(conn: &Connection) -> Vec<(String, String)> {
 
 fn public_ip(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(v) => !(v.is_private() || v.is_loopback() || v.is_link_local() || v.is_unspecified() || v.is_broadcast() || v.octets()[0] == 100 && v.octets()[1] >= 64 && v.octets()[1] < 128),
-        IpAddr::V6(v) => !(v.is_loopback() || v.is_unspecified() || (v.segments()[0] & 0xfe00) == 0xfc00 || (v.segments()[0] & 0xffc0) == 0xfe80),
+        IpAddr::V4(v) => {
+            let o = v.octets();
+            !(v.is_private() || v.is_loopback() || v.is_link_local() || v.is_broadcast() || v.is_multicast() || v.is_documentation()
+                || o[0] == 0 || (o[0] == 100 && (64..128).contains(&o[1])) || (o[0] == 198 && (18..20).contains(&o[1])) || o[0] >= 240)
+        }
+        IpAddr::V6(v) => match v.to_ipv4_mapped() {
+            Some(v4) => public_ip(IpAddr::V4(v4)),
+            None => !(v.is_loopback() || v.is_unspecified() || v.is_multicast() || (v.segments()[0] & 0xfe00) == 0xfc00 || (v.segments()[0] & 0xffc0) == 0xfe80),
+        },
     }
+}
+
+/// Every address `host` resolves to is public (or private hosts are allowed for testing).
+fn host_is_public(host: &str, port: u16) -> bool {
+    if std::env::var("HC_SKILLS_ALLOW_PRIVATE").as_deref() == Ok("1") {
+        return true;
+    }
+    use std::net::ToSocketAddrs;
+    (host, port).to_socket_addrs().is_ok_and(|mut a| a.all(|s| public_ip(s.ip())))
 }
 
 /// Where to fetch a skill from: a GitHub folder link becomes the repository's zip plus the folder inside it.
@@ -213,7 +229,11 @@ pub async fn download(url: &str) -> Result<Vec<(String, String)>, String> {
     }
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
-        .redirect(reqwest::redirect::Policy::custom(|a| if a.url().scheme() == "https" && a.previous().len() < 5 { a.follow() } else { a.stop() }))
+        // Each hop is checked like the first: a public page must not redirect into the private network.
+        .redirect(reqwest::redirect::Policy::custom(|a| {
+            let ok = a.url().scheme() == "https" && a.previous().len() < 5 && a.url().host_str().is_some_and(|h| host_is_public(h, a.url().port_or_known_default().unwrap_or(443)));
+            if ok { a.follow() } else { a.stop() }
+        }))
         .build()
         .map_err(|e| e.to_string())?;
     let mut resp = client.get(parsed).send().await.map_err(|e| format!("下载技能失败：{e}"))?;
