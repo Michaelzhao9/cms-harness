@@ -10,7 +10,7 @@
 </div>
 {% if form.error %}<p class="note bad" role="alert">{{ form.error }}</p>{% endif %}
 {% if form.saved %}<p class="note good" role="status">已存为草稿，发布后才会上线。</p>{% endif %}
-{% if form.status == "deleting" %}<p class="note warn">这条记录正在等待删除，发布后才会真正删除。</p>{% endif %}
+{% if form.status == "deleting" %}<p class="note pending">这条记录正在等待删除，发布后才会真正删除。</p>{% endif %}
 <form class="fields" data-dirty method="post" action="{% if form.id %}/admin/r/{{ form.id }}{% else %}/admin/c/{{ collection }}/new{% endif %}" enctype="multipart/form-data">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 {% if form.id %}<input type="hidden" name="seen" value="{{ form.seen }}">{% endif %}

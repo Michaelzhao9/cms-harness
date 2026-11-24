@@ -336,7 +336,8 @@ html:not(.js) .chat-floating .chat.has-log .log { display: flex; max-height: 40v
 .note { padding: 10px 14px; border-radius: 8px; font-size: 13px; }
 .note.bad { background: #fdecea; }
 .note.good { background: #e9f5ed; color: var(--good); }
-.note.warn { background: var(--mark-tint); color: var(--mark-ink); }
+/* Warnings stay neutral: the change colour (--mark) means only "changed, not published". */
+.note.warn { background: var(--tint); color: var(--ink); box-shadow: inset 3px 0 0 var(--ink); }
 
 .editor { flex: 1 1 320px; max-width: 400px; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 20px 22px 22px;
   border-left: 1px solid var(--hair); }
@@ -451,13 +452,14 @@ code.secret { font-size: 13px; color: var(--ink); background: #fff; user-select:
 .sw-green { background: #1fa35c; }
 .sw-coral { background: #f2564b; }
 .sw-purple { background: #7c5cff; }
-.seg { display: flex; padding: 2px; border-radius: 9px; background: var(--panel); }
-.seg button { height: 30px; padding: 0 14px; border-radius: 7px; color: var(--muted); font-size: 13px; }
-.seg button[aria-pressed='true'] { background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 0 1px 2px rgba(16, 16, 24, .08); color: var(--ink); font-weight: 600; }
+/* Flat text options; the chosen one is underlined (the owner rejected filled segmented controls). */
+.seg { display: flex; gap: 20px; }
+.seg button { height: 32px; padding: 0 2px; border-radius: 0; color: var(--muted); font-size: 14px; }
+.seg button[aria-pressed='true'] { color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px 0 var(--ink); }
 
 /* ---- settings: the chat model and skills ---- */
 .pair2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
-.row { display: flex; gap: 8px; }
+.field-row { display: flex; gap: 8px; }
 .radios { display: flex; flex-direction: column; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--rule); }
 .radio { display: flex; align-items: center; gap: 10px; padding: 10px 14px; font-size: 14px; color: var(--ink); border-bottom: 1px solid rgba(0, 0, 0, .06); }
 .radio:last-child { border-bottom: 0; }
@@ -499,3 +501,48 @@ code.secret { font-size: 13px; color: var(--ink); background: #fff; user-select:
 .records ul.plain .flag, .records ul.plain .draft { margin-left: auto; }
 .records li.empty { padding: 24px 0; color: var(--muted); }
 .table.compact td { height: 38px; }
+
+/* ---- the wrapped look (owner-approved canvas, 2026-11-23): nav on a light grey canvas, the chat in a pale
+   rounded panel, the work area in a white sheet; 8px of canvas around both, radius 14 outside, 8 inside. ---- */
+:root { --canvas: #efeff1; --panel-2: #f8f8fa;
+  --sheet-shadow: 0 0 0 1px rgba(0, 0, 0, .055), 0 1px 2px rgba(16, 16, 24, .04), 0 12px 32px -12px rgba(16, 16, 24, .14);
+  --panel-shadow: 0 0 0 1px rgba(0, 0, 0, .05), 0 1px 2px rgba(16, 16, 24, .03), 0 8px 24px -14px rgba(16, 16, 24, .10);
+  --chip-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 0 1px 2px rgba(16, 16, 24, .06); }
+body, .shell { background: var(--canvas); }
+.nav { background: transparent; border-right: 0; }
+.nav :is(.item, .sub)[aria-current='page'] { background: #fff; box-shadow: var(--chip-shadow); }
+.chat-docked .chat { top: 8px; height: calc(100vh - 16px); margin: 8px 8px 8px 0; flex-basis: 384px; border: 0; border-radius: 14px;
+  background: var(--panel-2); box-shadow: var(--panel-shadow); overflow: hidden; }
+.main { margin: 8px 8px 8px 0; min-height: calc(100vh - 16px); border-radius: 14px; background: #fff; box-shadow: var(--sheet-shadow); overflow: hidden; }
+.workbench .main { position: sticky; top: 8px; height: calc(100vh - 16px); }
+.chat-floating .main, .chat-mini .main { margin-left: 0; }
+.bubble { box-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 0 1px 2px rgba(16, 16, 24, .04); }
+.shell.collapsed .nav { padding-left: 8px; padding-right: 8px; }
+@media (max-width: 860px) {
+  .main, .chat-docked .chat { margin: 0 8px 8px; height: auto; position: static; }
+}
+.note.pending { background: var(--mark-tint); color: var(--mark-ink); }
+
+/* ---- sign-in, as the owner-approved mockup: form on the left, an inset rounded panel on the right ---- */
+body.signin { background: #f6f6f8; }
+.signin-grid { min-height: 100vh; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); }
+.signin-form { min-height: 640px; display: flex; flex-direction: column; padding: 36px 56px 32px; }
+.signin-site { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 700; letter-spacing: .04em; }
+.signin-body { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; gap: 32px; width: 100%; max-width: 360px; padding: 40px 0; }
+.signin-head { display: flex; flex-direction: column; gap: 10px; }
+.signin-head h1 { font-size: 40px; line-height: 1.15; font-weight: 600; letter-spacing: -.03em; }
+.signin-head p { font-size: 16px; color: var(--ink-2); }
+.signin-form form { display: flex; flex-direction: column; gap: 18px; }
+.signin-form .fd { display: flex; flex-direction: column; gap: 6px; }
+.signin-form label { font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.signin-form input { height: 46px; border-radius: 8px; border-color: var(--rule); }
+.signin-form .error { font-size: 13px; font-weight: 500; }
+.signin-form button { height: 46px; margin-top: 4px; border-radius: 8px; background: var(--ink); color: #fff; font-weight: 600; transition: transform .2s var(--ease); }
+.signin-form button:active { transform: scale(.98); }
+.signin-note { font-size: 13px; color: var(--muted); }
+.signin-foot { font-size: 12px; color: var(--muted); }
+.signin-art { margin: 10px; min-height: 300px; display: flex; align-items: center; justify-content: center; border-radius: 16px;
+  background: radial-gradient(120% 90% at 30% 20%, #ffffff 0%, #ececef 55%, #e2e2e6 100%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .05), 0 12px 32px -12px rgba(16, 16, 24, .22); }
+.signin-art img { opacity: .9; filter: drop-shadow(0 10px 18px rgba(16, 16, 24, .18)); }
+@media (max-width: 860px) { .signin-art { display: none; } .signin-form { padding: 28px 24px; min-height: 100vh; } }

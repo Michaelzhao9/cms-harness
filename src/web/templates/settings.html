@@ -88,7 +88,7 @@
 <div class="fd"><label class="lb" for="m-svc">模型服务</label><select class="in" id="m-svc" name="preset">
 {% for p in model.presets %}<option value="{{ p.id }}" data-url="{{ p.base_url }}"{% if p.on %} selected{% endif %}>{{ p.name }}</option>
 {% endfor %}</select></div>
-<div class="fd"><label class="lb" for="m-key">密钥</label><div class="row"><input class="in" id="m-key" type="password" name="key" autocomplete="off" placeholder="{{ '已保存，不显示。要换就重新填' if model.key_set else '这家服务给你的 API 密钥' }}"><button type="submit" class="btn2" formaction="/admin/settings/model/detect" formnovalidate>检测</button></div></div>
+<div class="fd"><label class="lb" for="m-key">密钥</label><div class="field-row"><input class="in" id="m-key" type="password" name="key" autocomplete="off" placeholder="{{ '已保存，不显示。要换就重新填' if model.key_set else '这家服务给你的 API 密钥' }}"><button type="submit" class="btn2" formaction="/admin/settings/model/detect" formnovalidate>检测</button></div></div>
 </div>
 <div class="fd"><label class="lb" for="m-url">接口地址<span class="req">不填就用这家服务的默认地址</span></label><input class="in mono" id="m-url" type="url" name="base_url" value="{{ model.base_url }}" placeholder="https://…"></div>
 <div class="fd"><span class="lb">型号{% if model.models %}<span class="req">检测到 {{ model.models|length }} 个</span>{% endif %}</span>
@@ -128,7 +128,7 @@
 {% if builder -%}
 <form class="fields" method="post" action="/admin/settings/skills/install" enctype="multipart/form-data">
 <input type="hidden" name="csrf" value="{{ csrf }}">
-<div class="fd"><label class="lb" for="sk-url">安装新技能</label><div class="row"><input class="in" id="sk-url" type="url" name="url" placeholder="GitHub 文件夹、zip 或 SKILL.md 的链接"><button type="submit" class="btn2">{{ i.icon("download", 16) }}安装</button></div></div>
+<div class="fd"><label class="lb" for="sk-url">安装新技能</label><div class="field-row"><input class="in" id="sk-url" type="url" name="url" placeholder="GitHub 文件夹、zip 或 SKILL.md 的链接"><button type="submit" class="btn2">{{ i.icon("download", 16) }}安装</button></div></div>
 <div class="fd"><label class="lb" for="sk-zip">或者上传一个压缩包</label><input id="sk-zip" type="file" name="zip" accept=".zip,application/zip"></div>
 </form>
 {%- else %}<p class="small">只有搭建者可以安装和管理技能。</p>{% endif %}
