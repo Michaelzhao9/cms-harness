@@ -29,6 +29,19 @@ pub struct FieldDef {
     pub options: Vec<String>,
     #[serde(default)]
     pub target: Option<String>,
+    /// Text and rich text are translated into the site's other languages unless this is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translate: Option<bool>,
+}
+
+/// What another language shows of a record that has no translation there.
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Untranslated {
+    /// The default language's text (the default).
+    Fallback,
+    /// Nothing: the record is not in that language.
+    Hide,
 }
 
 /// Who may read a collection's live records (content API and built-in site).
@@ -101,6 +114,9 @@ pub struct CollectionDef {
     /// Where each record's page lives, like `/news/{slug}`; `/{name}/{slug}` when left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// In another language, records without a translation fall back to the default language, or are hidden.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub untranslated: Option<Untranslated>,
 }
 
 impl CollectionDef {
@@ -230,7 +246,7 @@ fn show(v: &Value) -> String {
 }
 
 /// Checks one value against one field and returns the cleaned value. `null` is always accepted.
-fn check_value(f: &FieldDef, value: &Value) -> Result<Value, String> {
+pub fn check_value(f: &FieldDef, value: &Value) -> Result<Value, String> {
     use FieldType::*;
     let n = &f.name;
     if value.is_null() { return Ok(Value::Null); }

@@ -41,7 +41,10 @@ pub struct Query {
 pub struct Row {
     pub id: i64,
     pub status: &'static str,
+    /// The fields the definition declares.
     pub doc: Value,
+    /// The stored document, translations (`_i18n`) included.
+    pub raw: Value,
 }
 
 /// A JSON scalar as an SQL parameter; `None` for null, arrays and objects.
@@ -92,7 +95,7 @@ fn check_filter(def: &CollectionDef, field: &str, op: Op, v: &Value) -> Result<(
     if let Some(f) = f.filter(|f| matches!(f.kind, FieldType::Date | FieldType::Select)) {
         // reuse the record validator on a one-field definition so dates and options are judged the same way
         let one = CollectionDef { name: def.name.clone(), title: String::new(), single: false, access: Default::default(),
-            fields: vec![FieldDef { required: false, ..f.clone() }], url: None };
+            fields: vec![FieldDef { required: false, ..f.clone() }], url: None, untranslated: None };
         normalize(&one, &Value::Null, &serde_json::json!({ field: v }))
             .map_err(|e| format!("筛选字段“{field}”的值不合法：{e}"))?;
     }
@@ -221,7 +224,7 @@ pub fn run(conn: &Connection, def: &CollectionDef, q: &Query, live: bool) -> Res
     for r in rows {
         let (id, p, d, dd, doc) = r.map_err(err)?;
         let doc: Value = serde_json::from_str(&doc).map_err(|e| format!("记录 {id} 的内容已损坏：{e}"))?;
-        out.push(Row { id, status: changes::status(p, d, dd), doc: project(def, &doc) });
+        out.push(Row { id, status: changes::status(p, d, dd), doc: project(def, &doc), raw: doc });
     }
     Ok((out, total))
 }

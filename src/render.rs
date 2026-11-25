@@ -44,5 +44,14 @@ pub fn admin_page(name: &str, ctx: Value) -> Result<String, String> {
     ADMIN
         .get_template(name)
         .and_then(|t| t.render(ctx))
-        .map_err(|e| format!("渲染后台页面“{name}”失败：{e}"))
+        .map_err(|e| {
+            // The innermost cause says what went wrong (an include wraps the real error).
+            let mut why = e.to_string();
+            let mut src = std::error::Error::source(&e);
+            while let Some(s) = src {
+                why = format!("{why}：{s}");
+                src = s.source();
+            }
+            format!("渲染后台页面“{name}”失败：{why}")
+        })
 }

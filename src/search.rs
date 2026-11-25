@@ -143,6 +143,12 @@ pub struct Hit {
 
 /// The published records matching `q` that `viewer` may read, best first. `only` limits it to one collection.
 pub fn search(conn: &Connection, q: &str, only: Option<&str>, viewer: crate::access::Viewer, limit: usize) -> Result<Vec<Hit>, String> {
+    search_in(conn, q, only, viewer, limit, None)
+}
+
+/// `search` in a language: matched and shown in that language's text (with its fallbacks); records not in that
+/// language are left out.
+pub fn search_in(conn: &Connection, q: &str, only: Option<&str>, viewer: crate::access::Viewer, limit: usize, lang: Option<&crate::langs::Current>) -> Result<Vec<Hit>, String> {
     let Some(expr) = match_expr(q) else { return Ok(vec![]) };
     let fail = |e: rusqlite::Error| format!("搜索失败：{e}");
     // ponytail: reads up to 500 hits and filters by access in Rust; push the rules into SQL if sites get that big.
@@ -176,7 +182,12 @@ pub fn search(conn: &Connection, q: &str, only: Option<&str>, viewer: crate::acc
         // Only what the collection still defines counts: a removed field's text stays in the record (so the field
         // can come back) but is neither found nor shown.
         let doc: Value = doc.and_then(|d| serde_json::from_str(&d).ok()).unwrap_or(Value::Null);
-        let body = text_of(&crate::schema::project(def, &doc).to_string());
+        let shown = match lang.filter(|l| !l.is_default()) {
+            Some(l) if !crate::langs::visible(def, &doc, &l.code, &l.default) => continue,
+            Some(l) => crate::langs::localize(def, &doc, &l.chain, &l.default),
+            None => crate::schema::project(def, &doc),
+        };
+        let body = text_of(&shown.to_string());
         if !contains_all(&body, &wanted, prefix_last) {
             continue;
         }

@@ -182,8 +182,25 @@ fn segment(v: &Value) -> Option<String> {
 /// Where a record lives in this mode, or None when its collection has no detail template (or a placeholder has no
 /// value). `doc` is the record as the caller already has it.
 pub fn url_for(conn: &Connection, mode: Mode, def: &CollectionDef, id: i64, doc: &Value) -> Option<String> {
+    url_for_in(conn, mode, def, id, doc, None)
+}
+
+/// A record's slug in a language: its own translated one, else the default language's.
+fn slug_in(conn: &Connection, id: i64, mode: Mode, doc: &Value, lang: Option<&crate::langs::Current>) -> Option<String> {
+    lang.filter(|l| !l.is_default())
+        .and_then(|l| doc[crate::langs::KEY][&l.code]["_slug"].as_str().map(String::from))
+        .or_else(|| slug_of(conn, id, mode))
+}
+
+/// `url_for` in a language: the language's prefix and slug; None when the record is not in that language.
+pub fn url_for_in(conn: &Connection, mode: Mode, def: &CollectionDef, id: i64, doc: &Value, lang: Option<&crate::langs::Current>) -> Option<String> {
     template(conn, mode, &def.name)?;
-    let mut out = String::new();
+    if let Some(l) = lang.filter(|l| !l.is_default()) {
+        if !crate::langs::visible(def, doc, &l.code, &l.default) {
+            return None;
+        }
+    }
+    let mut out = lang.map(|l| l.prefix.clone()).unwrap_or_default();
     for seg in pattern(def).trim_matches('/').split('/') {
         out.push('/');
         let Some(inner) = seg.strip_prefix('{').and_then(|s| s.strip_suffix('}')) else {
@@ -191,13 +208,20 @@ pub fn url_for(conn: &Connection, mode: Mode, def: &CollectionDef, id: i64, doc:
             continue;
         };
         let value = match inner.split_once('.') {
-            None if inner == "slug" => slug_of(conn, id, mode)?,
+            None if inner == "slug" => slug_in(conn, id, mode, doc, lang)?,
             None if inner == "id" => id.to_string(),
             None => segment(doc.get(inner)?)?,
-            Some((rel, "slug")) => slug_of(conn, doc.get(rel)?.as_i64()?, mode)?,
+            Some((rel, "slug")) => {
+                let rid = doc.get(rel)?.as_i64()?;
+                let rdoc = doc_of(conn, rid, mode).unwrap_or(Value::Null);
+                slug_in(conn, rid, mode, &rdoc, lang)?
+            }
             Some((rel, _)) => doc.get(rel)?.as_i64()?.to_string(),
         };
         out.push_str(&value);
+    }
+    if out.is_empty() {
+        out.push('/');
     }
     Some(out)
 }
@@ -228,6 +252,11 @@ fn routable(conn: &Connection, mode: Mode) -> Vec<(CollectionDef, String)> {
 
 /// The record a request path names, for a viewer who may read it. `segments` are the decoded path segments.
 pub fn resolve(conn: &Connection, mode: Mode, segments: &[String], viewer: crate::access::Viewer) -> Option<Found> {
+    resolve_in(conn, mode, segments, viewer, None)
+}
+
+/// `resolve` in a language: `segments` without the language prefix, slugs matched in that language.
+pub fn resolve_in(conn: &Connection, mode: Mode, segments: &[String], viewer: crate::access::Viewer, lang: Option<&crate::langs::Current>) -> Option<Found> {
     for (def, template) in routable(conn, mode) {
         let pat: Vec<String> = pattern(&def).trim_matches('/').split('/').map(String::from).collect();
         if pat.len() != segments.len() {
@@ -243,29 +272,42 @@ pub fn resolve(conn: &Connection, mode: Mode, segments: &[String], viewer: crate
             None => p == s,
         });
         let Some((kind, value)) = key.filter(|_| literal_ok) else { continue };
-        let Some(id) = find(conn, mode, &def.name, kind, value) else { continue };
-        if let Some(found) = found(conn, mode, &def, id, viewer, template) {
+        let Some(id) = find(conn, mode, &def.name, kind, value, lang) else { continue };
+        if let Some(found) = found(conn, mode, &def, id, viewer, template, lang) {
             return Some(found);
         }
     }
     None
 }
 
-fn find(conn: &Connection, mode: Mode, collection: &str, kind: &str, value: &str) -> Option<i64> {
+fn find(conn: &Connection, mode: Mode, collection: &str, kind: &str, value: &str, lang: Option<&crate::langs::Current>) -> Option<i64> {
     let visible = match mode {
         Mode::Live => "published IS NOT NULL",
         Mode::Preview => "(published IS NOT NULL OR draft IS NOT NULL) AND draft_deleted = 0",
     };
-    let by = match (kind, mode) {
-        ("id", _) => "id = ?2",
-        (_, Mode::Live) => "slug = ?2",
-        (_, Mode::Preview) => "coalesce(draft_slug, slug) = ?2",
+    let (doc, base) = match mode {
+        Mode::Live => ("published", "slug"),
+        Mode::Preview => ("coalesce(draft, published)", "coalesce(draft_slug, slug)"),
+    };
+    // In another language a translated slug wins; records without one keep the default language's.
+    let by = match (kind, lang.filter(|l| !l.is_default())) {
+        ("id", _) => "id = ?2".to_string(),
+        (_, None) => format!("{base} = ?2"),
+        (_, Some(l)) => {
+            let path = format!("$._i18n.\"{}\"._slug", l.code);
+            format!("(json_extract({doc}, '{path}') = ?2 OR (json_extract({doc}, '{path}') IS NULL AND {base} = ?2))")
+        }
     };
     let id: Option<i64> = conn
         .query_row(&format!("SELECT id FROM records WHERE collection = ?1 AND {by} AND {visible}"), params![collection, value], |r| r.get(0))
         .optional()
         .ok()
         .flatten();
+    // In another language, the default language's slug still finds the record (and redirects to its own address).
+    let id = id.or_else(|| {
+        lang.filter(|l| !l.is_default() && kind == "slug")
+            .and_then(|_| conn.query_row(&format!("SELECT id FROM records WHERE collection = ?1 AND {base} = ?2 AND {visible}"), params![collection, value], |r| r.get(0)).optional().ok().flatten())
+    });
     id.or_else(|| {
         // A slug this record used to have.
         (kind == "slug")
@@ -274,7 +316,7 @@ fn find(conn: &Connection, mode: Mode, collection: &str, kind: &str, value: &str
     })
 }
 
-fn found(conn: &Connection, mode: Mode, def: &CollectionDef, id: i64, viewer: crate::access::Viewer, template: String) -> Option<Found> {
+fn found(conn: &Connection, mode: Mode, def: &CollectionDef, id: i64, viewer: crate::access::Viewer, template: String, lang: Option<&crate::langs::Current>) -> Option<Found> {
     let (_, owner) = crate::site::visible_def(conn, mode, &def.name, viewer).ok().flatten()?;
     if let Some(me) = owner {
         let theirs: Option<i64> = conn.query_row("SELECT owner FROM records WHERE id = ?1", [id], |r| r.get(0)).ok().flatten();
@@ -283,16 +325,20 @@ fn found(conn: &Connection, mode: Mode, def: &CollectionDef, id: i64, viewer: cr
         }
     }
     let doc = doc_of(conn, id, mode)?;
-    let canonical = url_for(conn, mode, def, id, &doc)?;
+    let canonical = url_for_in(conn, mode, def, id, &doc, lang)?;
     Some(Found { collection: def.name.clone(), id, canonical, template })
 }
 
 /// Where `/_r/<id>` points: the record's page, for a viewer who may read it.
 pub fn by_id(conn: &Connection, mode: Mode, id: i64, viewer: crate::access::Viewer) -> Option<Found> {
+    by_id_in(conn, mode, id, viewer, None)
+}
+
+pub fn by_id_in(conn: &Connection, mode: Mode, id: i64, viewer: crate::access::Viewer, lang: Option<&crate::langs::Current>) -> Option<Found> {
     let collection: String = conn.query_row("SELECT collection FROM records WHERE id = ?1", [id], |r| r.get(0)).ok()?;
     let def = crate::site::any_def(conn, mode, &collection).ok().flatten()?;
     let template = template(conn, mode, &collection)?;
-    found(conn, mode, &def, id, viewer, template)
+    found(conn, mode, &def, id, viewer, template, lang)
 }
 
 /// Own-site links in rich text become `/_r/<id>` when they point at a record's page, so they follow the record.
@@ -317,7 +363,14 @@ pub fn link_refs(conn: &Connection, origin: &str, html: &str) -> String {
             .then(|| {
                 let (p, _) = path.split_once(['?', '#']).unwrap_or((path, ""));
                 let segments: Vec<String> = p.trim_matches('/').split('/').map(decode).collect();
-                resolve(conn, Mode::Preview, &segments, crate::access::Viewer::Key).map(|f| format!("/_r/{}", f.id))
+                // A link into another language of this site: its prefix is not part of the record's address.
+                let langs = crate::langs::load(conn, true);
+                let lang = langs.as_ref().and_then(|l| {
+                    let first = segments.first()?;
+                    l.get(first).filter(|x| !l.is_default(&x.code)).map(|x| crate::langs::Current::new(l, &x.code, false))
+                });
+                let rest = if lang.is_some() { &segments[1..] } else { &segments[..] };
+                resolve_in(conn, Mode::Preview, rest, crate::access::Viewer::Key, lang.as_ref()).map(|f| format!("/_r/{}", f.id))
             })
             .flatten();
         out.push_str(replaced.as_deref().unwrap_or(href));
@@ -329,6 +382,10 @@ pub fn link_refs(conn: &Connection, origin: &str, html: &str) -> String {
 
 /// `/_r/<id>` links in rendered HTML replaced by where each record is now; ones that cannot be shown stay.
 pub fn expand_refs(conn: &Connection, mode: Mode, html: &str, viewer: crate::access::Viewer) -> String {
+    expand_refs_in(conn, mode, html, viewer, None)
+}
+
+pub fn expand_refs_in(conn: &Connection, mode: Mode, html: &str, viewer: crate::access::Viewer, lang: Option<&crate::langs::Current>) -> String {
     if !html.contains("/_r/") {
         return html.to_string();
     }
@@ -339,7 +396,7 @@ pub fn expand_refs(conn: &Connection, mode: Mode, html: &str, viewer: crate::acc
         out.push_str(head);
         let digits: String = tail[4..].chars().take_while(char::is_ascii_digit).collect();
         let after = &tail[4 + digits.len()..];
-        match digits.parse::<i64>().ok().filter(|_| after.starts_with('"')).and_then(|id| by_id(conn, mode, id, viewer)) {
+        match digits.parse::<i64>().ok().filter(|_| after.starts_with('"')).and_then(|id| by_id_in(conn, mode, id, viewer, lang)) {
             Some(f) => {
                 out.push_str(&f.canonical);
                 rest = after;
@@ -365,8 +422,18 @@ pub fn encode(path: &str) -> String {
     path.split('/').map(|s| percent_encoding::utf8_percent_encode(s, SEG).to_string()).collect::<Vec<_>>().join("/")
 }
 
+/// Collections visitors may read without signing in that have record pages.
+pub fn routable_public(conn: &Connection) -> Vec<(CollectionDef, String)> {
+    routable(conn, Mode::Live).into_iter().filter(|(d, _)| d.access.is_public()).collect()
+}
+
 /// Every live record page a visitor may read without signing in: (path, last change).
 pub fn public_pages(conn: &Connection) -> Vec<(String, Option<String>)> {
+    public_pages_in(conn, None)
+}
+
+/// `public_pages` in a language (its prefix and slugs; records not in that language left out).
+pub fn public_pages_in(conn: &Connection, lang: Option<&crate::langs::Current>) -> Vec<(String, Option<String>)> {
     let mut out = vec![];
     for (def, _) in routable(conn, Mode::Live) {
         if !def.access.is_public() {
@@ -378,7 +445,7 @@ pub fn public_pages(conn: &Connection) -> Vec<(String, Option<String>)> {
             .unwrap_or_default();
         for (id, doc, at) in rows {
             let doc = serde_json::from_str(&doc).unwrap_or(Value::Null);
-            if let Some(url) = url_for(conn, Mode::Live, &def, id, &doc) {
+            if let Some(url) = url_for_in(conn, Mode::Live, &def, id, &doc, lang) {
                 out.push((url, at.map(|d| d.chars().take(10).collect())));
             }
         }

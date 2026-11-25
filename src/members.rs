@@ -67,6 +67,7 @@ pub fn members_def() -> CollectionDef {
         default: None,
         options: options.iter().map(|s| s.to_string()).collect(),
         target: None,
+        translate: None,
     };
     let mut def: CollectionDef = serde_json::from_value(json!({ "name": MEMBERS, "title": "用户", "fields": [] })).expect("valid empty def");
     def.fields = vec![

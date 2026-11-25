@@ -19,6 +19,7 @@ pub mod cache;
 pub mod canvas;
 pub mod export;
 pub mod i18n;
+pub mod langs;
 pub mod routes;
 pub mod schedule;
 pub mod search;
