@@ -630,7 +630,7 @@ body.signin { background: #efeff1; }
 .cpop.grid button.all { grid-column: 1 / -1; }
 
 /* ---- the pen: bottom right of the preview; opens the tools that add elements ---- */
-.pen { position: absolute; z-index: 6; right: 24px; bottom: 24px; display: flex; align-items: center; gap: 12px; }
+.pen { position: fixed; z-index: 21; right: 24px; bottom: 24px; display: flex; align-items: center; gap: 12px; }
 .chat-mini .pen { right: 92px; }
 .pen-btn, .pen-tools { background: linear-gradient(180deg, rgba(255, 255, 255, .72), rgba(255, 255, 255, .56)); backdrop-filter: blur(22px) saturate(1.8);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), inset 0 0 0 1px rgba(255, 255, 255, .45), 0 0 0 1px rgba(16, 16, 24, .08), 0 2px 8px -2px rgba(16, 16, 24, .1), 0 24px 48px -18px rgba(16, 16, 24, .32); }
@@ -663,3 +663,23 @@ body.signin { background: #efeff1; }
 .tr-state.stale, .tr-stale { color: var(--mark-ink); }
 .tr-source { display: block; margin: 2px 0 6px; color: var(--muted); }
 .translation .ask-ai { margin-top: 6px; }
+
+/* ---- motion: the chat's sizes, the nav and page changes morph instead of jumping ---- */
+@view-transition { navigation: auto; }
+.nav { view-transition-name: nav; }
+.chat { view-transition-name: chat; }
+.main { view-transition-name: main; }
+.pen { view-transition-name: pen; }
+::view-transition-group(*) { animation-duration: .32s; animation-timing-function: var(--ease); }
+::view-transition-old(chat), ::view-transition-new(chat) { height: 100%; object-fit: cover; }
+.pen-tools:not([hidden]) { animation: hc-rise .22s var(--ease); transform-origin: right center; }
+.cbar:not([hidden]) { animation: hc-rise .16s var(--ease); transform-origin: left bottom; }
+.cpop { animation: hc-rise .14s var(--ease); transform-origin: left top; }
+@keyframes hc-rise { from { opacity: 0; transform: translateY(6px) scale(.97); } }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+  .pen-tools, .cbar, .cpop { animation: none !important; }
+}
+/* The work area changes size, not content: no ghost of the old page while it moves. */
+::view-transition-old(main) { display: none; }
+::view-transition-new(main) { animation: none; width: 100%; height: 100%; object-fit: cover; object-position: left top; }

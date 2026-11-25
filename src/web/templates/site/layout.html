@@ -38,7 +38,7 @@ form.stack input { font: inherit; height: 46px; padding: 0 14px; border: 1px sol
 </style>
 </head>
 <body>
-<nav class="lang" aria-label="语言 / Language"><a href="?lang=zh" lang="zh-CN"{% if lang != 'en' %} aria-current="true"{% endif %}>中文</a><a href="?lang=en" lang="en"{% if lang == 'en' %} aria-current="true"{% endif %}>EN</a></nav>
+{% if builtin %}<nav class="lang" aria-label="语言 / Language"><a href="?lang=zh" lang="zh-CN"{% if lang != 'en' %} aria-current="true"{% endif %}>中文</a><a href="?lang=en" lang="en"{% if lang == 'en' %} aria-current="true"{% endif %}>EN</a></nav>{% endif %}
 <main><div class="wrap">
 {% block main %}{% endblock %}
 </div></main>

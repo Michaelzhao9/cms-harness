@@ -41,10 +41,20 @@ function mode() {
   return ['docked', 'floating', 'mini'].find((m) => shell.classList.contains(`chat-${m}`)) || 'docked';
 }
 
+/** Runs `change` as an animated transition where the browser can (the old and new layouts morph into each
+ * other), else at once. Nothing moves for people who asked for less motion. */
+function animate(change) {
+  const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  if (!document.startViewTransition || still) return change();
+  document.startViewTransition(change);
+}
+
 function setMode(m, focus) {
   if (!shell || mode() === m) return;
-  shell.classList.remove('chat-docked', 'chat-floating', 'chat-mini');
-  shell.classList.add(`chat-${m}`);
+  animate(() => {
+    shell.classList.remove('chat-docked', 'chat-floating', 'chat-mini');
+    shell.classList.add(`chat-${m}`);
+  });
   send('/admin/prefs', form({ chat: m })).catch(() => {});
   if (focus && m !== 'mini') setTimeout(() => ask?.focus(), 0);
 }

@@ -370,6 +370,8 @@ impl Visit<'_> {
         // The built-in pages: where the admin opens, for the welcome.
         if template.starts_with("_hc/") {
             ctx["admin_url"] = json!(self.admin_url);
+            // The visitor's 中文 / EN switch is for these pages only: a site's own pages that use the layout decide for themselves.
+            ctx["builtin"] = json!(true);
         }
         // A multilingual site: the page's language, its other languages, and its template text.
         let alternates = self.alternates(&extra);
