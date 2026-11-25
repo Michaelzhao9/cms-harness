@@ -397,7 +397,7 @@ async fn the_mark_color_preference_is_saved_and_applied() {
     // The chat mode is stored and handed to the templates.
     assert_eq!(post_form(&app, "/admin/settings/appearance", Some(&s), &[("chat", "floating")]).await.0, StatusCode::SEE_OTHER);
     let u = user_of(&app, &s.0);
-    assert_eq!(admin::nav(&app.conn(), &u, "settings")["chat"], "floating");
+    assert_eq!(admin::nav(&app.conn(), &u, "settings", false)["chat"], "floating");
     let (_, _, page) = get_with(&app, "/admin/settings", Some(&s.0)).await;
     assert!(page.contains("name=\"chat\" value=\"floating\" aria-pressed=\"true\""), "{page}");
 }

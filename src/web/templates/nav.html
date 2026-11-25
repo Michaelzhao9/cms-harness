@@ -15,7 +15,7 @@
 <span class="rule" aria-hidden="true"></span>
 <span class="cap">{{ "内容与表单"|t }}</span>
 {% for c in nav.collections -%}
-<a class="item" href="/admin/c/{{ c.name }}"{% if nav.current == "c:" ~ c.name %} aria-current="page"{% endif %}{% if nav.collapsed %} title="{{ c.title }}"{% endif %}>{{ i.icon("clipboard-text") }}<span class="label">{{ c.title }}</span>
+<a class="item{% if c.unused %} unused{% endif %}" href="/admin/c/{{ c.name }}"{% if nav.current == "c:" ~ c.name %} aria-current="page"{% endif %}{% if nav.collapsed %} title="{{ c.title }}{% if c.unused %} · {{ '网站上还没用到'|t }}{% endif %}"{% elif c.unused %} title="{{ '网站上还没用到'|t }}"{% endif %}>{{ i.icon("clipboard-text") }}<span class="label">{{ c.title }}</span>
 {%- if c.pending %}<span class="mk" aria-hidden="true"></span><span class="sr">{{ "有改动"|t }}</span>{% endif %}
 {%- if c.fresh %}<span class="fresh">{{ c.fresh }} {{ "条新"|t }}</span>{% else %}<span class="num">{{ c.count }}</span>{% endif %}</a>
 {% if c.views and not nav.collapsed -%}
@@ -25,11 +25,15 @@
 </div>
 {% endif -%}
 {% endfor -%}
+{% if nav.members or nav.media or nav.releases -%}
 <span class="rule" aria-hidden="true"></span>
 <span class="cap">{{ "后台"|t }}</span>
+{% endif -%}
 {% if nav.members %}{{ item("/admin/members", "members", ("用户管理"|t), "users") }}
 {% endif -%}
-{{ item("/admin/media", "media", ("素材库"|t), "images") }}
-{{ item("/admin/releases", "releases", ("发布记录"|t), "clock-counter-clockwise") }}
+{% if nav.media %}{{ item("/admin/media", "media", ("素材库"|t), "images") }}
+{% endif -%}
+{% if nav.releases %}{{ item("/admin/releases", "releases", ("发布记录"|t), "clock-counter-clockwise") }}
+{% endif -%}
 {{ item("/admin/settings", "settings", ("设置"|t), "sliders-horizontal", "item end") }}
 </nav>

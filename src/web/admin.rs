@@ -54,8 +54,31 @@ pub const MARKS: [(&str, &str); 5] = [("yellow", "黄"), ("blue", "蓝"), ("gree
 /// The nav context every admin page passes to `base.html`. `current` names the page: `web`, `c:<name>`, `v:<view>`,
 /// `media`, `publish`, `releases` or `settings`. It also carries the admin's look: `mark` (a `MARKS` key) and
 /// `chat` (`docked` or `floating`).
-pub fn nav(conn: &Connection, user: &AdminUser, current: &str) -> Value {
+/// The site's text files as the preview sees them (drafts over live ones): what the site is made of.
+fn site_texts(conn: &Connection) -> Vec<(String, String)> {
+    let Ok(mut stmt) = conn.prepare("SELECT path, coalesce(draft, published) FROM site_files WHERE draft_deleted = 0") else { return vec![] };
+    stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))
+        .map(|rows| {
+            rows.filter_map(|r| r.ok())
+                .filter(|(p, _)| !crate::site::is_binary(p))
+                .map(|(p, j)| (p, j.and_then(|j| serde_json::from_str::<String>(&j).ok()).unwrap_or_default()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Whether the site shows a collection anywhere: a site file names it (`collection("news")`, `record('news', …)`,
+/// a form posting to `/news/new`, a link under `/news/`) or lives under `news/` (its record pages).
+pub fn site_uses(texts: &[(String, String)], name: &str) -> bool {
+    let quoted = [format!("\"{name}\""), format!("'{name}'"), format!("/{name}/"), format!("/{name}\""), format!("/{name}'")];
+    texts.iter().any(|(path, text)| path.starts_with(&format!("{name}/")) || quoted.iter().any(|q| text.contains(q.as_str())))
+}
+
+/// The nav. It keeps itself tight: an item is there while it is useful and gone when it is not.
+/// `has_media`: there are uploaded files.
+pub fn nav(conn: &Connection, user: &AdminUser, current: &str, has_media: bool) -> Value {
     let mark = user.prefs["mark"].as_str().filter(|m| MARKS.iter().any(|(k, _)| k == m)).unwrap_or("yellow");
+    let texts = site_texts(conn);
     json!({
         "current": current,
         "collapsed": user.prefs["nav"] == "collapsed",
@@ -63,11 +86,16 @@ pub fn nav(conn: &Connection, user: &AdminUser, current: &str) -> Value {
         "chat": user.prefs["chat"].as_str().filter(|c| CHAT_MODES.contains(c)).unwrap_or("docked"),
         // 用户管理 is there exactly while member login is on (live or drafted) and gone when it is off.
         "members": crate::members::login_enabled(conn, true),
+        // 素材库 once something was uploaded; 发布记录 lives in 发布 and 设置, shown here only while open.
+        "media": has_media || current == "media",
+        "releases": current == "releases",
         // A database error leaves the nav without collections rather than failing the page.
         "collections": nav_collections(conn).unwrap_or_default().into_iter().map(|mut c| {
             let name = c["name"].as_str().unwrap_or_default().to_string();
             // Visitor and member submissions this admin has not looked at yet.
             c["fresh"] = json!(crate::access::new_submissions(conn, &name, user.prefs[format!("seen_{name}")].as_str()));
+            // Content the site does not show yet is marked, so it is not mistaken for something visitors see.
+            c["unused"] = json!(!site_uses(&texts, &name));
             c
         }).collect::<Vec<_>>(),
     })

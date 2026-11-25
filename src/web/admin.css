@@ -683,3 +683,9 @@ body.signin { background: #efeff1; }
 /* The work area changes size, not content: no ghost of the old page while it moves. */
 ::view-transition-old(main) { display: none; }
 ::view-transition-new(main) { animation: none; width: 100%; height: 100%; object-fit: cover; object-position: left top; }
+
+/* Content the site does not show yet: quieter in the nav, explained on its page. */
+.nav .item.unused .label { color: var(--muted); }
+.unused-note { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 0 28px 14px; padding: 12px 14px; border-radius: 10px; background: var(--tint); font-size: 13px; }
+.unused-note p { margin: 0; flex: 1 1 280px; }
+.unused-note form { margin: 0; }

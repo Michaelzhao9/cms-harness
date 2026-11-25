@@ -143,7 +143,7 @@ fn settings_page(app: &App, user: &AdminUser, extra: Extra) -> Result<Out, Out> 
     };
     let notes = content::tool(app, user, "get_site_notes", json!({})).map_err(content::internal)?;
     let site = content::tool(app, user, "get_site_settings", json!({})).map_err(content::internal)?;
-    let nav = super::admin::nav(&app.conn(), user, "settings");
+    let nav = super::admin::nav(&app.conn(), user, "settings", !crate::media::list(app).is_empty());
     let status = if extra.error.is_some() { StatusCode::BAD_REQUEST } else { StatusCode::OK };
     let address = super::address::section(app, extra.address);
     let ctx = json!({

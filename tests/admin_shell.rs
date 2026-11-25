@@ -12,7 +12,7 @@ fn user(app: &cms_harness::Shared, cookie: &str) -> session::AdminUser {
 
 fn nav_of(app: &cms_harness::Shared, cookie: &str) -> Value {
     let u = user(app, cookie);
-    admin::nav(&app.conn(), &u, "web")
+    admin::nav(&app.conn(), &u, "web", false)
 }
 
 fn products(app: &cms_harness::Shared) {
@@ -69,8 +69,8 @@ async fn nav_lists_collections_and_their_views() {
     assert_clean(&body);
     for needle in [
         "href=\"/admin\"", "网页", "内容与表单", "href=\"/admin/c/news\"", "新闻", "href=\"/admin/c/products\"", "产品",
-        "href=\"/admin/v/news_by_date\"", "新闻（按日期）", "后台", "href=\"/admin/media\"", "素材库",
-        "href=\"/admin/releases\"", "发布记录", "href=\"/admin/settings\"", "设置", "aria-current=\"page\"",
+        "href=\"/admin/v/news_by_date\"", "新闻（按日期）",
+        "href=\"/admin/settings\"", "设置", "aria-current=\"page\"",
     ] {
         assert!(body.contains(needle), "missing {needle}: {body}");
     }
@@ -80,9 +80,9 @@ async fn nav_lists_collections_and_their_views() {
     let at = |s: &str| body.find(s).unwrap();
     assert!(at("href=\"/admin/c/news\"") < at("href=\"/admin/v/news_by_date\""));
     assert!(at("href=\"/admin/v/news_by_date\"") < at("href=\"/admin/c/products\""));
-    assert!(at("href=\"/admin/c/products\"") < at("href=\"/admin/media\""));
-    assert!(at("href=\"/admin/media\"") < at("href=\"/admin/releases\""));
-    assert!(at("href=\"/admin/releases\"") < at("href=\"/admin/settings\""));
+    assert!(at("href=\"/admin/c/products\"") < at("href=\"/admin/settings\""));
+    // Media and history are not in the nav until there is something to show (the_nav_keeps_only_what_is_useful).
+    assert!(!body.contains("href=\"/admin/media\"") && !body.contains("href=\"/admin/releases\""));
     // The home page frames the site preview.
     assert!(frame_src(&body, "draft").starts_with("/_hc/preview/"), "{body}");
 
@@ -211,4 +211,29 @@ async fn stylesheet_is_served_with_cache_headers() {
         let v: String = page[start + "/admin/static/admin.css?v=".len()..].chars().take_while(char::is_ascii_hexdigit).collect();
         assert_eq!(v.len(), 12, "{page}");
     }
+}
+
+#[tokio::test]
+async fn the_nav_keeps_only_what_is_useful() {
+    let app = app();
+    news(&app);
+    ok(&app, &builder(), "update_collection", json!({ "name": "news", "public_read": true, "note": "公开" }));
+    ok(&app, &builder(), "create_collection", json!({ "name": "bookings", "title": "预约", "note": "n", "fields": [{ "name": "who", "title": "称呼", "type": "text" }] }));
+    ok(&app, &builder(), "write_site_file", json!({ "path": "index.html", "content": "<ul>{% for n in collection('news') %}<li>{{ n.title }}</li>{% endfor %}</ul>", "note": "首页" }));
+    publish_all(&app);
+    let (cookie, _) = admin_session(&app, "builder").await;
+    let (_, _, page) = get_with(&app, "/admin", Some(&cookie)).await;
+    // Nothing uploaded, no member login, history lives in 发布 and 设置.
+    for gone in ["/admin/media\"", "/admin/releases\"", "/admin/members\""] {
+        assert!(!page.contains(&format!("href=\"{gone}")), "{gone} in nav: {page}");
+    }
+    // Content the site uses is plain; the rest is marked and explained.
+    assert!(page.contains("class=\"item\" href=\"/admin/c/news\""), "{page}");
+    assert!(page.contains("class=\"item unused\" href=\"/admin/c/bookings\""), "{page}");
+    let (_, _, list) = get_with(&app, "/admin/c/bookings", Some(&cookie)).await;
+    assert!(list.contains("unused-note"), "{list}");
+    let (_, _, list) = get_with(&app, "/admin/c/news", Some(&cookie)).await;
+    assert!(!list.contains("unused-note"));
+    let (_, _, settings) = get_with(&app, "/admin/settings", Some(&cookie)).await;
+    assert!(settings.contains("href=\"/admin/releases\""));
 }

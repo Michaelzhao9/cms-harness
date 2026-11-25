@@ -9,6 +9,21 @@
 <span class="sum">{{ summary|t }}</span>
 {% if can_create %}<a class="btn" href="{{ new_href }}">{{ i.icon("plus", 16) }}{{ "新建"|t }}</a>{% endif %}
 </header>
+{% for c in nav.collections %}{% if nav.current == "c:" ~ c.name and c.unused -%}
+<div class="unused-note" role="note">
+<p><strong>{{ "网站上还没用到它"|t }}</strong>{{ "：访客现在看不到这里的内容，网页上也没有提交它的表单。"|t }}</p>
+{% if chat.model -%}
+<form method="post" action="/admin/chat" enctype="multipart/form-data">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="ctx" value="collection:{{ c.name }}">
+<input type="hidden" name="text" value="{{ '把「'|t }}{{ c.title }}{{ '」做到网站上：按它的用途做成列表和详情页，或者访客能提交的表单，并放进网站的导航。'|t }}">
+<button type="submit" class="btn2">{{ i.icon("sparkle", 15) }}{{ "让对话做到网站上"|t }}</button>
+</form>
+{%- else -%}
+<p class="muted">{{ "设置好对话用的模型后，可以让对话把它做到网站上。"|t }}</p>
+{%- endif %}
+</div>
+{%- endif %}{% endfor %}
 <nav class="tabs" aria-label="{{ '按状态筛选'|t }}">
 {% for t in tabs %}<a href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.label|t }}</a>
 {% endfor -%}

@@ -1001,3 +1001,11 @@ record:{} 还被 {} 链接着，删掉会留下死链：请先改掉那个链接
 语言“{}”的回退语言“{}”不在语言列表里。	Language “{}” falls back to “{}”, which is not in the list.
 网站还没有设置多种语言：先用 set_site_settings 设 languages。	The site has no languages set yet: set languages with set_site_settings first.
 网站还没有设置多种语言。	The site has no languages set yet.
+网站上还没用到	Not on the site yet
+网站上还没用到它	Not on the site yet
+：访客现在看不到这里的内容，网页上也没有提交它的表单。	: visitors cannot see this content, and no page has a form that sends to it.
+把「	Put “
+」做到网站上：按它的用途做成列表和详情页，或者访客能提交的表单，并放进网站的导航。	” on the website: as a list and detail pages, or as a form visitors can send, whichever fits it, and link it from the site's navigation.
+让对话做到网站上	Ask the chat to put it on the site
+设置好对话用的模型后，可以让对话把它做到网站上。	Once a chat model is set up, the chat can put it on the site.
+：每次发布改了什么，也可以恢复到以前的版本。	: what each publish changed, and going back to an earlier version.

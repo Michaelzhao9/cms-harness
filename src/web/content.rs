@@ -60,7 +60,7 @@ pub(super) fn tool(app: &App, user: &AdminUser, name: &str, args: Value) -> Resu
 pub(super) fn shell(app: &App, user: &AdminUser, current: &str, mut ctx: Value) -> Value {
     let (nav, name) = {
         let conn = app.conn();
-        (nav(&conn, user, current), app.name(&conn, false))
+        (nav(&conn, user, current, !crate::media::list(app).is_empty()), app.name(&conn, false))
     };
     ctx["chat"] = super::chat::view(app, user);
     ctx["site_name"] = json!(name);

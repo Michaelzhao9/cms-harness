@@ -4,6 +4,7 @@
 {%- import "icons.html" as i %}
 <div class="page">
 <h1>{{ "设置"|t }}</h1>
+<p class="muted"><a href="/admin/releases">{{ "发布记录"|t }}</a>{{ "：每次发布改了什么，也可以恢复到以前的版本。"|t }}</p>
 <div class="settings">
 {% if error %}<p class="note bad" role="alert">{{ error|t }}</p>{% endif %}
 
