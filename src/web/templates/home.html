@@ -32,7 +32,7 @@
 </div>
 </details>
 <div class="versions" role="group" aria-label="{{ '预览版本'|t }}">
-<a href="{{ links.draft|safe }}" aria-pressed="{{ 'true' if version == 'draft' else 'false' }}">{{ "草稿"|t }}</a><a href="{{ links.live|safe }}" aria-pressed="{{ 'true' if version == 'live' else 'false' }}">{{ "线上"|t }}</a><a class="ib sm" href="{{ links.split|safe }}" aria-label="{{ '草稿和线上并排对比'|t }}" aria-pressed="{{ 'true' if version == 'split' else 'false' }}">{{ i.icon("columns", 17) }}</a>
+<a href="{{ links.draft|safe }}" aria-pressed="{{ 'true' if version == 'draft' else 'false' }}">{{ "草稿"|t }}</a><a href="{{ links.live|safe }}" aria-pressed="{{ 'true' if version == 'live' else 'false' }}">{{ "线上"|t }}</a><a class="ib sm" href="{{ (links.draft if version == 'split' else links.split)|safe }}" aria-label="{{ ('关闭并排对比' if version == 'split' else '草稿和线上并排对比')|t }}" aria-pressed="{{ 'true' if version == 'split' else 'false' }}">{{ i.icon("columns", 17) }}</a>
 </div>
 <a class="ib sm marks" href="{{ links.marks|safe }}" aria-label="{{ '在草稿上标出改动'|t }}" aria-pressed="{{ 'true' if marks else 'false' }}" data-marks>{{ i.icon("highlighter", 17) }}</a>
 <button type="button" class="ib warn js-only" aria-label="{{ '手动调整的提示'|t }}" data-warn hidden>{{ i.icon("warning", 16) }}<span class="n" data-warn-n></span></button>

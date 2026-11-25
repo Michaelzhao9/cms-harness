@@ -124,6 +124,9 @@ async fn separate_addresses_route_by_host() {
     assert!(policy.contains(&format!("frame-src 'self' {SITE};")) && policy.contains("frame-ancestors 'self'"), "{policy}");
     assert_eq!(h[header::X_FRAME_OPTIONS], "SAMEORIGIN");
     assert_eq!(frame_src(&page, "live"), format!("{SITE}/"));
+    // Pressed again, the side-by-side button closes it: it leads back to the draft alone.
+    let button = page.split("aria-label=\"关闭并排对比\"").next().unwrap().rsplit("href=\"").next().unwrap();
+    assert!(button.starts_with("/admin?") && !button.contains("v=split"), "{button}");
     let draft = frame_src(&page, "draft");
     assert!(draft.starts_with("/_hc/preview/") && draft.ends_with("/"), "{draft}");
     // The preview is the admin's: on its host only.

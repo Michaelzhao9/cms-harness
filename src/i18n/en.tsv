@@ -1009,3 +1009,4 @@ record:{} 还被 {} 链接着，删掉会留下死链：请先改掉那个链接
 让对话做到网站上	Ask the chat to put it on the site
 设置好对话用的模型后，可以让对话把它做到网站上。	Once a chat model is set up, the chat can put it on the site.
 ：每次发布改了什么，也可以恢复到以前的版本。	: what each publish changed, and going back to an earlier version.
+关闭并排对比	Close side by side
