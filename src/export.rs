@@ -28,8 +28,16 @@ fn page_file(dir: &Path, path: &str) -> PathBuf {
 }
 
 async fn get(app: &Shared, path: &str) -> Result<(StatusCode, Vec<u8>), String> {
+    get_on(app, path, None).await
+}
+
+async fn get_on(app: &Shared, path: &str, host: Option<&str>) -> Result<(StatusCode, Vec<u8>), String> {
     let uri = crate::routes::encode(path);
-    let req = Request::get(uri.as_str()).body(axum::body::Body::empty()).map_err(|e| e.to_string())?;
+    let mut req = Request::get(uri.as_str());
+    if let Some(h) = host {
+        req = req.header(axum::http::header::HOST, h);
+    }
+    let req = req.body(axum::body::Body::empty()).map_err(|e| e.to_string())?;
     // The router never fails: its error type is Infallible.
     let resp = match crate::api::router(app.clone()).oneshot(req).await {
         Ok(r) => r,
@@ -49,47 +57,71 @@ fn write(to: &Path, bytes: &[u8]) -> Result<(), String> {
 
 /// Writes the live site into `dir`.
 pub async fn export(app: &Shared, dir: &Path) -> Result<Summary, String> {
-    let (pages, files) = {
+    let (pages, files, domains) = {
         let conn = app.conn();
-        let pages = crate::site::public_paths(&conn)?;
+        // (path to fetch, host to send, path to write under `dir`)
+        let mut pages: Vec<(String, Option<String>, String)> = vec![];
+        let mut domains = vec![];
+        match crate::langs::load(&conn, false) {
+            None => pages.extend(crate::site::public_paths(&conn)?.into_iter().map(|(p, _)| (p.clone(), None, p))),
+            Some(langs) => {
+                for group in crate::site::language_groups(&conn, &langs)? {
+                    for (code, path, _) in group {
+                        match langs.get(&code).and_then(|l| l.domain.clone()) {
+                            Some(d) => {
+                                if !domains.contains(&d) {
+                                    domains.push(d.clone());
+                                }
+                                pages.push((path.clone(), Some(d.clone()), format!("/{d}{path}")))
+                            }
+                            None => pages.push((path.clone(), None, path)),
+                        }
+                    }
+                }
+            }
+        }
         let files: Vec<String> = conn
             .prepare("SELECT path FROM site_files WHERE published IS NOT NULL AND path NOT LIKE '%.html' ORDER BY path")
             .and_then(|mut s| s.query_map([], |r| r.get(0))?.collect())
             .map_err(|e| format!("读取站点文件失败：{e}"))?;
-        (pages, files)
+        (pages, files, domains)
     };
     let mut summary = Summary { pages: 0, files: 0, uploads: 0, need_server: vec![] };
-    for (path, _) in &pages {
-        let (status, body) = get(app, path).await?;
+    for (path, host, to) in &pages {
+        let (status, body) = get_on(app, path, host.as_deref()).await?;
         if status != StatusCode::OK {
             continue;
         }
         let text = String::from_utf8_lossy(&body);
         if text.contains("<form") || text.contains("/account/") {
-            summary.need_server.push(path.clone());
+            summary.need_server.push(to.clone());
         }
-        write(&page_file(dir, path), &body)?;
+        write(&page_file(dir, to), &body)?;
         summary.pages += 1;
     }
+    // A language on its own domain is a site of its own (`<dir>/<domain>/`): it gets the shared files too.
+    let roots: Vec<PathBuf> = std::iter::once(dir.to_path_buf()).chain(domains.iter().map(|d| dir.join(d))).collect();
     for path in files.iter().map(|p| format!("/{p}")).chain(["/sitemap.xml".to_string(), "/robots.txt".to_string()]) {
         let (status, body) = get(app, &path).await?;
         if status == StatusCode::OK {
-            write(&dir.join(path.trim_start_matches('/')), &body)?;
+            for root in &roots {
+                write(&root.join(path.trim_start_matches('/')), &body)?;
+            }
             summary.files += 1;
         }
     }
     // The site's own 404 page, for hosts that serve 404.html.
     let (_, body) = get(app, "/__export_missing__").await?;
-    write(&dir.join("404.html"), &body)?;
+    for root in &roots {
+        write(&root.join("404.html"), &body)?;
+    }
     if let Ok(entries) = std::fs::read_dir(app.data_dir.join("uploads")) {
         for e in entries.flatten() {
             if e.path().is_file() {
-                std::fs::copy(e.path(), dir.join("uploads").join(e.file_name()))
-                    .or_else(|_| {
-                        std::fs::create_dir_all(dir.join("uploads"))?;
-                        std::fs::copy(e.path(), dir.join("uploads").join(e.file_name()))
-                    })
-                    .map_err(|err| format!("复制上传文件失败：{err}"))?;
+                for root in &roots {
+                    std::fs::create_dir_all(root.join("uploads")).map_err(|err| format!("复制上传文件失败：{err}"))?;
+                    std::fs::copy(e.path(), root.join("uploads").join(e.file_name())).map_err(|err| format!("复制上传文件失败：{err}"))?;
+                }
                 summary.uploads += 1;
             }
         }

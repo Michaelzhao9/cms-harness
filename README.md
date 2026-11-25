@@ -31,6 +31,7 @@ It needs no external services. One executable and one SQLite file serve the publ
 - **AI that builds, people who publish.** The assistant cannot publish. It treats text in records, pages and uploads as data, never as instructions.
 - **Drafts everywhere.** Content, collections, pages, admin screens and settings are drafts until published. The live site always shows the published version, whoever visits.
 - **A page for every record, automatically.** Write one detail template and every record of a collection gets its own page at a clean address (`/news/drum-contest`, Chinese titles stay Chinese). Addresses follow the data: change a slug or a category and the old address redirects forever; links in text point at the record, not the address, so they never break; publishing is stopped if it would leave a dead link.
+- **Any number of languages.** One record, many languages: text is translated, images, dates and prices are shared. Each language gets its own addresses (`/en/…` or its own domain), fallbacks, hreflang and localized dates and money. Every translation knows when its source changed, so out-of-date ones are flagged, and the chat can keep every language in sync as drafts.
 - **Dynamic, at static speed.** Live pages are cached, and a publish recomputes exactly the pages it touched. `cms-harness export` writes the whole site as static files for any CDN.
 - **A real website.** Pages are HTML with `{{ }}` templates, plus CSS, JavaScript, JSX and TypeScript (transpiled on the fly). React, Vue or Three.js load through an import map, with no build step. You can also upload a site built with Vite.
 - **Admin screens that follow the site.** When the site gains a form, members or orders, the assistant builds the screen to manage them in the same turn. When the feature goes, the screen goes too. Turn on member login and **Members** appears by itself.
@@ -65,10 +66,11 @@ It needs no external services. One executable and one SQLite file serve the publ
 
 ## Quick start
 
-With Docker:
+With Docker, on a server: point your domain's DNS at it and open ports 80 and 443. Caddy comes in the same file and gets the HTTPS certificate by itself.
 
 ```sh
 curl -O https://raw.githubusercontent.com/Michaelzhao9/cms-harness/main/docker-compose.yml
+echo DOMAIN=example.com > .env
 docker compose up -d
 docker compose exec cms-harness cms-harness admin you@example.com   # prints the admin password once
 ```
@@ -87,7 +89,7 @@ Sign in at `http://127.0.0.1:4200/admin`. The site is at `http://127.0.0.1:4200/
 
 To use the chat, open **Settings → Chat model**, pick a service, paste a key and press **Detect**. You can also set `LLM_PROVIDER` (`anthropic` or `openai`), `LLM_API_KEY`, `LLM_MODEL` and `LLM_BASE_URL` in the environment. Without a model, the admin and the API still work, but there is no chat.
 
-To serve the site publicly, put a reverse proxy (nginx, Caddy) in front for HTTPS. The server only listens on the local address. Set `HC_ORIGIN` to the public address.
+To serve the binary publicly, put a reverse proxy (nginx, Caddy) in front for HTTPS. The server only listens on the local address. Set `HC_ORIGIN` to the public address. The Docker setup above already does this.
 
 Back up and restore from the command line too (stop the server before a restore):
 
@@ -129,6 +131,8 @@ A fresh site has one built-in page: a welcome with the site's name and a link to
 The live site always shows the published version, whatever cookies or headers a visitor sends. Drafts only appear in the admin's preview.
 
 **Record pages.** A collection visitors may read gets a page per record once the site has a detail template: `<collection>/_item.html`, or `_item.html` for every collection. The template reads the record as `item`. Addresses come from the collection's `url` pattern, `/{collection}/{slug}` by default; `{id}`, a field (`{year}`) or a relation's slug (`/products/{category.slug}/{slug}`) work too. Each record gets its slug from its title when it is created and keeps it when the title changes. A new slug is a draft; once live, the old address keeps redirecting. Link to records with `item.url` (or `/_r/<id>`): links pasted into rich text are stored that way automatically and always render at the record's current address.
+
+**Languages.** Set the site's languages in **Settings → Site languages** (or `set_site_settings` with `languages`); the first is the default. Other languages live under `/<code>/` or on their own domain, and may fall back to others. Text and rich text fields are translated (`translate: false` keeps one shared); a collection with `untranslated: "hide"` leaves untranslated records out of other languages. Translations are written with `set_translation` or in the record editor, kept in the record as drafts, and `translation_status` lists what is missing or out of date. Templates get `lang`, `dir`, `languages` (this page in every language, for a switcher) and `suggested_lang`; `{{ "…"|t }}` reads the site's string table; `|date`, `|number` and `|money("EUR")` format per language. hreflang links and a multilingual sitemap are added for you.
 
 **Cache and export.** Live pages for visitors who are not signed in are cached until something they read is published again (the `x-cms-cache` header says hit or miss). `cms-harness export <dir>` writes every public page, record pages included, plus site files, uploads, `sitemap.xml`, `robots.txt` and `404.html`; set `HC_ORIGIN` to the address the files will be served from. Forms and sign-in still need the server; the command lists the pages that use them.
 
@@ -184,7 +188,8 @@ Only fields declared with `index` or `unique` can filter and sort.
 | `get_site_notes` / `set_site_notes` | read / structure | notes for the assistant |
 | `list_site_files` `get_site_file` | read | read site files |
 | `write_site_file` `delete_site_file` `upload_site_bundle` | structure | write site files, upload a built site |
-| `get_site_settings` / `set_site_settings` | read / structure | site name, import map, script origins |
+| `get_site_settings` / `set_site_settings` | read / structure | site name, languages, template text, import map, script origins |
+| `translation_status` / `set_translation` | read / write | what is missing or out of date; write a translation |
 | `set_member_login` | structure | turn member accounts on or off |
 | `list_members` / `set_member_status` | read / write | list members, disable or enable one |
 | `upload_media` | write | upload an image or PDF |

@@ -422,8 +422,18 @@ pub fn encode(path: &str) -> String {
     path.split('/').map(|s| percent_encoding::utf8_percent_encode(s, SEG).to_string()).collect::<Vec<_>>().join("/")
 }
 
+/// Collections visitors may read without signing in that have record pages.
+pub fn routable_public(conn: &Connection) -> Vec<(CollectionDef, String)> {
+    routable(conn, Mode::Live).into_iter().filter(|(d, _)| d.access.is_public()).collect()
+}
+
 /// Every live record page a visitor may read without signing in: (path, last change).
 pub fn public_pages(conn: &Connection) -> Vec<(String, Option<String>)> {
+    public_pages_in(conn, None)
+}
+
+/// `public_pages` in a language (its prefix and slugs; records not in that language left out).
+pub fn public_pages_in(conn: &Connection, lang: Option<&crate::langs::Current>) -> Vec<(String, Option<String>)> {
     let mut out = vec![];
     for (def, _) in routable(conn, Mode::Live) {
         if !def.access.is_public() {
@@ -435,7 +445,7 @@ pub fn public_pages(conn: &Connection) -> Vec<(String, Option<String>)> {
             .unwrap_or_default();
         for (id, doc, at) in rows {
             let doc = serde_json::from_str(&doc).unwrap_or(Value::Null);
-            if let Some(url) = url_for(conn, Mode::Live, &def, id, &doc) {
+            if let Some(url) = url_for_in(conn, Mode::Live, &def, id, &doc, lang) {
                 out.push((url, at.map(|d| d.chars().take(10).collect())));
             }
         }

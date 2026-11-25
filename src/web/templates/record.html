@@ -70,6 +70,25 @@
 {% if form.id %}<a class="txt" href="/admin?ctx=record:{{ form.id }}">{{ "交给对话来改"|t }}</a>{% endif %}
 </div>
 </form>
+{% for tr in form.translations -%}
+<details class="translation" id="tr-{{ tr.code }}"{% if tr.summary in ["missing", "stale"] %} open{% endif %}>
+<summary><b>{{ tr.name }}</b><span class="tr-state {{ tr.summary or 'empty' }}">{% if tr.hide %}{{ "不在这种语言里显示"|t }}{% elif tr.summary == "missing" %}{{ "缺翻译"|t }}{% elif tr.summary == "stale" %}{{ "原文改过，可能过期"|t }}{% elif tr.summary == "done" %}{{ "已翻译"|t }}{% else %}{{ "没有要翻译的文字"|t }}{% endif %}</span></summary>
+<form class="fields" method="post" action="/admin/r/{{ form.id }}/translation/{{ tr.code }}">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+{% for f in tr.fields -%}
+<div class="fd"><label class="lb" for="tr-{{ tr.code }}-{{ f.name }}">{{ f.title }}{% if f.state == "stale" %}<span class="req tr-stale">{{ "原文改过"|t }}</span>{% elif f.state == "missing" %}<span class="req">{{ "缺翻译"|t }}</span>{% endif %}</label>
+{% if f.source %}<span class="hint tr-source">{{ f.source }}</span>{% endif %}
+{%- if f.rich %}<textarea class="in code" id="tr-{{ tr.code }}-{{ f.name }}" name="tr.{{ f.name }}" rows="6">
+{{ f.value }}</textarea>{% else %}<input class="in" id="tr-{{ tr.code }}-{{ f.name }}" name="tr.{{ f.name }}" value="{{ f.value }}">{% endif %}
+</div>
+{%- endfor %}
+<div class="fd"><label class="lb" for="tr-{{ tr.code }}-slug">{{ "这种语言的网址名"|t }}</label><input class="in mono" id="tr-{{ tr.code }}-slug" name="slug" value="{{ tr.slug or '' }}" placeholder="{{ '从翻译的标题自动生成'|t }}"></div>
+<label class="check"><input type="checkbox" name="hide" value="1"{% if tr.hide %} checked{% endif %}> {{ "这条内容不在这种语言里显示"|t }}</label>
+<div class="actions"><button type="submit" class="btn">{{ "存为草稿"|t }}</button></div>
+</form>
+<form class="ask-ai" method="post" action="/admin/chat"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="text" value="{{ '把记录 #'|t }}{{ form.id }}{{ ' 翻译成 '|t }}{{ tr.name }}（{{ tr.code }}）{{ '：只翻译缺的和过期的字段，遵守站点说明里的术语表。'|t }}"><button type="submit" class="txt">{{ "让对话来翻译"|t }}</button></form>
+</details>
+{%- endfor %}
 {% if form.id -%}
 <div class="more">
 {% if form.status != "published" %}<form method="post" action="/admin/r/{{ form.id }}/discard"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="txt">{{ ("放弃删除"|t) if form.status == "deleting" else (("丢弃这条草稿"|t) if form.status == "draft" else ("放弃改动"|t)) }}</button></form>{% endif %}

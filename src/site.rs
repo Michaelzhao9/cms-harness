@@ -210,18 +210,84 @@ fn template_error(e: &minijinja::Error) -> String {
 /// date of the release that last changed it. Built from the published state on every request, so it is current
 /// after each publish.
 pub fn sitemap(conn: &Connection, origin: &str) -> Result<String, String> {
-    let urls = public_paths(conn)?;
     let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
-    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
-    for (url, lastmod) in urls {
-        out.push_str(&format!("  <url><loc>{}{}</loc>", esc(origin), esc(&crate::routes::encode(&url))));
-        if let Some(d) = lastmod {
-            out.push_str(&format!("<lastmod>{d}</lastmod>"));
+    let Some(langs) = crate::langs::load(conn, false) else {
+        let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
+        for (url, lastmod) in public_paths(conn)? {
+            out.push_str(&format!("  <url><loc>{}{}</loc>", esc(origin), esc(&crate::routes::encode(&url))));
+            if let Some(d) = lastmod {
+                out.push_str(&format!("<lastmod>{d}</lastmod>"));
+            }
+            out.push_str("</url>\n");
         }
-        out.push_str("</url>\n");
+        out.push_str("</urlset>\n");
+        return Ok(out);
+    };
+    // Every language's version of every page, each listing its siblings (hreflang).
+    let scheme = if origin.starts_with("https://") { "https" } else { "http" };
+    let groups = language_groups(conn, &langs)?;
+    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\" xmlns:xhtml=\"http://www.w3.org/1999/xhtml\">\n");
+    for group in &groups {
+        let abs = |code: &str, path: &str| match langs.get(code).and_then(|l| l.domain.clone()) {
+            Some(d) => format!("{scheme}://{d}{}", crate::routes::encode(path)),
+            None => format!("{origin}{}", crate::routes::encode(path)),
+        };
+        for (code, path, lastmod) in group {
+            out.push_str(&format!("  <url><loc>{}</loc>", esc(&abs(code, path))));
+            if let Some(d) = lastmod {
+                out.push_str(&format!("<lastmod>{d}</lastmod>"));
+            }
+            for (c, p, _) in group {
+                out.push_str(&format!("<xhtml:link rel=\"alternate\" hreflang=\"{c}\" href=\"{}\"/>", esc(&abs(c, p))));
+            }
+            out.push_str("</url>\n");
+        }
     }
     out.push_str("</urlset>\n");
     Ok(out)
+}
+
+/// One page in each of its languages: (language, path, last change).
+pub type LangGroup = Vec<(String, String, Option<String>)>;
+
+/// Each public page in every language it exists in: (language, path as served under that language's own host or
+/// prefix, last change). Pages are grouped by the default language's version.
+pub fn language_groups(conn: &Connection, langs: &crate::langs::Languages) -> Result<Vec<LangGroup>, String> {
+    let default = langs.default_code().unwrap_or_default().to_string();
+    let files = public_paths(conn)?;
+    let records = crate::routes::public_pages(conn);
+    let mut groups: Vec<LangGroup> = vec![];
+    // Page files: the same path under every language.
+    for (path, lastmod) in files.iter().filter(|(p, _)| !records.iter().any(|(r, _)| r == p)) {
+        let mut g = vec![(default.clone(), path.clone(), lastmod.clone())];
+        for l in langs.list.iter().skip(1) {
+            let prefix = if l.domain.is_some() { String::new() } else { format!("/{}", l.code) };
+            g.push((l.code.clone(), format!("{prefix}{path}"), lastmod.clone()));
+        }
+        groups.push(g);
+    }
+    // Record pages: each language's own address, where the record is in that language.
+    for (def, _) in crate::routes::routable_public(conn) {
+        let rows: Vec<(i64, String, Option<String>)> = conn
+            .prepare("SELECT id, published, updated_at FROM records WHERE collection = ?1 AND published IS NOT NULL ORDER BY id")
+            .and_then(|mut s| s.query_map([&def.name], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect())
+            .map_err(|e| format!("读取记录失败：{e}"))?;
+        for (id, doc, at) in rows {
+            let doc: Value = serde_json::from_str(&doc).unwrap_or(Value::Null);
+            let at = at.map(|d| d.chars().take(10).collect::<String>());
+            let mut g = vec![];
+            for l in &langs.list {
+                let cur = crate::langs::Current::new(langs, &l.code, l.domain.is_some());
+                if let Some(p) = crate::routes::url_for_in(conn, Mode::Live, &def, id, &doc, Some(&cur)) {
+                    g.push((l.code.clone(), p, at.clone()));
+                }
+            }
+            if !g.is_empty() {
+                groups.push(g);
+            }
+        }
+    }
+    Ok(groups)
 }
 
 /// Every public page of the live site, with the date it last changed: page files (not layouts or fragments) and
@@ -393,7 +459,7 @@ impl Server<'_> {
             }
             Ask::Records { collection, filter, sort, limit, offset, id } => self.records(&collection, &filter, sort, limit, offset, id).map(Answer::Records),
             Ask::Search { q, collection, limit } => {
-                let hits = crate::search::search(self.conn, &q, collection.as_deref(), self.viewer, limit)?;
+                let hits = crate::search::search_in(self.conn, &q, collection.as_deref(), self.viewer, limit, self.lang.as_ref())?;
                 let mut out = vec![];
                 for hit in hits {
                     // The record as this render sees it (drafts in preview), plus where it came from.

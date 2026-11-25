@@ -517,6 +517,41 @@ pub(super) fn record_title(def: &CollectionDef, doc: &Value, id: i64) -> String 
         .map_or_else(|| format!("记录 #{id}"), str::to_string)
 }
 
+/// The first 160 characters of a field's text, without tags.
+fn short_text(s: &str) -> String {
+    let plain = crate::schema::strip_tags(s);
+    let short: String = plain.chars().take(160).collect();
+    if short.len() < plain.len() { format!("{short}…") } else { short }
+}
+
+/// For a multilingual site: each language other than the default, with every translated field's source, text and
+/// state (`missing`, `stale`, `done`), the language's slug and whether the record is hidden there.
+fn translations_of(app: &App, def: &CollectionDef, row: &Row, current: &Value) -> Value {
+    let conn = app.conn();
+    let Some(langs) = crate::langs::load(&conn, true) else { return json!([]) };
+    // The stored draft (or live copy) holds the translations; `current` is the projected document.
+    let raw = row.draft.clone().or_else(|| row.published.clone()).unwrap_or(Value::Null);
+    let mut out = vec![];
+    for l in langs.list.iter().skip(1) {
+        let status = crate::langs::status(def, &raw, &l.code);
+        let t = &raw[crate::langs::KEY][&l.code];
+        let fields: Vec<Value> = def
+            .fields
+            .iter()
+            .filter(|f| crate::langs::translated(f))
+            .map(|f| {
+                json!({ "name": f.name, "title": f.title, "rich": f.kind == crate::schema::FieldType::Richtext,
+                    "source": short_text(current[&f.name].as_str().unwrap_or_default()),
+                    "value": t[&f.name].as_str().unwrap_or_default(),
+                    "state": status.get(&f.name).cloned().unwrap_or(json!("empty")) })
+            })
+            .collect();
+        out.push(json!({ "code": l.code, "name": l.name, "summary": crate::langs::summary(def, &raw, &l.code),
+            "slug": t["_slug"], "hide": t["_hide"].as_bool() == Some(true), "fields": fields }));
+    }
+    json!(out)
+}
+
 fn record_page(app: &App, user: &AdminUser, id: i64, params: &Params, typed: Option<Typed>) -> Result<Out, Out> {
     let row = load(app, id)?;
     let def = collection(app, &row.collection)?;
@@ -539,16 +574,42 @@ fn record_page(app: &App, user: &AdminUser, id: i64, params: &Params, typed: Opt
         (slug, crate::routes::url_for(&conn, crate::site::Mode::Preview, &def, id, &current))
     };
     let typed_slug = typed.as_ref().and_then(|t| t.raw.get("_slug")).and_then(|v| v.last()).cloned();
+    let translations = translations_of(app, &def, &row, &current);
     let mut ctx = list_ctx(app, user, &def, None, &vec![], Some(id))?;
     ctx["form"] = json!({
         "id": id, "title": title, "status": status, "status_label": status_label(status), "fields": fields,
-        "slug": typed_slug.or(slug), "url": url,
+        "slug": typed_slug.or(slug), "url": url, "translations": translations,
         "seen": typed.as_ref().and_then(|t| t.seen.as_deref()).unwrap_or(&row.seen),
         "note": typed.as_ref().map_or(EDIT_NOTE, |t| t.note.as_str()), "error": typed.as_ref().map(|t| &t.error),
         "saved": typed.is_none() && param(params, "saved") == "1",
     });
     let code = typed.as_ref().map_or(StatusCode::OK, |t| t.status);
     Ok(Out::Page(code, "collection.html", shell(app, user, &format!("c:{}", row.collection), ctx)))
+}
+
+/// `POST /admin/r/<id>/translation/<lang>`: one language's text for a record, as a draft.
+pub async fn save_translation(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Path((id, lang)): Path<(i64, String)>, req: Request) -> Response {
+    let posted = match checked(&user, req).await {
+        Ok(p) => p,
+        Err(o) => return o.into_response(),
+    };
+    blocking(move || {
+        let mut data = Map::new();
+        for (k, v) in &posted.fields {
+            if let Some(field) = k.strip_prefix("tr.") {
+                data.insert(field.to_string(), json!(v.last().cloned().unwrap_or_default()));
+            }
+        }
+        let mut args = json!({ "id": id, "lang": lang, "data": data, "hide": posted.one("hide") == "1", "note": posted.note(EDIT_NOTE) });
+        if !posted.one("slug").trim().is_empty() {
+            args["slug"] = json!(posted.one("slug").trim());
+        }
+        match tool(&app, &user, "set_translation", args) {
+            Ok(_) => Ok(Out::Go(format!("/admin/r/{id}?saved=1#tr-{lang}"))),
+            Err(e) => record_page(&app, &user, id, &vec![], Some(Typed { raw: HashMap::new(), note: EDIT_NOTE.into(), error: e, status: StatusCode::BAD_REQUEST, seen: None })),
+        }
+    })
+    .await
 }
 
 // ---- posted forms ----

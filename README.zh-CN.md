@@ -33,6 +33,7 @@
 - **AI 动手，人来发布。** 对话助手不能发布。记录、网页、上传文件里的文字，它只当数据，不当指令。
 - **什么都是草稿。** 内容、集合、页面、后台界面、设置，发布前都是草稿。线上网站永远只显示已发布的版本，不管谁来访问。
 - **每条内容自动有自己的页面。** 写一个详情模板，集合里每条记录就有自己的页面和干净的网址（`/news/鼓手大赛`，中文标题就是中文网址）。网址跟着数据走：改了网址名或分类，旧网址永久跳转；正文里的链接认的是那条记录而不是网址，所以永远不会断；发布会留下死链时直接拦下。
+- **任意多种语言。** 一条内容、多种语言：文字分语言翻译，图片、日期、价格共用。每种语言有自己的网址（`/en/…` 或单独的域名）、回退顺序、hreflang，日期和金额按语言格式显示。每段译文都知道原文后来有没有改过，过期的会标出来；对话还能把所有语言自动同步成草稿。
 - **动态网站，静态网站的速度。** 线上页面会缓存，一次发布只重算它影响到的页面。`cms-harness export` 能把整个网站导出成静态文件，放到任何 CDN 上。
 - **真正的网站。** 页面是 HTML 加 `{{ }}` 模板，还能写 CSS、JavaScript、JSX、TypeScript（访问时自动转换）。React、Vue、Three.js 通过 import map 加载，不需要打包；用 Vite 打包好的网站也能整个上传。
 - **后台跟着网站走。** 网站加了表单、会员、订单，助手在同一轮里就建好管理它们的界面；功能删掉，界面也一起删掉。打开会员登录，左边自动出现「用户管理」。
@@ -67,10 +68,11 @@
 
 ## 快速开始
 
-用 Docker：
+在服务器上用 Docker：先把域名解析到这台服务器，放行 80 和 443 端口（国内服务器要先备案）。同一个文件里带了 Caddy，HTTPS 证书它自己申请、自己续期。
 
 ```sh
 curl -O https://raw.githubusercontent.com/Michaelzhao9/cms-harness/main/docker-compose.yml
+echo DOMAIN=example.com > .env
 docker compose up -d
 docker compose exec cms-harness cms-harness admin 你的邮箱          # 打印管理员密码，只显示一次
 ```
@@ -89,7 +91,7 @@ cargo build --release
 
 要用对话，打开 **设置 → 对话用的模型**，选一家服务、填密钥、点「检测」。也可以用环境变量 `LLM_PROVIDER`（`anthropic` 或 `openai`）、`LLM_API_KEY`、`LLM_MODEL`、`LLM_BASE_URL` 配置。不配模型时，后台和接口照常可用，只是没有对话。
 
-对外提供服务时，在前面放一个反向代理（nginx、Caddy）负责 HTTPS。服务只监听本机地址。把 `HC_ORIGIN` 设成对外的网址。
+直接运行程序并对外提供服务时，在前面放一个反向代理（nginx、Caddy）负责 HTTPS。服务只监听本机地址。把 `HC_ORIGIN` 设成对外的网址。上面的 Docker 方式已经包含了这一步。
 
 命令行也能备份和恢复（恢复前先停掉服务）：
 
@@ -131,6 +133,8 @@ HC_ORIGIN=https://example.com ./target/release/cms-harness export ./public   # �
 线上网站永远只显示已发布的版本，不管访客带什么 cookie 或请求头。草稿只在后台的预览里看得到。
 
 **记录页面。** 访客能看的集合，只要网站里有详情模板，每条记录就自动有页面：模板叫 `集合名/_item.html`，全站通用的叫 `_item.html`，模板里用 `item` 取这条记录。网址来自集合的 `url` 规则，默认 `/集合名/{slug}`；也可以用 `{id}`、某个字段（`{year}`）或关联字段的网址名（`/products/{category.slug}/{slug}`）。记录新建时从标题生成网址名，之后改标题网址不变；改网址名是草稿，上线后旧网址一直跳转到新的。链接到记录用 `item.url`（或 `/_r/编号`）：粘贴进正文的本站链接会自动存成这种形式，显示时总是记录现在的网址。
+
+**多语言。** 在 **设置 → 网站语言** 设网站用哪些语言（或用 `set_site_settings` 的 `languages`），第一种是默认语言。其他语言的网址在 `/语言代码/` 下或用单独的域名，也可以设回退语言。文字和富文本字段会翻译（`translate: false` 的字段各语言共用）；集合设 `untranslated: "hide"` 时，没翻译的记录不出现在其他语言里。翻译用 `set_translation` 或在记录编辑页里写，作为草稿存在记录里，`translation_status` 列出缺翻译和过期的内容。模板里有 `lang`、`dir`、`languages`（这一页的所有语言版本，做语言切换用）和 `suggested_lang`；`{{ "…"|t }}` 读站点文字表；`|date`、`|number`、`|money("EUR")` 按语言格式化。hreflang 和多语言 sitemap 自动加好。
 
 **缓存和导出。** 没登录的访客看到的线上页面会缓存，直到它读过的内容再次发布（响应头 `x-cms-cache` 显示 hit 或 miss）。`cms-harness export <目录>` 导出所有公开页面（含记录页面）、网站文件、上传文件、`sitemap.xml`、`robots.txt` 和 `404.html`；把 `HC_ORIGIN` 设成这些文件要放的网址。表单和登录还是要靠服务器，命令会列出用到它们的页面。
 
@@ -186,7 +190,8 @@ HC_ORIGIN=https://example.com ./target/release/cms-harness export ./public   # �
 | `get_site_notes` / `set_site_notes` | read / structure | 给助手看的站点说明 |
 | `list_site_files` `get_site_file` | read | 读网站文件 |
 | `write_site_file` `delete_site_file` `upload_site_bundle` | structure | 写网站文件、上传打包好的网站 |
-| `get_site_settings` / `set_site_settings` | read / structure | 站点名称、import map、脚本来源 |
+| `get_site_settings` / `set_site_settings` | read / structure | 站点名称、语言、模板文字翻译、import map、脚本来源 |
+| `translation_status` / `set_translation` | read / write | 缺翻译和过期的内容；写翻译 |
 | `set_member_login` | structure | 打开或关闭会员账号 |
 | `list_members` / `set_member_status` | read / write | 列出会员、停用或恢复 |
 | `upload_media` | write | 上传图片或 PDF |

@@ -425,6 +425,19 @@ pub async fn restore(State(app): State<Shared>, Extension(user): Extension<Admin
 /// script origin that is added or removed. Unchanged entries are left out; changed ones are shown in full.
 fn setting_pairs(key: &str, old: &Value, new: &Value) -> Vec<Value> {
     let gone = || Some("（去掉）".to_string());
+    if key == "languages" {
+        let names = |v: &Value| v["list"].as_array().into_iter().flatten().filter_map(|l| l["name"].as_str()).collect::<Vec<_>>().join("、");
+        let sync = |v: &Value| if v["sync"].as_bool() == Some(true) { "开" } else { "关" };
+        let mut out = vec![json!({ "field": "网站语言", "old": Some(names(old)).filter(|s| !s.is_empty()), "new": Some(names(new)).filter(|s| !s.is_empty()).or_else(gone) })];
+        if old["sync"] != new["sync"] {
+            out.push(json!({ "field": "翻译自动同步", "old": sync(old), "new": sync(new) }));
+        }
+        return out;
+    }
+    if key == "strings" {
+        let count = |v: &Value| v.as_object().map_or(0, |o| o.values().map(|t| t.as_object().map_or(0, |t| t.len())).sum::<usize>());
+        return vec![json!({ "field": "站点文字翻译", "old": format!("{} 条", count(old)), "new": format!("{} 条", count(new)) })];
+    }
     if key == "site_name" {
         return vec![json!({ "field": "站点名称", "old": old.as_str(), "new": new.as_str().map(String::from).or_else(gone) })];
     }

@@ -6,7 +6,8 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 async fn fetch(app: &cms_harness::Shared, path: &str, host: Option<&str>) -> (StatusCode, String) {
-    let mut req = Request::get(cms_harness::routes::encode(path).as_str());
+    let (p, q) = path.split_once('?').map_or((path, String::new()), |(p, q)| (p, format!("?{q}")));
+    let mut req = Request::get(format!("{}{q}", cms_harness::routes::encode(p)).as_str());
     if let Some(h) = host {
         req = req.header(header::HOST, h);
     }
@@ -134,4 +135,51 @@ fn translation_rules() {
     for bad in [json!({ "list": [] }), json!({ "list": [{ "code": "EN", "name": "x" }] }), json!({ "list": [{ "code": "zh", "name": "中文", "fallback": ["xx"] }] })] {
         assert!(!err(&app, &builder(), "set_site_settings", json!({ "note": "x", "languages": bad })).is_empty());
     }
+}
+
+#[tokio::test]
+async fn search_sitemap_and_export_speak_every_language() {
+    let app = app();
+    languages(&app);
+    news(&app, "fallback");
+    let id = add(&app);
+    ok(&app, &builder(), "set_translation", json!({ "id": id, "lang": "en", "note": "翻译", "data": { "title": "Drum Contest", "body": "<p>Sign up now</p>" } }));
+    write(&app, "search.html", "{% for r in search(request.query.q or '') %}<li>{{ r.title }}|{{ r.url }}</li>{% endfor %}");
+    publish_all(&app);
+    let (_, en) = fetch(&app, "/en/search?q=drum", None).await;
+    assert!(en.contains("<li>Drum Contest|/en/news/drum-contest</li>"), "{en}");
+    let (_, zh) = fetch(&app, "/search?q=%E9%BC%93%E6%89%8B", None).await; // 鼓手
+    assert!(zh.contains("<li>鼓手大赛|"), "{zh}");
+
+    let xml = get_text(&app, "/sitemap.xml").await;
+    assert!(xml.contains("<loc>http://127.0.0.1:4200/en/news/drum-contest</loc>"), "{xml}");
+    assert!(xml.contains("hreflang=\"ja\" href=\"http://example.jp/news/"), "{xml}");
+
+    let dir = std::env::temp_dir().join(format!("hc-export-langs-{:016x}", rand::random::<u64>()));
+    cms_harness::export::export(&app, &dir).await.unwrap();
+    assert!(std::fs::read_to_string(dir.join("en/news/drum-contest.html")).unwrap().contains("<h1>Drum Contest</h1>"));
+    assert!(std::fs::read_to_string(dir.join("news/鼓手大赛.html")).unwrap().contains("<h1>鼓手大赛</h1>"));
+    assert!(std::fs::read_to_string(dir.join("example.jp/news/鼓手大赛.html")).unwrap().contains("ja|ltr"), "a domain language is its own folder");
+}
+
+#[tokio::test]
+async fn the_admin_edits_languages_and_translations() {
+    let app = app();
+    let s = admin_session(&app, "builder").await;
+    let (code, _, body) = post_form(&app, "/admin/settings/languages", Some(&s), &[("code", "zh"), ("name", "中文"), ("domain", ""), ("fallback", ""),
+        ("code", "en"), ("name", "English"), ("domain", ""), ("fallback", ""), ("code", ""), ("name", ""), ("domain", ""), ("fallback", ""), ("sync", "1")]).await;
+    assert_eq!(code, StatusCode::SEE_OTHER, "{body}");
+    let langs = cms_harness::langs::load(&app.conn(), true).unwrap();
+    assert_eq!((langs.list.len(), langs.sync), (2, true));
+    news(&app, "fallback");
+    let id = add(&app);
+    let (_, _, page) = get_with(&app, &format!("/admin/r/{id}"), Some(&s.0)).await;
+    assert!(page.contains("id=\"tr-en\"") && page.contains("缺翻译") && page.contains("name=\"tr.title\""), "{page}");
+    let (code, _, body) = post_form(&app, &format!("/admin/r/{id}/translation/en"), Some(&s), &[("tr.title", "Drum Contest"), ("tr.body", "<p>Hi</p>"), ("slug", ""), ("note", "翻译")]).await;
+    assert_eq!(code, StatusCode::SEE_OTHER, "{body}");
+    let (_, _, page) = get_with(&app, &format!("/admin/r/{id}"), Some(&s.0)).await;
+    assert!(page.contains("已翻译") && page.contains("value=\"Drum Contest\""), "{page}");
+    // The chat is told about the languages and the sync promise.
+    let tools: Vec<String> = cms_harness::chat::chat_tools(&builder()).into_iter().map(|t| t.name).collect();
+    assert!(tools.iter().any(|t| t == "set_translation") && tools.iter().any(|t| t == "translation_status"));
 }

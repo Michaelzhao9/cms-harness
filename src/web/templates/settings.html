@@ -202,6 +202,26 @@
 </form>
 </section>
 
+<section aria-labelledby="s-langs-h" id="s-langs">
+<h2 id="s-langs-h">{{ "网站语言"|t }}</h2>
+<p class="lede">{{ "网站用哪些语言。第一种是默认语言，其他语言的网址前面加语言代码（比如 /en/），也可以给它一个单独的域名。和内容一样，改完要发布才生效。"|t }}</p>
+{% if saved == "langs" %}<p class="note good" role="status">{{ "已存为草稿，发布后才会生效。"|t }}</p>{% endif %}
+{% if builder -%}
+<form class="fields" method="post" action="/admin/settings/languages">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="lang-rows">
+<div class="lang-row head"><span>{{ "代码"|t }}</span><span>{{ "名字"|t }}</span><span>{{ "单独的域名（可不填）"|t }}</span><span>{{ "缺翻译时依次用"|t }}</span></div>
+{% for l in langs.list %}<div class="lang-row"><input class="in mono" name="code" value="{{ l.code }}" aria-label="{{ '代码'|t }}"><input class="in" name="name" value="{{ l.name }}" aria-label="{{ '名字'|t }}"><input class="in mono" name="domain" value="{{ l.domain or '' }}" placeholder="example.com" aria-label="{{ '域名'|t }}"><input class="in mono" name="fallback" value="{{ (l.fallback or [])|join(', ') }}" placeholder="en" aria-label="{{ '回退语言'|t }}"></div>
+{% endfor -%}
+<div class="lang-row"><input class="in mono" name="code" placeholder="{{ ('en' if lang == 'en' else 'zh') if not langs.list else 'fr' }}" aria-label="{{ '新语言的代码'|t }}"><input class="in" name="name" placeholder="{{ ('English' if lang == 'en' else '中文') if not langs.list else 'Français' }}" aria-label="{{ '新语言的名字'|t }}"><input class="in mono" name="domain" placeholder="example.jp" aria-label="{{ '域名'|t }}"><input class="in mono" name="fallback" placeholder="en" aria-label="{{ '回退语言'|t }}"></div>
+</div>
+<label class="check"><input type="checkbox" name="sync" value="1"{% if langs.sync %} checked{% endif %}> {{ "翻译自动同步：对话改了文字，就把改动翻译进其他语言（草稿，你看过再发布）"|t }}</label>
+<p class="small">{{ "要删掉一种语言，清空它那一行的代码再保存。清空全部就回到单语言网站。"|t }}</p>
+<div class="actions"><button type="submit" class="btn">{{ "存为草稿"|t }}</button></div>
+</form>
+{%- else %}<p class="small">{% for l in langs.list %}{{ l.name }}{% if not loop.last %}、{% endif %}{% else %}{{ "单语言网站"|t }}{% endfor %}</p>{% endif %}
+</section>
+
 <section aria-labelledby="s-backup">
 <h2 id="s-backup">{{ "备份"|t }}</h2>
 <p class="lede">{{ "整站打成一个 zip：数据库（内容、草稿、历史、账号、设置）和上传的文件。"|t }}</p>

@@ -310,8 +310,20 @@ fn system_prompt(app: &Shared, actor: &Actor) -> (String, bool) {
         .flatten()
         .and_then(|j| serde_json::from_str(&j).ok());
     let skills = crate::skills::enabled(&conn);
+    let langs = crate::langs::load(&conn, true);
     drop(conn);
     let mut out = String::from(RULES);
+    // A multilingual site: which languages, and how translations are kept.
+    if let Some(l) = &langs {
+        let names: Vec<String> = l.list.iter().map(|x| format!("{}（{}）", x.name, x.code)).collect();
+        out.push_str(&format!(
+            "\n\n网站有多种语言：{}，第一种是默认语言。记录的文字字段用 update_record 写默认语言，用 set_translation 写其他语言（草稿，和别的改动一起发布）；图片、日期、价格、关联字段各语言共用。翻译前先用 translation_status 看缺什么、哪些因为原文改过而过期。模板里用 {{{{ lang }}}}、{{{{ dir }}}} 设 <html lang dir>，用 languages 做语言切换（每项有 name、url、current），模板里写死的文字用 {{{{ \"中文\"|t }}}} 并在 set_site_settings 的 strings 里给出各语言的译文，日期、数字、金额用 |date、|number、|money(\"CNY\") 按语言格式化。翻译时遵守站点说明里的术语表和语气。",
+            names.join("、")
+        ));
+        if l.sync {
+            out.push_str("\n已打开「翻译自动同步」：你改了任何记录的文字字段，同一轮里就要用 set_translation 把改动翻译进其他每种语言，并在回复里说明翻译了哪些。");
+        }
+    }
     if let Some(n) = notes.filter(|n| !n.trim().is_empty()) {
         out.push_str("\n\n站点说明（网站的搭建者写的）：\n");
         out.push_str(&n);

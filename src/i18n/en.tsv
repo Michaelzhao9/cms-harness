@@ -896,3 +896,39 @@ admin、api、uploads、account、mcp 开头的网址留给系统。	addresses s
 检查链接失败：{}	Could not check the links: {}
 {} 链接到 record:{}，它不在线上：请把它一起发布，或先去掉这个链接。	{} links to record:{}, which is not live: publish it too, or remove the link first.
 record:{} 还被 {} 链接着，删掉会留下死链：请先改掉那个链接，或一起发布。	record:{} is still linked from {}; removing it would leave a dead link. Change that link first, or publish both.
+网站语言	Site languages
+站点文字翻译	Template text translations
+翻译自动同步	Keep translations in sync
+网站用哪些语言。第一种是默认语言，其他语言的网址前面加语言代码（比如 /en/），也可以给它一个单独的域名。和内容一样，改完要发布才生效。	The languages of the site. The first is the default; the others live under their code (like /en/) or on a domain of their own. Like content, changes go live when published.
+代码	Code
+单独的域名（可不填）	Own domain (optional)
+缺翻译时依次用	When untranslated, use
+域名	Domain
+回退语言	Fallback languages
+新语言的代码	New language code
+新语言的名字	New language name
+翻译自动同步：对话改了文字，就把改动翻译进其他语言（草稿，你看过再发布）	Keep translations in sync: when the chat changes text, it translates the change into the other languages (as drafts you review)
+要删掉一种语言，清空它那一行的代码再保存。清空全部就回到单语言网站。	To remove a language, clear its code and save. Clear them all for a single-language site.
+单语言网站	Single-language site
+不在这种语言里显示	Not shown in this language
+缺翻译	Untranslated
+原文改过，可能过期	Source changed, may be out of date
+已翻译	Translated
+没有要翻译的文字	Nothing to translate
+原文改过	Source changed
+这种语言的网址名	Address name in this language
+从翻译的标题自动生成	Made from the translated title
+这条内容不在这种语言里显示	Do not show this in this language
+让对话来翻译	Ask the chat to translate
+把记录 #	Translate record #
+ 翻译成 	 into
+：只翻译缺的和过期的字段，遵守站点说明里的术语表。	: only the missing and out-of-date fields, following the glossary in the site notes.
+至少要有一种语言（第一种是默认语言）。	There must be at least one language (the first is the default).
+语言代码“{}”不合法：用小写的语言代码，比如 zh、en、ja、zh-tw、pt-br。	Language code “{}” is invalid: use a lowercase code like zh, en, ja, zh-tw or pt-br.
+语言“{}”重复了。	Language “{}” is listed twice.
+语言“{}”要有一个名字，比如 English。	Language “{}” needs a name, like English.
+“{}”不是域名：只写主机名，比如 example.jp。	“{}” is not a domain: write the host name only, like example.jp.
+语言代码“{}”和系统的网址冲突，请换一个。	Language code “{}” clashes with the system's addresses; choose another.
+语言“{}”的回退语言“{}”不在语言列表里。	Language “{}” falls back to “{}”, which is not in the list.
+网站还没有设置多种语言：先用 set_site_settings 设 languages。	The site has no languages set yet: set languages with set_site_settings first.
+网站还没有设置多种语言。	The site has no languages set yet.

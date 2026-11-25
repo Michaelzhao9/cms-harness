@@ -161,6 +161,7 @@ fn settings_page(app: &App, user: &AdminUser, extra: Extra) -> Result<Out, Out> 
         "can_notes": user.actor().can(Scope::Structure),
         "notes_note": NOTES_NOTE,
         "web": web_section(app),
+        "langs": langs_section(app),
         "site_name_draft": site["name"]["value"].as_str().unwrap_or_default(),
         "name_status": site["name"]["status"],
         "marks": MARKS.iter().map(|(k, label)| json!({ "key": k, "label": label, "on": nav["mark"] == *k })).collect::<Vec<_>>(),
@@ -520,6 +521,41 @@ pub async fn restore_backup(State(app): State<Shared>, Extension(user): Extensio
         }
         match crate::backup::restore_live(app, bytes) {
             Ok(_) => Ok(Out::Go("/admin/settings?saved=restored#s-backup".into())),
+            Err(e) => refused(app, user, e),
+        }
+    })
+    .await
+}
+
+fn langs_section(app: &App) -> Value {
+    let conn = app.conn();
+    let draft = crate::langs::load(&conn, true);
+    let status = crate::changes::target_status(&conn, &crate::changes::Target::Setting("languages".into())).unwrap_or("deleted");
+    match draft {
+        Some(l) => json!({ "list": l.list, "sync": l.sync, "status": status }),
+        None => json!({ "list": [], "sync": false, "status": status }),
+    }
+}
+
+/// `POST /admin/settings/languages`: the site's languages, a draft until published (builders only).
+pub async fn save_languages(State(app): State<Shared>, Extension(user): Extension<AdminUser>, req: Request) -> Response {
+    handle(app, user, req, true, |app, user, posted| {
+        let get = |k: &str| posted.fields.get(k).cloned().unwrap_or_default();
+        let (codes, names, domains, fallbacks) = (get("code"), get("name"), get("domain"), get("fallback"));
+        let mut list = vec![];
+        for (i, code) in codes.iter().enumerate() {
+            let code = code.trim().to_ascii_lowercase();
+            if code.is_empty() {
+                continue;
+            }
+            let name = names.get(i).map(|s| s.trim().to_string()).unwrap_or_default();
+            let domain = domains.get(i).map(|s| s.trim().to_ascii_lowercase()).filter(|s| !s.is_empty());
+            let fallback: Vec<String> = fallbacks.get(i).map(|s| s.split([',', ' ', '，']).map(|x| x.trim().to_ascii_lowercase()).filter(|x| !x.is_empty()).collect()).unwrap_or_default();
+            list.push(json!({ "code": code, "name": name, "domain": domain, "fallback": fallback }));
+        }
+        let value = if list.is_empty() { Value::Null } else { json!({ "list": list, "sync": posted.one("sync") == "1" }) };
+        match content::tool(app, user, "set_site_settings", json!({ "languages": value, "note": "后台修改网站语言" })) {
+            Ok(_) => Ok(Out::Go("/admin/settings?saved=langs#s-langs".into())),
             Err(e) => refused(app, user, e),
         }
     })
