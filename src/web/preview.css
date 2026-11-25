@@ -21,3 +21,9 @@ html.hc-picking, html.hc-picking * { cursor: crosshair !important; }
 #hc-overlay .hc-size { position: absolute; padding: 3px 7px; border-radius: 5px; background: #0a6cff; color: #fff; transform: translateX(-50%);
   font: 600 11px/1.2 -apple-system, BlinkMacSystemFont, sans-serif; font-variant-numeric: tabular-nums; white-space: nowrap; }
 [data-hc-editing] { outline: 1.5px solid #0a6cff !important; outline-offset: 2px; cursor: text !important; }
+#hc-overlay .hc-handle { pointer-events: auto; cursor: nwse-resize; }
+#hc-overlay .hc-handle[data-dir="ne"], #hc-overlay .hc-handle[data-dir="sw"] { cursor: nesw-resize; }
+#hc-overlay .hc-handle[data-dir="n"], #hc-overlay .hc-handle[data-dir="s"] { cursor: ns-resize; }
+#hc-overlay .hc-handle[data-dir="e"], #hc-overlay .hc-handle[data-dir="w"] { cursor: ew-resize; }
+#hc-overlay .hc-guide { position: absolute; background: #ff2d78; }
+html.hc-dragging, html.hc-dragging * { user-select: none !important; cursor: grabbing !important; }

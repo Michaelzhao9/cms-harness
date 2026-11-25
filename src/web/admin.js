@@ -499,6 +499,7 @@ async function canvasSave(url, fields) {
   if (!res.ok) throw new Error((await res.text()) || tr(`出错了（${res.status}）`, `Something went wrong (${res.status})`));
   const out = await res.json();
   setPending(out.pending);
+  return out;
 }
 
 function hex(rgb) {
@@ -509,17 +510,61 @@ function hex(rgb) {
 }
 
 /** Sets one property: shown in the preview at once, saved as a draft. */
-async function canvasSet(prop, value) {
-  if (!csel) return;
-  post({ type: 'hc:style', src: csel.src, prop, value });
+/** Shows one property in the preview at once and saves it as a draft; returns what it was (for undo). */
+async function canvasPut(src, tier, prop, value) {
+  post({ type: 'hc:style', src, prop, value });
   // The stylesheet gives a border width its solid style; the preview needs it too until it reloads.
-  if (prop === 'border-width') post({ type: 'hc:style', src: csel.src, prop: 'border-style', value: value ? 'solid' : '' });
+  if (prop === 'border-width') post({ type: 'hc:style', src, prop: 'border-style', value: value ? 'solid' : '' });
+  const out = await canvasSave('/admin/canvas/style', { src, tier, prop, value });
+  return out.old ?? '';
+}
+
+// Undo and redo: each step is a list of {src, tier, prop, old, value}.
+const undone = [];
+const done = [];
+
+/** Applies a step's edits, saving each; on success it can be undone. */
+async function canvasStep(src, edits) {
+  const step = [];
   try {
-    await canvasSave('/admin/canvas/style', { src: csel.src, tier: canvasTier(), prop, value });
+    for (const { tier, prop, value } of edits) step.push({ src, tier, prop, value, old: await canvasPut(src, tier, prop, value) });
   } catch (err) {
     toast(tr('没存上', 'Not saved'), err.message, true);
   }
+  if (step.length) {
+    done.push(step);
+    undone.length = 0;
+  }
 }
+
+async function canvasSet(prop, value) {
+  if (csel) await canvasStep(csel.src, [{ tier: canvasTier(), prop, value }]);
+}
+
+async function canvasUndo(redo) {
+  const step = (redo ? undone : done).pop();
+  if (!step) return;
+  try {
+    for (const e of redo ? step : [...step].reverse()) await canvasPut(e.src, e.tier, e.prop, redo ? e.value : e.old);
+    (redo ? done : undone).push(step);
+  } catch (err) {
+    toast(tr('没撤销成', 'Could not undo'), err.message, true);
+  }
+}
+
+/** Takes the selected element out of its template, or copies it, then shows the page again. */
+async function canvasElement(action) {
+  if (!csel) return;
+  try {
+    await canvasSave('/admin/canvas/element', { src: csel.src, action });
+    closeBar();
+    reloadFrames();
+  } catch (err) {
+    toast(action === 'remove' ? tr('没删成', 'Not deleted') : tr('没复制成', 'Not copied'), err.message, true);
+  }
+}
+
+const width = () => cbar.querySelector('[data-c-tier]').dataset.tier;
 
 const PRESETS = {
   plain: { color: '', 'background-color': '', 'border-width': '', 'border-color': '', 'box-shadow': '' },
@@ -530,11 +575,37 @@ const PRESETS = {
 };
 const ALIGNS = ['left', 'center', 'right'];
 
+// The desktop preview is never narrower than a desktop (DESKTOP px, where the site's desktop edits apply): a
+// narrower pane shows it scaled down, the way a thumbnail would. Tablet and phone previews are their real width.
+const DESKTOP = 1024;
+let frameScale = 1;
+function fitFrames() {
+  frameScale = 1;
+  for (const f of $$('.preview')) {
+    const box = f.parentElement;
+    const fit = stage.classList.contains('w-desktop') && box.clientWidth < DESKTOP;
+    const s = fit ? box.clientWidth / DESKTOP : 1;
+    f.style.flex = fit ? 'none' : '';
+    f.style.width = fit ? `${DESKTOP}px` : '';
+    f.style.height = fit ? `${box.clientHeight / s}px` : '';
+    f.style.transform = fit ? `scale(${s})` : '';
+    f.style.transformOrigin = fit ? '0 0' : '';
+    box.style.overflow = fit ? 'hidden' : '';
+    box.style.justifyContent = fit ? 'flex-start' : '';
+    if (f === frame) frameScale = s;
+  }
+}
+if (stage) {
+  fitFrames();
+  new ResizeObserver(fitFrames).observe(stage);
+}
+
 function placeBar() {
   if (!cbar || !csel || !frame) return;
   const fr = frame.getBoundingClientRect();
   const st = stage.getBoundingClientRect();
-  const r = csel.rect;
+  const s = frameScale;
+  const r = { x: csel.rect.x * s, y: csel.rect.y * s, w: csel.rect.w * s, h: csel.rect.h * s };
   const h = cbar.offsetHeight || 40;
   const w = cbar.offsetWidth || 420;
   let top = fr.top - st.top + r.y - h - 14;
@@ -586,6 +657,19 @@ if (cbar && frame) {
         toast(tr('文字没改成', 'Text not changed'), err.message, true);
         reloadFrames();
       });
+    } else if (m.type === 'hc:move' && typeof m.src === 'string') {
+      // Where things sit is an edit of the width being looked at.
+      canvasStep(m.src, [{ tier: width(), prop: 'translate', value: `${Number(m.x) || 0}px ${Number(m.y) || 0}px` }]);
+    } else if (m.type === 'hc:resize' && typeof m.src === 'string') {
+      const edits = [];
+      if (m.w != null) edits.push({ tier: width(), prop: 'width', value: `${Number(m.w)}px` });
+      if (m.h != null) edits.push({ tier: width(), prop: 'height', value: `${Number(m.h)}px` });
+      edits.push({ tier: width(), prop: 'translate', value: `${Number(m.x) || 0}px ${Number(m.y) || 0}px` });
+      canvasStep(m.src, edits);
+    } else if (m.type === 'hc:key') {
+      if (m.key === 'undo' || m.key === 'redo') canvasUndo(m.key === 'redo');
+      else if (m.key === 'delete') canvasElement('remove');
+      else if (m.key === 'duplicate') canvasElement('duplicate');
     }
   });
   window.addEventListener('resize', placeBar);
@@ -625,6 +709,23 @@ if (cbar && frame) {
     tierOnly = !tierOnly;
     fillBar();
   });
+  $('[data-c-copy]', cbar).addEventListener('click', () => canvasElement('duplicate'));
+  $('[data-c-remove]', cbar).addEventListener('click', () => canvasElement('remove'));
+  for (const b of $$('[data-c-layer]', cbar)) {
+    b.addEventListener('click', () => {
+      b.closest('details').removeAttribute('open');
+      if (!csel) return;
+      const z = Math.max(-50, Math.min(50, (parseInt(csel.style.zIndex, 10) || 0) + Number(b.dataset.cLayer)));
+      csel.style.zIndex = String(z);
+      canvasStep(csel.src, [{ tier: width(), prop: 'z-index', value: String(z) }]);
+    });
+  }
+  $('[data-c-hide]', cbar).addEventListener('click', (e) => {
+    e.currentTarget.closest('details').removeAttribute('open');
+    if (!csel) return;
+    canvasStep(csel.src, [{ tier: width(), prop: 'display', value: 'none' }]);
+    closeBar();
+  });
   $('[data-c-ai]', cbar).addEventListener('click', () => {
     if (!csel) return;
     picked = [{ path: page.path || '/', selector: `[data-hc-src="${csel.src}"]`, text: csel.text, change: null }];
@@ -633,7 +734,12 @@ if (cbar && frame) {
     else ask?.focus();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && csel && !e.target.closest?.('input, textarea')) {
+    const typing = e.target.closest?.('input, textarea, [contenteditable]');
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !typing && (done.length || undone.length)) {
+      e.preventDefault();
+      canvasUndo(e.shiftKey);
+    }
+    if (e.key === 'Escape' && csel && !typing) {
       post({ type: 'hc:deselect' });
       closeBar();
     }

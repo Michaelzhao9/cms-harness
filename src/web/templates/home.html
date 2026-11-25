@@ -81,11 +81,17 @@
 <button type="button" role="menuitem" data-c-set="box-shadow" data-v="none">{{ "无"|t }}</button><button type="button" role="menuitem" data-c-set="box-shadow" data-v="0 1px 3px rgba(16,16,24,.12)">{{ "轻"|t }}</button><button type="button" role="menuitem" data-c-set="box-shadow" data-v="0 8px 24px -8px rgba(16,16,24,.25)">{{ "中"|t }}</button><button type="button" role="menuitem" data-c-set="box-shadow" data-v="0 24px 48px -16px rgba(16,16,24,.35)">{{ "重"|t }}</button>
 <span class="cap">{{ "内边距"|t }}</span>
 <button type="button" role="menuitem" data-c-set="padding" data-v="0px">0</button><button type="button" role="menuitem" data-c-set="padding" data-v="8px">8</button><button type="button" role="menuitem" data-c-set="padding" data-v="16px">16</button><button type="button" role="menuitem" data-c-set="padding" data-v="32px">32</button>
+<span class="cap">{{ "层级"|t }}</span>
+<button type="button" role="menuitem" class="two" data-c-layer="1">{{ "上移一层"|t }}</button><button type="button" role="menuitem" class="two" data-c-layer="-1">{{ "下移一层"|t }}</button>
+<button type="button" role="menuitem" class="all" data-c-hide>{{ "在这个宽度隐藏"|t }}</button>
 </div>
 </details>
 <span class="cb-sep" aria-hidden="true"></span>
 <button type="button" class="cb wide" aria-pressed="false" data-c-tier data-tier="{{ width }}">{{ "所有宽度"|t }}</button>
+<span class="cb-sep" aria-hidden="true"></span>
 <button type="button" class="cb" aria-label="{{ '问 AI'|t }}" data-c-ai>{{ i.icon("sparkle", 16) }}</button>
+<button type="button" class="cb" aria-label="{{ '复制一份'|t }}" aria-keyshortcuts="Meta+D" data-c-copy>{{ i.icon("copy", 15) }}</button>
+<button type="button" class="cb" aria-label="{{ '删除'|t }}" aria-keyshortcuts="Delete" data-c-remove>{{ i.icon("trash", 15) }}</button>
 </div>
 {%- endif %}
 {% if published %}<div class="pubbed" role="status" data-published>{{ i.icon("check", 14) }}{{ "已发布，线上已经是最新的"|t }}<a href="{{ links.live|safe }}">{{ "看线上"|t }}</a></div>{% endif %}

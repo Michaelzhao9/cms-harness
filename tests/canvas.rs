@@ -85,3 +85,32 @@ async fn text_written_in_the_template_can_be_edited_and_keeps_its_style() {
     let live = get_text(&app, "/").await;
     assert!(live.contains(&format!("<h1 data-hc=\"{id}\">夏季&lt;新品&gt;</h1>")), "{live}");
 }
+
+#[tokio::test]
+async fn elements_are_copied_and_deleted_and_edits_move_with_them() {
+    let app = app();
+    let page = "<!doctype html><html><head><title>t</title></head><body><section><h2>甲</h2></section><p>乙</p></body></html>";
+    ok(&app, &builder(), "write_site_file", json!({ "path": "index.html", "content": page, "note": "首页" }));
+    publish_all(&app);
+    let s = admin_session(&app, "builder").await;
+    // <p> is the 7th start tag: html head title body section h2 p.
+    let set = |v: &'static str| [("src", "index.html#7"), ("prop", "translate"), ("value", v), ("tier", "desktop")];
+    let (_, _, body) = post_form(&app, "/admin/canvas/style", Some(&s), &set("10px 20px")).await;
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["old"], Value::Null);
+    let (_, _, body) = post_form(&app, "/admin/canvas/style", Some(&s), &set("11px 20px")).await;
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["old"], "10px 20px");
+
+    let (status, _, body) = post_form(&app, "/admin/canvas/element", Some(&s), &[("src", "index.html#5"), ("action", "duplicate")]).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let draft = ok(&app, &reader(), "get_site_file", json!({ "path": "index.html" }))["content"].as_str().unwrap().to_string();
+    assert!(draft.contains("<section><h2>甲</h2></section><section><h2>甲</h2></section><p>乙</p>"), "{draft}");
+    let canvas = cms_harness::changes::setting(&app.conn(), "canvas", true);
+    assert!(canvas["els"].get("index.html#9").is_some(), "{canvas}");
+
+    let (status, _, _) = post_form(&app, "/admin/canvas/element", Some(&s), &[("src", "index.html#9"), ("action", "remove")]).await;
+    assert_eq!(status, StatusCode::OK);
+    let canvas = cms_harness::changes::setting(&app.conn(), "canvas", true);
+    assert!(canvas["els"].as_object().is_none_or(|m| m.is_empty()), "{canvas}");
+    let (status, _, _) = post_form(&app, "/admin/canvas/element", Some(&s), &[("src", "index.html#1"), ("action", "remove")]).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

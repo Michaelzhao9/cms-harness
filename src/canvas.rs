@@ -187,6 +187,7 @@ pub fn annotate(path: &str, src: &str, doc: &Value, preview: bool) -> String {
 
 /// Shadow presets: the only shadows an edit may set.
 pub const SHADOWS: [&str; 4] = ["none", "0 1px 3px rgba(16,16,24,.12)", "0 8px 24px -8px rgba(16,16,24,.25)", "0 24px 48px -16px rgba(16,16,24,.35)"];
+
 fn number_in(v: &str, unit: &str, lo: f64, hi: f64) -> Option<String> {
     let n: f64 = v.strip_suffix(unit)?.parse().ok()?;
     (n.is_finite() && (lo..=hi).contains(&n)).then(|| format!("{}{unit}", (n * 100.0).round() / 100.0))
@@ -202,9 +203,12 @@ fn color(v: &str) -> Option<String> {
 }
 
 /// The CSS properties a hand edit may set.
-pub const PROPS: [&str; 15] = [
+/// Position and size (`translate`, `width`, `height`), stacking (`z-index`) and hiding (`display: none`) are
+/// edits of one width tier in practice; the admin sends them for the tier being looked at.
+pub const PROPS: [&str; 20] = [
     "color", "background-color", "border-color", "font-size", "font-weight", "font-style", "text-decoration-line", "text-align",
     "line-height", "letter-spacing", "border-radius", "border-width", "padding", "opacity", "box-shadow",
+    "translate", "width", "height", "z-index", "display",
 ];
 
 /// Each value a hand edit sets, checked against what that property may hold. The page
@@ -225,6 +229,10 @@ pub fn check(prop: &str, value: &str) -> Result<String, String> {
         "padding" => number_in(v, "px", 0.0, 400.0),
         "opacity" => v.parse::<f64>().ok().filter(|n| (0.0..=1.0).contains(n)).map(|n| format!("{}", (n * 100.0).round() / 100.0)),
         "box-shadow" => SHADOWS.contains(&v).then(|| v.to_string()),
+        "translate" => v.split_once(' ').and_then(|(x, y)| Some(format!("{} {}", number_in(x, "px", -5000.0, 5000.0)?, number_in(y.trim(), "px", -5000.0, 5000.0)?))),
+        "width" | "height" => number_in(v, "px", 1.0, 5000.0),
+        "z-index" => v.parse::<i32>().ok().filter(|n| (-50..=50).contains(n)).map(|n| n.to_string()),
+        "display" => (v == "none").then(|| v.to_string()),
         _ => return Err(format!("不能在画板上改“{prop}”。")),
     };
     ok.ok_or_else(|| format!("“{prop}”不能设成“{value}”。"))
@@ -283,7 +291,16 @@ pub fn css(doc: &Value) -> Option<String> {
             if decls.is_empty() {
                 continue;
             }
-            let extra = if props.contains_key("border-width") { ";border-style:solid !important" } else { "" };
+            let mut extra = String::new();
+            if props.contains_key("border-width") {
+                extra.push_str(";border-style:solid !important");
+            }
+            if props.contains_key("z-index") {
+                extra.push_str(";position:relative");
+            }
+            if props.contains_key("width") || props.contains_key("height") {
+                extra.push_str(";box-sizing:border-box !important;max-width:none !important");
+            }
             rules.push_str(&format!("[data-hc=\"{}\"]{{{}{extra}}}", id(key), decls.join(";")));
         }
         if rules.is_empty() {
@@ -327,6 +344,92 @@ pub fn set_text(src: &str, n: usize, text: &str) -> Result<String, String> {
     }
     let escaped = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('{', "&#123;").replace('\n', "<br>");
     Ok(format!("{}{}{}", &src[..tag.open_end], escaped, &rest[close..]))
+}
+
+// ---- elements ----
+
+/// Elements that have no content and no closing tag.
+const VOID: [&str; 14] = ["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr", "param"];
+
+/// Byte range of the whole element that `tag` opens, up to its matching closing tag; template blocks and
+/// comments inside are skipped when matching.
+pub fn element_range(src: &str, tag: &Tag) -> Option<(usize, usize)> {
+    if VOID.contains(&tag.name.as_str()) || src[..tag.open_end].ends_with("/>") {
+        return Some((tag.start, tag.open_end));
+    }
+    let name = &tag.name;
+    let lower = src.to_ascii_lowercase();
+    let boundary = |at: usize| lower[at..].chars().next().is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '-'));
+    let mut depth = 1;
+    let mut i = tag.open_end;
+    while i < src.len() {
+        let rest = &src[i..];
+        let skip = [("{{", "}}"), ("{%", "%}"), ("{#", "#}"), ("<!--", "-->")].iter().find(|(o, _)| rest.starts_with(o));
+        if let Some((_, close)) = skip {
+            i += rest.find(close)? + close.len();
+        } else if lower[i..].starts_with(&format!("</{name}")) && boundary(i + 2 + name.len()) {
+            depth -= 1;
+            let end = i + rest.find('>')? + 1;
+            if depth == 0 {
+                return Some((tag.start, end));
+            }
+            i = end;
+        } else if lower[i..].starts_with(&format!("<{name}")) && boundary(i + 1 + name.len()) {
+            let len = tag_end(rest);
+            if !rest[..len].ends_with("/>") {
+                depth += 1;
+            }
+            i += len;
+        } else {
+            i += rest.chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    None
+}
+
+/// Removes (`copy` false) or duplicates right after itself (`copy` true) the element at position `n`.
+/// Returns the new source, and how the positions after it move: (first moved position, shift).
+pub fn restructure(src: &str, n: usize, copy: bool) -> Result<(String, usize, isize), String> {
+    let all = tags(src);
+    let tag = all.get(n.wrapping_sub(1)).ok_or("这个元素已经不在文件里了：请刷新预览。")?;
+    if UNMARKED.contains(&tag.name.as_str()) {
+        return Err("这个元素不能复制或删除。".into());
+    }
+    let (start, end) = element_range(src, tag).ok_or("找不到这个元素的结尾：它不能复制或删除。")?;
+    let inside = all.iter().filter(|t| t.start >= start && t.start < end).count();
+    if copy {
+        let out = format!("{}{}{}", &src[..end], &src[start..end], &src[end..]);
+        Ok((out, n + inside, inside as isize))
+    } else {
+        Ok((format!("{}{}", &src[..start], &src[end..]), n, -(inside as isize)))
+    }
+}
+
+/// Moves the edits of the file at `path` after a restructure: positions from `from` on shift by `by`; with a
+/// negative shift, edits of the removed elements (`from` up to `from - by`) are dropped.
+pub fn shift(doc: &Value, path: &str, from: usize, by: isize) -> Value {
+    let mut doc = doc.clone();
+    let Some(els) = doc["els"].as_object() else { return doc };
+    let mut out = Map::new();
+    for (key, el) in els {
+        let moved = parse_src(key).filter(|(p, n)| *p == path && *n >= from).map(|(_, n)| n);
+        match moved {
+            Some(n) if by < 0 && n < from + by.unsigned_abs() => {}
+            Some(n) => {
+                out.insert(format!("{path}#{}", (n as isize + by) as usize), el.clone());
+            }
+            None => {
+                out.insert(key.clone(), el.clone());
+            }
+        }
+    }
+    doc["els"] = Value::Object(out);
+    doc
+}
+
+/// The value one edit has now, for undo: `None` when it is not set.
+pub fn current(doc: &Value, key: &str, tier: &str, prop: &str) -> Option<String> {
+    doc["els"][key]["style"][tier][prop].as_str().map(String::from)
 }
 
 #[cfg(test)]
@@ -377,6 +480,37 @@ mod tests {
         let cleared = set_style(&doc, "a.html#1", "p|", "all", "color", None).unwrap();
         assert_eq!(cleared, json!({ "els": {} }));
         assert!(set_style(&doc, "a.html#1", "p|", "all", "position", None).is_err());
+    }
+
+    #[test]
+    fn elements_are_removed_and_copied_whole() {
+        let src = "<div><section><div>a{% if x %}</div>{% endif %}<img src=\"x\"><div>b</div></div></section><p>c</p></div>";
+        let (copied, from, by) = restructure(src, 2, true).unwrap();
+        assert_eq!(copied, "<div><section><div>a{% if x %}</div>{% endif %}<img src=\"x\"><div>b</div></div></section><section><div>a{% if x %}</div>{% endif %}<img src=\"x\"><div>b</div></div></section><p>c</p></div>");
+        assert_eq!((from, by), (2 + 4, 4));
+        let (removed, from, by) = restructure(src, 2, false).unwrap();
+        assert_eq!(removed, "<div><p>c</p></div>");
+        assert_eq!((from, by), (2, -4));
+        let (no_img, ..) = restructure(src, 4, false).unwrap();
+        assert!(no_img.contains("{% endif %}<div>b</div>"));
+
+        let doc = set_style(&json!({}), "a.html#3", "div|a", "all", "color", Some("#000")).unwrap();
+        let doc = set_style(&doc, "a.html#7", "p|c", "all", "color", Some("#111")).unwrap();
+        let doc = set_style(&doc, "b.html#7", "p|c", "all", "color", Some("#222")).unwrap();
+        let after = shift(&doc, "a.html", 2, -4);
+        let keys: Vec<&String> = after["els"].as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["a.html#3", "b.html#7"].map(String::from).iter().collect::<Vec<_>>());
+        assert_eq!(after["els"]["a.html#3"]["style"]["all"]["color"], "#111");
+    }
+
+    #[test]
+    fn positions_and_sizes_are_checked() {
+        assert_eq!(check("translate", "12.345px -8px").unwrap(), "12.35px -8px");
+        assert!(check("translate", "12px").is_err());
+        assert!(check("translate", "1px 9999px").is_err());
+        assert!(check("display", "block").is_err());
+        let doc = set_style(&json!({}), "a.html#1", "p|", "desktop", "z-index", Some("2")).unwrap();
+        assert!(css(&doc).unwrap().contains("z-index:2 !important;position:relative}"));
     }
 
     #[test]

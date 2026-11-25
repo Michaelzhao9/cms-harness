@@ -65,9 +65,13 @@ fn save_canvas(conn: &Connection, user: &AdminUser, doc: &Value) -> Result<(), O
     changes::save_draft(conn, &user.actor(), &target, doc, NOTE).map_err(internal)
 }
 
-fn done(conn: &Connection) -> Result<Out, Out> {
+fn done(conn: &Connection, extra: Value) -> Result<Out, Out> {
     let pending = changes::pending_order(conn).map_err(internal)?.len();
-    Ok(Out::Json(json!({ "pending": pending })))
+    let mut out = json!({ "pending": pending });
+    if let (Some(o), Value::Object(e)) = (out.as_object_mut(), extra) {
+        o.extend(e);
+    }
+    Ok(Out::Json(out))
 }
 
 fn allowed(user: &AdminUser, csrf: &str) -> Result<(), Out> {
@@ -86,10 +90,12 @@ pub async fn style(State(app): State<Shared>, Extension(user): Extension<AdminUs
         let (_, source, tag) = element(&conn, &f.src)?;
         let fp = canvas::fingerprint(&source, &tag);
         let doc = changes::setting(&conn, canvas::KEY, true);
+        // What it was, so the admin can undo this edit.
+        let old = canvas::current(&doc, &f.src, &f.tier, &f.prop);
         let value = Some(f.value.as_str()).filter(|v| !v.trim().is_empty());
         let doc = canvas::set_style(&doc, &f.src, &fp, &f.tier, &f.prop, value).map_err(bad)?;
         save_canvas(&conn, &user, &doc)?;
-        done(&conn)
+        done(&conn, json!({ "old": old }))
     })
     .await
 }
@@ -111,7 +117,40 @@ pub async fn text(State(app): State<Shared>, Extension(user): Extension<AdminUse
             doc["els"][&f.src]["fp"] = json!(canvas::fingerprint(&new, &tag));
             save_canvas(&conn, &user, &doc)?;
         }
-        done(&conn)
+        done(&conn, json!({}))
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+pub struct ElementForm {
+    csrf: String,
+    src: String,
+    /// `remove` or `duplicate`.
+    action: String,
+}
+
+/// Removes an element from its template, or puts a copy of it right after itself. Hand edits of the elements
+/// after it move with them.
+pub async fn element_action(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Form(f): Form<ElementForm>) -> Response {
+    blocking(move || {
+        allowed(&user, &f.csrf)?;
+        let copy = match f.action.as_str() {
+            "duplicate" => true,
+            "remove" => false,
+            _ => return Err(bad("只能复制（duplicate）或删除（remove）。")),
+        };
+        let conn = app.conn();
+        let (path, source, tag) = element(&conn, &f.src)?;
+        let (new, from, by) = canvas::restructure(&source, tag.n, copy).map_err(bad)?;
+        site::check_file(&path, &new).map_err(bad)?;
+        changes::stage_file(&conn, &user.actor(), &path, &new, NOTE).map_err(internal)?;
+        let doc = changes::setting(&conn, canvas::KEY, true);
+        let moved = canvas::shift(&doc, &path, from, by);
+        if moved != doc {
+            save_canvas(&conn, &user, &moved)?;
+        }
+        done(&conn, json!({}))
     })
     .await
 }

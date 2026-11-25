@@ -118,6 +118,7 @@
         for (const [x, y] of [[0, 0], [.5, 0], [1, 0], [0, .5], [1, .5], [0, 1], [.5, 1], [1, 1]]) {
           const h = document.createElement("div");
           h.className = "hc-handle";
+          h.dataset.dir = (y === 0 ? "n" : y === 1 ? "s" : "") + (x === 0 ? "w" : x === 1 ? "e" : "");
           h.style.left = (b.left - 3 + (b.width + 6) * x) + "px";
           h.style.top = (b.top - 3 + (b.height + 6) * y) + "px";
           overlay.appendChild(h);
@@ -130,6 +131,13 @@
         overlay.appendChild(size);
       }
       reportRect();
+    }
+    for (const g of guides) {
+      const line = document.createElement("div");
+      line.className = "hc-guide";
+      if (g.x != null) Object.assign(line.style, { left: g.x + "px", top: "0px", width: "1px", height: "100%" });
+      else Object.assign(line.style, { left: "0px", top: g.y + "px", width: "100%", height: "1px" });
+      overlay.appendChild(line);
     }
     for (const el of picked) {
       const p = document.createElement("div");
@@ -208,6 +216,7 @@
   let editing = null; // the element whose text is being edited, and its text before
   let before = "";
   let press = null;
+  let nudged = 0, nudgeFrom = null;
   let swallow = false; // the click that ends a long press selects, it does not navigate
   const INTERACTIVE = "a[href], button, input, select, textarea, label, summary, [contenteditable], [onclick], [role=button]";
   const sourceOf = (t) => {
@@ -269,18 +278,103 @@
     else send({ type: "hc:text", src: el.dataset.hcSrc, text });
     redraw();
   }
+  // Dragging moves an element (translate), a handle resizes it (width/height). Both apply at once to every
+  // element from the same template line; the admin saves them for the width being looked at.
+  let drag = null; // {kind: "move"|"size", el, x0, y0, t0, w0, h0, dir, rect0, lines}
+  let guides = [];
+  const sameAs = (el) => document.querySelectorAll(`[data-hc-src="${CSS.escape(el.dataset.hcSrc)}"]`);
+  const getT = (el) => {
+    const t = (el.style.translate || getComputedStyle(el).translate || "none").split(" ").map(parseFloat);
+    return [t[0] || 0, t[1] || 0];
+  };
+  const setProp = (el, prop, v) => { for (const e of sameAs(el)) e.style.setProperty(prop, v, "important"); };
+  const SNAP = 6;
+  function snapLines(el) {
+    const xs = [], ys = [];
+    let n = 0;
+    for (const o of document.querySelectorAll("[data-hc-src]")) {
+      if (n > 400) break;
+      if (o.dataset.hcSrc === el.dataset.hcSrc || el.contains(o)) continue;
+      const b = o.getBoundingClientRect();
+      if (!b.width || !b.height || b.bottom < 0 || b.top > innerHeight) continue;
+      n++;
+      xs.push(b.left, b.left + b.width / 2, b.right);
+      ys.push(b.top, b.top + b.height / 2, b.bottom);
+    }
+    return { xs, ys };
+  }
+  const nearest = (edges, lines) => {
+    let best = null;
+    for (const e of edges) for (const l of lines) {
+      const d = l - e;
+      if (Math.abs(d) <= SNAP && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, at: l };
+    }
+    return best;
+  };
   document.addEventListener("pointerdown", (e) => {
     if (picking || e.button !== 0 || editing && editing.contains(e.target)) return;
+    const handle = e.target instanceof Element && e.target.closest(".hc-handle");
+    if (handle && sel) {
+      e.preventDefault();
+      const b = sel.getBoundingClientRect();
+      drag = { kind: "size", el: sel, dir: handle.dataset.dir, x0: e.clientX, y0: e.clientY, t0: getT(sel), w0: b.width, h0: b.height };
+      return;
+    }
     press = { x: e.clientX, y: e.clientY, t: performance.now(), el: sourceOf(e.target), target: e.target };
   }, true);
-  document.addEventListener("pointerup", (e) => {
+  document.addEventListener("pointermove", (e) => {
+    if (press && !drag && press.el && Math.hypot(e.clientX - press.x, e.clientY - press.y) > MOVE) {
+      const el = press.el;
+      select(el);
+      drag = { kind: "move", el, x0: press.x, y0: press.y, t0: getT(el), rect0: el.getBoundingClientRect(), lines: snapLines(el) };
+      document.documentElement.classList.add("hc-dragging");
+    }
+    if (!drag) return;
+    e.preventDefault();
+    let dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+    if (drag.kind === "move") {
+      const r = drag.rect0;
+      // Alt turns snapping off.
+      const sx = e.altKey ? null : nearest([r.left + dx, r.left + r.width / 2 + dx, r.right + dx], drag.lines.xs);
+      const sy = e.altKey ? null : nearest([r.top + dy, r.top + r.height / 2 + dy, r.bottom + dy], drag.lines.ys);
+      if (sx) dx += sx.d;
+      if (sy) dy += sy.d;
+      guides = [sx && { x: sx.at }, sy && { y: sy.at }].filter(Boolean);
+      setProp(drag.el, "translate", `${Math.round(drag.t0[0] + dx)}px ${Math.round(drag.t0[1] + dy)}px`);
+    } else {
+      const d = drag.dir;
+      const w = d.includes("e") ? drag.w0 + dx : d.includes("w") ? drag.w0 - dx : null;
+      const h = d.includes("s") ? drag.h0 + dy : d.includes("n") ? drag.h0 - dy : null;
+      setProp(drag.el, "box-sizing", "border-box");
+      if (w != null) { drag.w = Math.max(8, Math.round(w)); setProp(drag.el, "width", drag.w + "px"); setProp(drag.el, "max-width", "none"); }
+      if (h != null) { drag.h = Math.max(8, Math.round(h)); setProp(drag.el, "height", drag.h + "px"); }
+      // Pulling a left or top handle keeps the opposite edge where it was.
+      const tx = drag.t0[0] + (d.includes("w") && drag.w ? drag.w0 - drag.w : 0);
+      const ty = drag.t0[1] + (d.includes("n") && drag.h ? drag.h0 - drag.h : 0);
+      if (tx !== drag.t0[0] || ty !== drag.t0[1]) setProp(drag.el, "translate", `${Math.round(tx)}px ${Math.round(ty)}px`);
+    }
+    redraw();
+  }, true);
+  document.addEventListener("pointerup", () => {
     const p = press;
     press = null;
+    if (drag) {
+      const d = drag;
+      drag = null;
+      guides = [];
+      document.documentElement.classList.remove("hc-dragging");
+      swallow = d.kind === "move";
+      const t = getT(d.el);
+      const moved = t[0] !== d.t0[0] || t[1] !== d.t0[1];
+      if (d.kind === "move" && moved) send({ type: "hc:move", src: d.el.dataset.hcSrc, x: t[0], y: t[1], from: d.t0 });
+      if (d.kind === "size") send({ type: "hc:resize", src: d.el.dataset.hcSrc, w: d.w ?? null, h: d.h ?? null, x: t[0], y: t[1], from: d.t0 });
+      redraw();
+      return;
+    }
     if (!p || !p.el) return;
-    const moved = Math.hypot(e.clientX - p.x, e.clientY - p.y) > MOVE;
-    const held = performance.now() - p.t > HOLD;
-    if (held || moved) { swallow = true; select(p.el); }
+    if (performance.now() - p.t > HOLD) { swallow = true; select(p.el); }
   }, true);
+  document.addEventListener("dragstart", (e) => { if (!picking) e.preventDefault(); }, true);
   document.addEventListener("click", (e) => {
     if (picking) return;
     if (swallow) { swallow = false; e.preventDefault(); e.stopPropagation(); return; }
@@ -313,8 +407,26 @@
       return;
     }
     if (picking || !sel) return;
+    const mod = e.metaKey || e.ctrlKey;
     if (e.key === "Escape") deselect(true);
     else if (e.key === "Enter") { e.preventDefault(); startEdit(sel); }
+    else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); send({ type: "hc:key", key: "delete" }); }
+    else if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); send({ type: "hc:key", key: e.shiftKey ? "redo" : "undo" }); }
+    else if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); send({ type: "hc:key", key: "duplicate" }); }
+    else if (e.key.startsWith("Arrow")) {
+      e.preventDefault();
+      const step = e.shiftKey ? 10 : 1;
+      const [x, y] = getT(sel);
+      const nx = x + (e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0);
+      const ny = y + (e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0);
+      setProp(sel, "translate", `${nx}px ${ny}px`);
+      redraw();
+      clearTimeout(nudged);
+      const el = sel, from = nudgeFrom || [x, y];
+      nudgeFrom = from;
+      // One save for a run of key presses.
+      nudged = setTimeout(() => { nudgeFrom = null; send({ type: "hc:move", src: el.dataset.hcSrc, x: nx, y: ny, from }); }, 400);
+    }
   }, true);
   document.addEventListener("focusout", (e) => { if (editing && e.target === editing) finishEdit(true); }, true);
 

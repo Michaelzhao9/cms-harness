@@ -933,3 +933,11 @@ record:{} 还被 {} 链接着，删掉会留下死链：请先改掉那个链接
 不能在画板上改“{}”。	“{}” cannot be changed on the page.
 “{}”不能设成“{}”。	“{}” cannot be set to “{}”.
 宽度只能是 all、desktop、tablet 或 mobile，不是“{}”。	The width must be all, desktop, tablet or mobile, not “{}”.
+层级	Layer
+上移一层	Bring forward
+下移一层	Send backward
+在这个宽度隐藏	Hide at this width
+复制一份	Duplicate
+这个元素不能复制或删除。	This element cannot be copied or deleted.
+找不到这个元素的结尾：它不能复制或删除。	This element has no end tag: it cannot be copied or deleted.
+只能复制（duplicate）或删除（remove）。	The action must be duplicate or remove.
