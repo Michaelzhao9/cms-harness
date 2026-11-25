@@ -401,6 +401,11 @@ impl Visit<'_> {
             Err(e) => return self.failed(&format!("{template}：{e}")),
         };
         let mut html = rendered.html;
+        // A page in a prefixed language keeps its visitors there: links the templates wrote as `/about` lead to `/en/about`.
+        if let Some(s) = self.site.borrow().as_ref().filter(|s| !s.cur.prefix.is_empty()) {
+            let codes: Vec<&str> = s.langs.list.iter().map(|l| l.code.as_str()).collect();
+            html = localize_links(&html, &s.cur.prefix, &codes);
+        }
         let mut inject = String::new();
         let map = if self.mode == Mode::Preview {
             html = rewrite_html(&html, self.base);
@@ -526,6 +531,80 @@ fn preview_map(conn: &Connection, base: &str) -> String {
         imports.entry("/_hc/").or_insert_with(|| json!("/_hc/"));
     }
     map.to_string().replace('<', "\\u003c")
+}
+
+// ---- keeping a language's visitors in that language ----
+
+/// The page's links to other site pages moved under the language prefix (`/en`): `href` on `<a>` and `<area>`,
+/// `action` on `<form>`. Left alone: links marked `hreflang` (a language switch), links already under a language,
+/// files (a last segment with a dot, like `/style.css`) and the server's own paths.
+fn localize_links(html: &str, prefix: &str, codes: &[&str]) -> String {
+    let mut out = String::with_capacity(html.len() + 256);
+    let mut rest = html;
+    while let Some(lt) = rest.find('<') {
+        out.push_str(&rest[..lt]);
+        rest = &rest[lt..];
+        let name: String = rest[1..].chars().take_while(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
+        if name.is_empty() {
+            out.push('<');
+            rest = &rest[1..];
+            continue;
+        }
+        // The whole tag, quotes respected.
+        let mut quote = None;
+        let mut end = rest.len();
+        for (j, c) in rest.char_indices().skip(1) {
+            match (quote, c) {
+                (Some(q), c) if c == q => quote = None,
+                (Some(_), _) => {}
+                (None, '"' | '\'') => quote = Some(c),
+                (None, '>') => {
+                    end = j + 1;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let tag = &rest[..end];
+        rest = &rest[end..];
+        let attr = match name.as_str() {
+            "a" | "area" => Some("href"),
+            "form" => Some("action"),
+            _ => None,
+        };
+        match attr.filter(|_| !tag.to_ascii_lowercase().contains("hreflang")) {
+            Some(attr) => out.push_str(&localize_tag(tag, attr, prefix, codes)),
+            None => out.push_str(tag),
+        }
+        // Scripts and styles are copied as they are.
+        if name == "script" || name == "style" {
+            let close = rest.to_ascii_lowercase().find(&format!("</{name}")).unwrap_or(rest.len());
+            out.push_str(&rest[..close]);
+            rest = &rest[close..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn localize_tag(tag: &str, attr: &str, prefix: &str, codes: &[&str]) -> String {
+    let lower = tag.to_ascii_lowercase();
+    let Some(at) = [format!(" {attr}=\""), format!(" {attr}='")].iter().find_map(|n| lower.find(n.as_str()).map(|i| i + n.len())) else {
+        return tag.to_string();
+    };
+    let value = &tag[at..];
+    // Template output escapes `/` as `&#x2f;`.
+    let slash = if value.starts_with('/') { "/" } else if value.to_ascii_lowercase().starts_with("&#x2f;") { "&#x2f;" } else { return tag.to_string() };
+    let path = value[..value.find(['"', '\'']).unwrap_or(value.len())].replace("&#x2f;", "/").replace("&#X2F;", "/");
+    let bare = path.split(['?', '#']).next().unwrap_or_default();
+    let first = bare.trim_start_matches('/').split('/').next().unwrap_or_default();
+    let last = bare.rsplit('/').next().unwrap_or_default();
+    if !site_path(&path) || codes.contains(&first) || last.contains('.') {
+        return tag.to_string();
+    }
+    let moved = if slash == "/" { prefix.to_string() } else { prefix.replace('/', "&#x2f;") };
+    // `/` itself becomes `/en/`, the language's home.
+    format!("{}{moved}{}", &tag[..at], &tag[at..])
 }
 
 // ---- keeping a preview's paths inside the preview ----

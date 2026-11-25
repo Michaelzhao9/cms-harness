@@ -183,3 +183,26 @@ async fn the_admin_edits_languages_and_translations() {
     let tools: Vec<String> = cms_harness::chat::chat_tools(&builder()).into_iter().map(|t| t.name).collect();
     assert!(tools.iter().any(|t| t == "set_translation") && tools.iter().any(|t| t == "translation_status"));
 }
+
+#[tokio::test]
+async fn links_written_in_templates_stay_in_the_language() {
+    let app = app();
+    languages(&app);
+    news(&app, "fallback");
+    add(&app);
+    write(&app, "about.html", "<a href=\"/\">首页</a><a href=\"/about?x=1#top\">关于</a><a href=\"/style.css\">样式</a>\
+        <a href=\"/uploads/a.jpg\">图</a><a href=\"/en/about\">已在英文</a><a href=\"//cdn.example/x\">外站</a>\
+        <a href=\"https://example.com/\">外站</a><a href=\"{{ '/news/x' }}\">转义</a><a hreflang=\"zh\" href=\"/about\">中文</a>\
+        <form action=\"/search\"></form><script>var s = '<a href=\"/raw\">';</script>");
+    publish_all(&app);
+    let (s, en) = fetch(&app, "/en/about", None).await;
+    assert_eq!(s, StatusCode::OK, "{en}");
+    for kept in ["href=\"/en/\"", "href=\"/en/about?x=1#top\"", "href=\"/style.css\"", "href=\"/uploads/a.jpg\"", "href=\"/en/about\">已在英文",
+                 "href=\"//cdn.example/x\"", "href=\"https://example.com/\"", "href=\"/en/news/x\"", "hreflang=\"zh\" href=\"/about\"",
+                 "action=\"/en/search\"", "'<a href=\"/raw\">'"] {
+        assert!(en.contains(kept), "{kept}: {en}");
+    }
+    // The default language is left as it is.
+    let (_, zh) = fetch(&app, "/about", None).await;
+    assert!(zh.contains("<a href=\"/about?x=1#top\">") && zh.contains("action=\"/search\""), "{zh}");
+}
