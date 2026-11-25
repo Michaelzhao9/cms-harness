@@ -661,6 +661,15 @@ fn render_thread(asker: Asker, mode: Mode, page: &str, ctx: Value) -> Result<Str
         }
         crate::i18n::filter(state, value)
     });
+    // An uploaded image at a width that fits where it is shown: `{{ p.image|thumb(640) }}`.
+    env.add_filter("thumb", |src: minijinja::Value, w: u32| -> String {
+        let s = src.as_str().unwrap_or_default().to_string();
+        let raster = s.split(['?', '#']).next().is_some_and(|p| {
+            let p = p.to_ascii_lowercase();
+            p.starts_with("/uploads/") && [".jpg", ".jpeg", ".png", ".webp"].iter().any(|e| p.ends_with(e))
+        });
+        if raster && !s.contains('?') { format!("{s}?w={}", crate::media::snap_width(w)) } else { s }
+    });
     let page_lang = |state: &minijinja::State| state.lookup("lang").and_then(|l| l.as_str().map(String::from)).unwrap_or_else(|| "zh".into());
     env.add_filter("date", move |state: &minijinja::State, value: String| crate::langs::format_date(&value, &page_lang(state)));
     env.add_filter("number", move |state: &minijinja::State, value: f64, decimals: Option<usize>| crate::langs::format_number(value, &page_lang(state), decimals.unwrap_or(0)));

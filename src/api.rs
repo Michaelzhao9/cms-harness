@@ -224,8 +224,16 @@ fn expand_item(conn: &Connection, def: &crate::schema::CollectionDef, item: &mut
     Ok(())
 }
 
-async fn serve(State(app): State<Shared>, Path(name): Path<String>) -> Response {
-    let found = tokio::task::spawn_blocking(move || media::read(&app, &name)).await.ok().flatten();
+async fn serve(State(app): State<Shared>, Path(name): Path<String>, Query(p): Params) -> Response {
+    // `?w=640`: a copy no wider than that (one of media::WIDTHS); anything else is the original.
+    let width = p.iter().find(|(k, _)| k == "w").and_then(|(_, v)| v.parse::<u32>().ok());
+    let found = tokio::task::spawn_blocking(move || match width {
+        Some(w) => media::thumb(&app, &name, w),
+        None => media::read(&app, &name),
+    })
+    .await
+    .ok()
+    .flatten();
     let Some((bytes, content_type)) = found else {
         return error_response(StatusCode::NOT_FOUND, "文件不存在：请检查 /uploads/ 后面的文件名。".into());
     };

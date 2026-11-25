@@ -625,3 +625,39 @@ async fn a_padded_import_map_cannot_hide_an_entry_from_the_review() {
     let (_, _, page) = get_with(&app, "/admin/publish", Some(&s.0)).await;
     assert!(page.contains("evil-pkg"), "every changed entry is listed in full");
 }
+
+#[tokio::test]
+async fn uploaded_images_come_in_smaller_sizes() {
+    let app = app();
+    // A 2000×1000 JPEG and a 300×200 PNG.
+    let mut big = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut big, 90)
+        .encode_image(&image::RgbImage::from_fn(2000, 1000, |x, y| image::Rgb([(x % 256) as u8, (y % 256) as u8, 90])))
+        .unwrap();
+    let mut small = Vec::new();
+    image::RgbaImage::new(300, 200).write_to(&mut std::io::Cursor::new(&mut small), image::ImageFormat::Png).unwrap();
+    let big = cms_harness::media::store_upload(&app, "big.jpg", &big).unwrap();
+    let small = cms_harness::media::store_upload(&app, "small.png", &small).unwrap();
+    let width = |b: &[u8]| image::load_from_memory(b).unwrap().width();
+
+    let (s, h, body) = fetch(&app, &format!("{big}?w=640"), &[]).await;
+    assert_eq!((s, h["content-type"].to_str().unwrap()), (StatusCode::OK, "image/jpeg"));
+    assert!(h["cache-control"].to_str().unwrap().contains("immutable"));
+    assert_eq!(width(&body), 640);
+    // Made once, then read back.
+    assert_eq!(fetch(&app, &format!("{big}?w=640"), &[]).await.2, body);
+    // Never enlarged, PNG stays PNG; an unknown width or none at all is the original.
+    let (_, h, body) = fetch(&app, &format!("{small}?w=640"), &[]).await;
+    assert_eq!((h["content-type"].to_str().unwrap(), width(&body)), ("image/png", 300));
+    assert_eq!(width(&fetch(&app, &format!("{big}?w=500"), &[]).await.2), 2000);
+    assert_eq!(width(&fetch(&app, &big, &[]).await.2), 2000);
+
+    // Templates ask for a size with |thumb; widths snap to the allowed ones, other files are left alone.
+    write(&app, "index.html", &format!("<img src=\"{{{{ '{big}'|thumb(600) }}}}\"><img src=\"{{{{ '{big}'|thumb(5000) }}}}\">\
+        <img src=\"{{{{ '/logo.svg'|thumb(640) }}}}\"><img src=\"{{{{ ''|thumb(640) }}}}\">"));
+    publish_all(&app);
+    let (_, _, home) = page(&app, "/", &[]).await;
+    let home = home.replace("&#x2f;", "/");
+    assert!(home.contains(&format!("<img src=\"{big}?w=640\"><img src=\"{big}?w=1920\">")), "{home}");
+    assert!(home.contains("<img src=\"/logo.svg\"><img src=\"\">"), "{home}");
+}

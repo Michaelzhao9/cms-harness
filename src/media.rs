@@ -102,3 +102,63 @@ pub fn list(app: &App) -> Vec<(String, bool)> {
     files.sort_by(|a, b| b.cmp(a));
     files.into_iter().map(|(_, n)| { let image = !n.ends_with(".pdf"); (n, image) }).collect()
 }
+
+/// Widths an image can be resized to (`/uploads/<name>?w=640`, or `{{ src|thumb(640) }}` in a template).
+pub const WIDTHS: [u32; 5] = [384, 640, 828, 1200, 1920];
+
+/// The allowed width that serves `w`: the smallest one at least as wide, else the largest.
+pub fn snap_width(w: u32) -> u32 {
+    WIDTHS.iter().copied().find(|&x| x >= w).unwrap_or(WIDTHS[WIDTHS.len() - 1])
+}
+
+/// An uploaded image no wider than `width`, made once and kept under `data_dir/thumbs/`. PNG stays PNG (logos and
+/// cut-outs keep their edges and transparency); JPEG and WebP become JPEG. An image already narrow enough, a GIF
+/// (it may move) or a PDF comes back as it is.
+pub fn thumb(app: &App, name: &str, width: u32) -> Option<(Vec<u8>, &'static str)> {
+    let (bytes, ct) = read(app, name)?;
+    if !WIDTHS.contains(&width) || !matches!(ct, "image/jpeg" | "image/png" | "image/webp") {
+        return Some((bytes, ct));
+    }
+    let png = ct == "image/png";
+    let (out_ct, out_ext) = if png { ("image/png", "png") } else { ("image/jpeg", "jpg") };
+    // The name is the file's hash, so a thumbnail never goes stale.
+    let dir = app.data_dir.join("thumbs");
+    let cached = dir.join(format!("{}-{width}.{out_ext}", name.split('.').next()?));
+    if let Ok(b) = std::fs::read(&cached) {
+        return Some((b, out_ct));
+    }
+    let made = (|| -> Result<Option<Vec<u8>>, image::ImageError> {
+        use image::{DynamicImage, ImageDecoder, ImageReader};
+        let mut decoder = ImageReader::new(Cursor::new(&bytes)).with_guessed_format()?.into_decoder()?;
+        // Phone and camera files are often stored sideways.
+        let orientation = decoder.orientation()?;
+        let mut img = DynamicImage::from_decoder(decoder)?;
+        if img.width() <= width && orientation == image::metadata::Orientation::NoTransforms {
+            return Ok(None); // never enlarged
+        }
+        img.apply_orientation(orientation);
+        if img.width() > width {
+            let height = (u64::from(img.height()) * u64::from(width) / u64::from(img.width())).max(1) as u32;
+            img = img.resize_exact(width, height, image::imageops::FilterType::CatmullRom);
+        }
+        let mut out = Vec::new();
+        if png {
+            img.write_to(&mut Cursor::new(&mut out), image::ImageFormat::Png)?;
+        } else {
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 82).encode_image(&img.to_rgb8())?;
+        }
+        Ok(Some(out))
+    })();
+    match made {
+        Ok(Some(out)) => {
+            // Written under a temporary name, then renamed: a half-written thumbnail is never served.
+            let tmp = dir.join(format!(".{}.{:016x}.tmp", name, rand::random::<u64>()));
+            if std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&tmp, &out)).and_then(|_| std::fs::rename(&tmp, &cached)).is_err() {
+                let _ = std::fs::remove_file(&tmp);
+            }
+            Some((out, out_ct))
+        }
+        // Too small to shrink, or not decodable: the original.
+        _ => Some((bytes, ct)),
+    }
+}
