@@ -269,6 +269,14 @@ async fn the_nav_follows_the_sites_sections_and_folds() {
     // Showing one of its collections opens the group.
     let (_, _, page) = get_with(&app, "/admin/c/rooms", Some(&cookie)).await;
     assert!(page.contains("<details class=\"group\" open>"), "{page}");
+    // A collection with an indexed position lists in that order in the admin too.
+    ok(&app, &builder(), "update_collection", json!({ "name": "gear", "add_fields": [{ "name": "position", "title": "排序", "type": "number", "index": true }], "note": "排序" }));
+    for (t, p) in [("二号", 2), ("一号", 1), ("三号", 3)] {
+        ok(&app, &builder(), "create_record", json!({ "collection": "gear", "data": { "title": t, "position": p }, "note": "写" }));
+    }
+    let (_, _, list) = get_with(&app, "/admin/c/gear", Some(&cookie)).await;
+    let at = |s: &str| list.find(s).unwrap_or_else(|| panic!("{s} not in {list}"));
+    assert!(at(">一号<") < at(">二号<") && at(">二号<") < at(">三号<"), "{list}");
     // Taken out of its group, a collection stands on its own again.
     ok(&app, &builder(), "update_collection", json!({ "name": "rooms", "group": "", "note": "出组" }));
     ok(&app, &builder(), "update_collection", json!({ "name": "gear", "group": "", "note": "出组" }));

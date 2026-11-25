@@ -389,11 +389,13 @@ enum Ask {
     File(String),
     Records { collection: String, filter: Value, sort: Option<String>, limit: i64, offset: i64, id: Option<i64> },
     Search { q: String, collection: Option<String>, limit: usize },
+    Count { collection: String, filter: Value },
 }
 
 enum Answer {
     File(Option<String>),
     Records(Vec<Rec>),
+    Count(i64),
 }
 
 /// One record for a template: (field, value, is rich text, change mark).
@@ -441,7 +443,7 @@ impl Server<'_> {
         }
         match &ask {
             Ask::File(path) => self.deps.insert(format!("f:{path}")),
-            Ask::Records { collection, .. } => self.deps.insert(format!("c:{collection}")),
+            Ask::Records { collection, .. } | Ask::Count { collection, .. } => self.deps.insert(format!("c:{collection}")),
             Ask::Search { .. } => self.deps.insert("records".into()),
         };
         match ask {
@@ -462,6 +464,7 @@ impl Server<'_> {
                 Ok(Answer::File(Some(format!("{REG_OPEN}{path}{REG_MID}{n}{REG_END_HEAD}{source}{REG_CLOSE}"))))
             }
             Ask::Records { collection, filter, sort, limit, offset, id } => self.records(&collection, &filter, sort, limit, offset, id).map(Answer::Records),
+            Ask::Count { collection, filter } => self.count(&collection, &filter).map(Answer::Count),
             Ask::Search { q, collection, limit } => {
                 let hits = crate::search::search_in(self.conn, &q, collection.as_deref(), self.viewer, limit, self.lang.as_ref())?;
                 let mut out = vec![];
@@ -476,6 +479,18 @@ impl Server<'_> {
                 Ok(Answer::Records(out))
             }
         }
+    }
+
+    /// How many records `collection()` would list without a limit: for page numbers. Records hidden in the page's
+    /// language (a collection set to hide untranslated ones) are still counted.
+    fn count(&mut self, name: &str, filter: &Value) -> Result<i64, String> {
+        use crate::query::{Query, Status};
+        let Some((def, owner)) = visible_def(self.conn, self.mode, name, self.viewer)? else { return Ok(0) };
+        let filters = if filter.is_null() { vec![] } else { crate::query::parse_filter(&def, filter)? };
+        let live = self.mode == Mode::Live;
+        let status = if live { vec![] } else { vec![Status::Draft, Status::Changed, Status::Published] };
+        let q = Query { filters, status, sort: None, limit: 1, offset: 0, owner };
+        Ok(crate::query::run(self.conn, &def, &q, live)?.1)
     }
 
     fn records(&mut self, name: &str, filter: &Value, sort: Option<String>, limit: i64, offset: i64, id: Option<i64>) -> Result<Vec<Rec>, String> {
@@ -636,7 +651,7 @@ impl Asker {
     fn records(&self, ask: Ask) -> Result<Vec<Rec>, minijinja::Error> {
         match self.ask(ask)? {
             Answer::Records(r) => Ok(r),
-            Answer::File(_) => Ok(vec![]),
+            Answer::File(_) | Answer::Count(_) => Ok(vec![]),
         }
     }
 }
@@ -683,7 +698,7 @@ fn render_thread(asker: Asker, mode: Mode, page: &str, ctx: Value) -> Result<Str
         }
         match a.ask(Ask::File(name.to_string()))? {
             Answer::File(f) => Ok(f),
-            Answer::Records(_) => Ok(None),
+            Answer::Records(_) | Answer::Count(_) => Ok(None),
         }
     });
     let (a, l) = (asker.clone(), last.clone());
@@ -696,6 +711,17 @@ fn render_thread(asker: Asker, mode: Mode, page: &str, ctx: Value) -> Result<Str
         let filter = serde_json::to_value(&filter).map_err(|e| minijinja::Error::new(ErrorKind::InvalidOperation, e.to_string()))?;
         let recs = a.records(Ask::Records { collection: name, filter, sort, limit, offset, id: None })?;
         Ok(minijinja::Value::from(recs.into_iter().map(|r| to_template(r, &l)).collect::<Vec<_>>()))
+    });
+    let a = asker.clone();
+    // count("news", filter={...}): how many records collection() would list, for page numbers.
+    env.add_function("count", move |name: String, kwargs: Kwargs| {
+        let filter = kwargs.get::<Option<minijinja::Value>>("filter")?;
+        kwargs.assert_all_used()?;
+        let filter = serde_json::to_value(&filter).map_err(|e| minijinja::Error::new(ErrorKind::InvalidOperation, e.to_string()))?;
+        match a.ask(Ask::Count { collection: name, filter })? {
+            Answer::Count(n) => Ok(n),
+            _ => Ok(0),
+        }
     });
     let (a, l) = (asker.clone(), last.clone());
     env.add_function("search", move |q: String, kwargs: Kwargs| {

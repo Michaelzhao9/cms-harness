@@ -661,3 +661,17 @@ async fn uploaded_images_come_in_smaller_sizes() {
     assert!(home.contains(&format!("<img src=\"{big}?w=640\"><img src=\"{big}?w=1920\">")), "{home}");
     assert!(home.contains("<img src=\"/logo.svg\"><img src=\"\">"), "{home}");
 }
+
+#[tokio::test]
+async fn templates_count_records_for_page_numbers() {
+    let app = app();
+    ok(&app, &builder(), "create_collection", json!({ "name": "items", "title": "条目", "read": "public", "note": "建",
+        "fields": [{ "name": "title", "title": "标题", "type": "text" }, { "name": "kind", "title": "种类", "type": "text", "index": true }] }));
+    for i in 0..130 {
+        ok(&app, &builder(), "create_record", json!({ "collection": "items", "data": { "title": format!("第{i}条"), "kind": if i % 2 == 0 { "a" } else { "b" } }, "note": "写" }));
+    }
+    write(&app, "index.html", "{{ count('items') }}|{{ count('items', filter={'kind': 'a'}) }}|{{ count('nothing') }}");
+    publish_all(&app);
+    let (_, _, home) = page(&app, "/", &[]).await;
+    assert!(home.contains("130|65|0"), "{home}");
+}

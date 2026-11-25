@@ -229,6 +229,9 @@ fn list_ctx(app: &App, user: &AdminUser, def: &CollectionDef, view: Option<&View
     }
     if let Some(sort) = view.and_then(|v| v.sort.as_ref()) {
         args["sort"] = json!(sort);
+    } else if def.field("position").is_some_and(|f| f.index || f.unique) {
+        // A collection kept in a set order (the site lists it by position) is listed in that order here too.
+        args["sort"] = json!("position");
     }
     let (items, total, list_error) = match tool(app, user, "query_records", args) {
         Ok(r) => (r["items"].as_array().cloned().unwrap_or_default(), r["total"].as_i64().unwrap_or(0), None),
