@@ -439,7 +439,7 @@ async fn media_upload_from_the_record_form_sets_the_field() {
 
     let (_, _, page) = get_with(&app, &format!("/admin/r/{id}"), Some(&s.0)).await;
     assert_clean(&page);
-    assert!(page.contains(&format!("src=\"/uploads/{name}\"")), "the current image is shown: {page}");
+    assert!(page.contains(&format!("src=\"/uploads/{name}?w=384\"")), "the current image is shown, small: {page}");
     let select = &page[page.find("name=\"cover\"").unwrap()..];
     assert!(select[..select.find("</select>").unwrap()].contains(&format!("{name}\" selected")), "{select}");
 
@@ -449,7 +449,7 @@ async fn media_upload_from_the_record_form_sets_the_field() {
     let (_, _, library) = get_with(&app, "/admin/media", Some(&s.0)).await;
     assert_clean(&library);
     assert_eq!(library.matches("<figure").count(), 2, "{library}");
-    let newest = library.split("src=\"/uploads/").nth(1).map(|s| s[..s.find('"').unwrap()].to_string()).unwrap();
+    let newest = library.split("src=\"/uploads/").nth(1).map(|s| s[..s.find('?').unwrap()].to_string()).unwrap();
     assert_ne!(newest, name, "newest first");
     let seen = hidden(&page, "seen");
     let (status, _, body) = post_multipart(&app, &format!("/admin/r/{id}"), Some(&s.0), &[

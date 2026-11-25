@@ -47,7 +47,7 @@
 {% for r in sec.rows -%}
 <li class="card{% if r.current %} on{% endif %}">
 {%- if r.link %}<a class="cover" href="/admin/r/{{ r.id }}">{% else %}<div class="cover">{% endif %}
-{%- if r.image %}<img src="/uploads/{{ r.image }}" alt="" loading="lazy">{% else %}<span class="noimg" aria-hidden="true">{{ i.icon("image", 22) }}</span>{% endif %}
+{%- if r.image %}<img src="/uploads/{{ r.image }}?w=384" alt="" loading="lazy">{% else %}<span class="noimg" aria-hidden="true">{{ i.icon("image", 22) }}</span>{% endif %}
 {%- if r.link %}</a>{% else %}</div>{% endif %}
 <div class="body">
 {% if r.link %}<a class="ttl" href="/admin/r/{{ r.id }}">{{ r.title }}</a>{% else %}<span class="ttl">{{ r.title }}</span>{% endif %}
@@ -80,7 +80,7 @@
 <tr class="row{% if r.current %} on{% endif %}">
 {%- for c in r.cells %}<td{% if loop.first %} class="lead"{% endif %}>
 {%- if loop.first and r.link %}<a href="/admin/r/{{ r.id }}">{% endif %}
-{%- if c.thumb %}<img class="thumb sm" src="/uploads/{{ c.thumb }}" alt="">{% endif %}
+{%- if c.thumb %}<img class="thumb sm" src="/uploads/{{ c.thumb }}?w=384" alt="">{% endif %}
 {%- if c.text %}{{ c.text }}{% elif loop.first %}#{{ r.id }}{% else %}<span class="muted">{{ "未填"|t }}</span>{% endif %}
 {%- if loop.first and r.link %}</a>{% endif %}</td>{% endfor %}
 <td>{% if r.status == "changed" or r.status == "deleting" %}<span class="flag"><span class="mk" aria-hidden="true"></span>{{ r.label|t }}</span>{% elif r.status == "draft" %}<span class="draft">{{ r.label|t }}</span>{% else %}<span class="muted">{{ r.label|t }}</span>{% endif %}</td>

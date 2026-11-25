@@ -16,7 +16,7 @@
 {% if error %}<p class="note bad" role="alert">{{ error|t }}</p>{% endif %}
 <ul class="grid">
 {% for f in files -%}
-<li><figure>{% if f.image %}<img src="/uploads/{{ f.name }}" alt="" loading="lazy">{% else %}<span class="pdf">PDF</span>{% endif %}
+<li><figure>{% if f.image %}<img src="/uploads/{{ f.name }}?w=384" alt="" loading="lazy">{% else %}<span class="pdf">PDF</span>{% endif %}
 <figcaption><a href="/uploads/{{ f.name }}" target="_blank" rel="noopener"><code>{{ f.name }}</code></a></figcaption></figure></li>
 {% else -%}
 <li class="empty">{{ "还没有上传过文件。"|t }}</li>

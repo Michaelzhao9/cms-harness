@@ -40,7 +40,7 @@
 {%- elif f.kind == "datetime" %}
 <input class="in" id="f-{{ f.name }}" type="datetime-local" step="1" name="{{ f.name }}" value="{{ f.value }}"{% if f.required %} required{% endif %}>
 {%- elif f.kind == "media" %}
-{% if f.thumbs %}<div class="thumbs">{% for t in f.thumbs %}<img class="thumb" src="/uploads/{{ t }}" alt="{{ f.title }}">{% endfor %}</div>{% endif %}
+{% if f.thumbs %}<div class="thumbs">{% for t in f.thumbs %}<img class="thumb" src="/uploads/{{ t }}?w=384" alt="{{ f.title }}">{% endfor %}</div>{% endif %}
 {% if f.multiple %}<input type="hidden" name="{{ f.name }}" value="">{% endif -%}
 <select class="in" id="f-{{ f.name }}" name="{{ f.name }}"{% if f.multiple %} multiple{% endif %}>
 {% if not f.multiple %}<option value="">{{ "不用文件"|t }}</option>{% endif %}
