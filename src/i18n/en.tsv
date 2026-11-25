@@ -964,3 +964,4 @@ record:{} 还被 {} 链接着，删掉会留下死链：请先改掉那个链接
 只能添加（add）或替换（replace）图片。	The mode must be add or replace.
 只有图片能换图片。	Only an image can have its picture replaced.
 “{}”不是上传的文件。	“{}” is not an uploaded file.
+这个元素已经变了（文件刚被改过）：请刷新预览再选。	This element has changed (its file was just edited): reload the preview and select it again.

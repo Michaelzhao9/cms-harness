@@ -52,25 +52,16 @@ pub fn tags(src: &str) -> Vec<Tag> {
     let mut i = 0;
     while i < b.len() {
         let rest = &src[i..];
-        if rest.starts_with("{%") && rest[2..].trim_start_matches('-').trim_start().starts_with("raw") {
-            i += rest.find("endraw").map_or(rest.len(), |e| e + 6);
-        } else if rest.starts_with("{{") {
-            i += rest.find("}}").map_or(rest.len(), |e| e + 2);
-        } else if rest.starts_with("{%") {
-            i += rest.find("%}").map_or(rest.len(), |e| e + 2);
-        } else if rest.starts_with("{#") {
-            i += rest.find("#}").map_or(rest.len(), |e| e + 2);
-        } else if rest.starts_with("<!--") {
-            i += rest.find("-->").map_or(rest.len(), |e| e + 3);
+        if let Some(len) = skip_block(rest) {
+            i += len;
         } else if b[i] == b'<' && b.get(i + 1).is_some_and(u8::is_ascii_alphabetic) {
-            let name_len = rest[1..].find(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).unwrap_or(rest.len() - 1);
+            let name_len = tag_name_len(rest);
             let name = rest[1..1 + name_len].to_ascii_lowercase();
             let open_end = i + tag_end(rest);
             out.push(Tag { n: out.len() + 1, name: name.clone(), start: i, name_end: i + 1 + name_len, open_end });
             i = open_end;
             if RAW.contains(&name.as_str()) {
-                let lower = src[i..].to_ascii_lowercase();
-                i += lower.find(&format!("</{name}")).unwrap_or(lower.len());
+                i += raw_len(&src[i..], &name);
             }
         } else {
             i += rest.chars().next().map_or(1, char::len_utf8);
@@ -79,34 +70,127 @@ pub fn tags(src: &str) -> Vec<Tag> {
     out
 }
 
-/// Length of the start tag at the beginning of `s`, up to and including `>`: quotes and template blocks respected.
+/// Length of a template block (`{{ }}`, `{% %}`, `{# #}`, a whole `{% raw %}…{% endraw %}`) or an HTML comment
+/// at the start of `s`.
+fn skip_block(s: &str) -> Option<usize> {
+    if s.starts_with("{%") && s[2..].trim_start_matches('-').trim_start().starts_with("raw") {
+        return Some(s.find("endraw").and_then(|e| s[e..].find("%}").map(|c| e + c + 2)).unwrap_or(s.len()));
+    }
+    let close = [("{{", "}}"), ("{%", "%}"), ("{#", "#}"), ("<!--", "-->")].into_iter().find(|(o, _)| s.starts_with(o))?.1;
+    Some(s[2..].find(close).map_or(s.len(), |e| e + 2 + close.len()))
+}
+
+/// Length of the tag name after `<`: up to whitespace, `/` or `>`. A name built by the template (`<h{{ n }}>`)
+/// runs on through the block.
+fn tag_name_len(s: &str) -> usize {
+    s[1..].find(|c: char| c.is_whitespace() || c == '/' || c == '>').unwrap_or(s.len() - 1)
+}
+
+/// Length of raw text (inside `name`) up to its closing tag.
+fn raw_len(s: &str, name: &str) -> usize {
+    let lower = s.to_ascii_lowercase();
+    lower.find(&format!("</{name}")).unwrap_or(lower.len())
+}
+
+/// Length of the start tag at the beginning of `s`, up to and including `>`. Template blocks are skipped whole,
+/// inside quotes too (a `{{ "a > b" }}` in an attribute), then quotes are respected.
 fn tag_end(s: &str) -> usize {
     let mut quote: Option<char> = None;
-    let mut it = s.char_indices().skip(1).peekable();
-    while let Some((j, c)) = it.next() {
+    let mut j = 1;
+    while j < s.len() {
+        let rest = &s[j..];
+        if rest.starts_with("{{") || rest.starts_with("{%") || rest.starts_with("{#") {
+            j += skip_block(rest).unwrap_or(1);
+            continue;
+        }
+        let c = rest.chars().next().unwrap_or(' ');
         match (quote, c) {
             (Some(q), c) if c == q => quote = None,
             (Some(_), _) => {}
             (None, '"' | '\'') => quote = Some(c),
-            (None, '{') if matches!(it.peek(), Some((_, '{' | '%' | '#'))) => {
-                let close = match it.peek() { Some((_, '{')) => "}}", Some((_, '%')) => "%}", _ => "#}" };
-                match s[j..].find(close) {
-                    Some(e) => while it.peek().is_some_and(|(k, _)| *k < j + e + 2) { it.next(); },
-                    None => return s.len(),
-                }
-            }
             (None, '>') => return j + 1,
             _ => {}
         }
+        j += c.len_utf8();
     }
     s.len()
 }
 
-/// What identifies an element besides its position: its tag and the first literal text after it.
+/// One attribute of a start tag: its name (lower case), its value as written (quotes removed), and the byte
+/// range it covers in the source, from the space before it.
+#[derive(Debug, PartialEq)]
+pub struct Attr {
+    pub name: String,
+    pub value: String,
+    pub range: (usize, usize),
+}
+
+/// The attributes of `tag`. Template blocks between attributes are skipped; inside a value they are part of it.
+pub fn attrs(src: &str, tag: &Tag) -> Vec<Attr> {
+    let end = if src[..tag.open_end].ends_with("/>") { tag.open_end - 2 } else { tag.open_end.saturating_sub(1) };
+    let mut out = vec![];
+    let mut i = tag.name_end;
+    while i < end {
+        let from = i;
+        while i < end && src[i..].starts_with(|c: char| c.is_whitespace() || c == '/') {
+            i += 1;
+        }
+        if i >= end {
+            break;
+        }
+        if let Some(len) = skip_block(&src[i..end]) {
+            i += len;
+            continue;
+        }
+        let name_len = src[i..end].find(|c: char| c.is_whitespace() || c == '=' || c == '/' || c == '{').unwrap_or(end - i).max(1);
+        let name = src[i..i + name_len].to_ascii_lowercase();
+        i += name_len;
+        let mut value = String::new();
+        let mut j = i;
+        while j < end && src[j..].starts_with(char::is_whitespace) {
+            j += 1;
+        }
+        if src[j..].starts_with('=') {
+            j += 1;
+            while j < end && src[j..].starts_with(char::is_whitespace) {
+                j += 1;
+            }
+            let v = &src[j..end];
+            let len = match v.chars().next() {
+                Some(q @ ('"' | '\'')) => {
+                    // Up to the closing quote, template blocks skipped.
+                    let mut k = 1;
+                    while k < v.len() && !v[k..].starts_with(q) {
+                        k += skip_block(&v[k..]).unwrap_or_else(|| v[k..].chars().next().map_or(1, char::len_utf8));
+                    }
+                    value = v[1..k.min(v.len())].to_string();
+                    (k + 1).min(v.len())
+                }
+                _ => {
+                    let k = v.find(char::is_whitespace).unwrap_or(v.len());
+                    value = v[..k].to_string();
+                    k
+                }
+            };
+            i = j + len;
+        }
+        out.push(Attr { name, value, range: (from, i) });
+    }
+    out
+}
+
+/// What identifies an element besides its position: its tag, its id and classes, and the first literal text
+/// after it.
 pub fn fingerprint(src: &str, tag: &Tag) -> String {
     let after = &src[tag.open_end..];
     let text: String = after.chars().take_while(|c| *c != '<' && *c != '{').collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
-    format!("{}|{}", tag.name, text.chars().take(32).collect::<String>())
+    let who: String = attrs(src, tag)
+        .into_iter()
+        .filter(|a| a.name == "id" || a.name == "class")
+        .map(|a| format!("{}={}", a.name, a.value.split_whitespace().collect::<Vec<_>>().join(" ")))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("{}|{}|{}", tag.name, who, text.chars().take(32).collect::<String>())
 }
 
 /// The short id of an edited element, used in `data-hc` and the stylesheet.
@@ -120,8 +204,12 @@ fn attr(s: &str) -> String {
 
 /// Splits `src` (`<path>#<n>`) into its parts.
 pub fn parse_src(src: &str) -> Option<(&str, usize)> {
-    let (path, n) = src.rsplit_once('#')?;
-    let n: usize = n.parse().ok().filter(|n| *n > 0)?;
+    let (path, digits) = src.rsplit_once('#')?;
+    let n: usize = digits.parse().ok().filter(|n| *n > 0)?;
+    // One spelling per element: no signs or leading zeros.
+    if n.to_string() != digits {
+        return None;
+    }
     crate::site::check_path(path).ok()?;
     Some((path, n))
 }
@@ -162,7 +250,7 @@ pub fn annotate(path: &str, src: &str, doc: &Value, preview: bool) -> String {
     let mut out = String::with_capacity(src.len() + tags.len() * 24);
     let mut from = 0;
     for t in &tags {
-        if UNMARKED.contains(&t.name.as_str()) {
+        if UNMARKED.contains(&t.name.as_str()) || t.name.contains('{') {
             continue;
         }
         let mut add = String::new();
@@ -239,6 +327,14 @@ pub fn check(prop: &str, value: &str) -> Result<String, String> {
 }
 
 /// Checks a page address an edit may be limited to.
+/// One spelling per page: `/about/` is `/about`.
+fn page_key(page: &str) -> &str {
+    match page.trim_end_matches('/') {
+        "" => "/",
+        p => p,
+    }
+}
+
 fn check_page(page: &str) -> Result<(), String> {
     (page.starts_with('/') && page.len() <= 500 && !page.chars().any(char::is_control)).then_some(()).ok_or_else(|| format!("“{page}”不是这个网站的页面地址。"))
 }
@@ -246,7 +342,7 @@ fn check_page(page: &str) -> Result<(), String> {
 /// The styles of one element by width: for every page (`page` None) or for one page only.
 fn styles<'a>(el: &'a Value, page: Option<&str>) -> &'a Value {
     match page {
-        Some(p) => &el["pages"][p],
+        Some(p) => &el["pages"][page_key(p)],
         None => &el["style"],
     }
 }
@@ -275,7 +371,7 @@ pub fn set_style(doc: &Value, key: &str, fp: &str, page: Option<&str>, tier: &st
     }
     el["fp"] = json!(fp);
     let ptr = match page {
-        Some(p) => format!("/pages/{}/{tier}", p.replace('~', "~0").replace('/', "~1")),
+        Some(p) => format!("/pages/{}/{tier}", page_key(p).replace('~', "~0").replace('/', "~1")),
         None => format!("/style/{tier}"),
     };
     // Make the path, then set or clear the property.
@@ -329,13 +425,16 @@ fn rule(key: &str, props: &Map<String, Value>) -> Option<String> {
     if props.contains_key("border-width") {
         extra.push_str(";border-style:solid !important");
     }
-    if props.contains_key("z-index") {
-        extra.push_str(";position:relative");
-    }
     if props.contains_key("width") || props.contains_key("height") {
         extra.push_str(";box-sizing:border-box !important;max-width:none !important");
     }
-    Some(format!("[data-hc=\"{}\"]{{{}{extra}}}", id(key), decls.join(";")))
+    let sel = format!("[data-hc=\"{}\"]", id(key));
+    let mut out = format!("{sel}{{{}{extra}}}", decls.join(";"));
+    // A stacking order needs a position; at zero specificity, so a sticky or fixed one the page gives it wins.
+    if props.contains_key("z-index") {
+        out = format!(":where({sel}){{position:relative}}{out}");
+    }
+    Some(out)
 }
 
 /// The stylesheet of every hand edit that applies on the page at `page` (its address), or `None` when there
@@ -367,7 +466,7 @@ pub fn css(doc: &Value, page: &str) -> Option<String> {
 /// Where the canvas stylesheet goes: right before `</head>`, after the page's own styles; else where injected
 /// tags go.
 pub fn head_end(html: &str) -> usize {
-    html.to_ascii_lowercase().find("</head").unwrap_or_else(|| crate::site::head_insert_at(html))
+    html.to_ascii_lowercase().find("</head>").unwrap_or_else(|| crate::site::head_insert_at(html))
 }
 
 // ---- text ----
@@ -375,24 +474,37 @@ pub fn head_end(html: &str) -> usize {
 /// Replaces the text inside the element at position `n` of `src` with `text`. Only an element whose content
 /// is plain text in the file (no tags but `<br>`, no template blocks) can be edited this way: anything else
 /// comes from data or markup the page builds.
-pub fn set_text(src: &str, n: usize, text: &str) -> Result<String, String> {
+/// Returns the new source and how the positions after it move (line breaks are `<br>` tags): (first moved
+/// position, shift), as `restructure` does.
+pub fn set_text(src: &str, n: usize, text: &str) -> Result<(String, usize, isize), String> {
     let all = tags(src);
     let tag = all.get(n.wrapping_sub(1)).ok_or("这个元素已经不在文件里了：请刷新预览。")?;
-    if UNMARKED.contains(&tag.name.as_str()) || RAW.contains(&tag.name.as_str()) {
+    if UNMARKED.contains(&tag.name.as_str()) || RAW.contains(&tag.name.as_str()) || VOID.contains(&tag.name.as_str()) || tag.name.contains('{') {
         return Err("这个元素的文字不能在画板上改。".into());
     }
-    let rest = &src[tag.open_end..];
-    let close = rest.to_ascii_lowercase().find(&format!("</{}", tag.name)).ok_or("找不到这个元素的结尾：它的文字不能在画板上改。")?;
-    let inner = &rest[..close];
+    let (_, end) = element_range(src, tag).ok_or("找不到这个元素的结尾：它的文字不能在画板上改。")?;
+    let close = src[..end].rfind("</").filter(|c| *c >= tag.open_end).ok_or("找不到这个元素的结尾：它的文字不能在画板上改。")?;
+    let inner = &src[tag.open_end..close];
+    let brs = all.iter().filter(|t| t.start >= tag.open_end && t.start < close).count();
     let plain = inner.replace("<br>", "").replace("<br/>", "").replace("<br />", "");
-    if plain.contains('<') || plain.contains('{') {
+    // Plain text only: anything that could be markup or template code is left to the chat.
+    if plain.contains(['<', '>', '{', '}', '%']) || all.iter().any(|t| t.start >= tag.open_end && t.start < close && t.name != "br") {
         return Err("这段文字来自数据或模板代码，不能在画板上直接改：请在对话里说，或去内容里改。".into());
     }
     if text.chars().count() > 5000 {
         return Err("文字太长了（最多 5000 字）。".into());
     }
-    let escaped = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('{', "&#123;").replace('\n', "<br>");
-    Ok(format!("{}{}{}", &src[..tag.open_end], escaped, &rest[close..]))
+    let text = text.replace("\r\n", "\n");
+    let escaped = text
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('{', "&#123;")
+        .replace('}', "&#125;")
+        .replace('%', "&#37;")
+        .replace('\n', "<br>");
+    let added = text.matches('\n').count() as isize - brs as isize;
+    Ok((format!("{}{}{}", &src[..tag.open_end], escaped, &src[close..]), n + brs + 1, added))
 }
 
 // ---- elements ----
@@ -406,29 +518,41 @@ pub fn element_range(src: &str, tag: &Tag) -> Option<(usize, usize)> {
     if VOID.contains(&tag.name.as_str()) || src[..tag.open_end].ends_with("/>") {
         return Some((tag.start, tag.open_end));
     }
-    let name = &tag.name;
-    let lower = src.to_ascii_lowercase();
-    let boundary = |at: usize| lower[at..].chars().next().is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '-'));
+    if tag.name.contains('{') {
+        return None;
+    }
+    // The same scan as `tags`: start tags are jumped whole (attributes can hold `</div>`), raw text and
+    // template blocks are skipped, and only real closing tags count.
+    let b = src.as_bytes();
     let mut depth = 1;
     let mut i = tag.open_end;
-    while i < src.len() {
+    if RAW.contains(&tag.name.as_str()) {
+        i += raw_len(&src[i..], &tag.name);
+    }
+    while i < b.len() {
         let rest = &src[i..];
-        let skip = [("{{", "}}"), ("{%", "%}"), ("{#", "#}"), ("<!--", "-->")].iter().find(|(o, _)| rest.starts_with(o));
-        if let Some((_, close)) = skip {
-            i += rest.find(close)? + close.len();
-        } else if lower[i..].starts_with(&format!("</{name}")) && boundary(i + 2 + name.len()) {
-            depth -= 1;
-            let end = i + rest.find('>')? + 1;
-            if depth == 0 {
-                return Some((tag.start, end));
+        if let Some(len) = skip_block(rest) {
+            i += len;
+        } else if rest.starts_with("</") {
+            let len = rest.find('>')? + 1;
+            let name = rest[2..len - 1].trim().to_ascii_lowercase();
+            if name == tag.name {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((tag.start, i + len));
+                }
             }
-            i = end;
-        } else if lower[i..].starts_with(&format!("<{name}")) && boundary(i + 1 + name.len()) {
+            i += len;
+        } else if b[i] == b'<' && b.get(i + 1).is_some_and(u8::is_ascii_alphabetic) {
+            let name = rest[1..1 + tag_name_len(rest)].to_ascii_lowercase();
             let len = tag_end(rest);
-            if !rest[..len].ends_with("/>") {
+            if name == tag.name && !rest[..len].ends_with("/>") {
                 depth += 1;
             }
             i += len;
+            if RAW.contains(&name.as_str()) {
+                i += raw_len(&src[i..], &name);
+            }
         } else {
             i += rest.chars().next().map_or(1, char::len_utf8);
         }
@@ -509,40 +633,16 @@ pub fn replace_image(src: &str, n: usize, url: &str) -> Result<String, String> {
     if tag.name != "img" {
         return Err("只有图片能换图片。".into());
     }
-    // The tag's attributes, rewritten without src and srcset.
-    let attrs = &src[tag.name_end..tag.open_end];
-    let mut kept = String::new();
-    let mut i = 0;
-    let b = attrs.as_bytes();
-    while i < b.len() {
-        let rest = &attrs[i..];
-        let lower = rest.to_ascii_lowercase();
-        let name_len = rest.find(|c: char| c.is_whitespace() || c == '=' || c == '>' || c == '/').unwrap_or(rest.len());
-        let starts_attr = i > 0 && b[i - 1].is_ascii_whitespace() && name_len > 0;
-        if starts_attr && (lower[..name_len] == *"src" || lower[..name_len] == *"srcset") {
-            // Skip the attribute and its value, with the space before it.
-            while kept.ends_with(char::is_whitespace) {
-                kept.pop();
-            }
-            let mut j = i + name_len;
-            let after = attrs[j..].trim_start();
-            if let Some(v) = after.strip_prefix('=') {
-                let v = v.trim_start();
-                j = attrs.len() - v.len();
-                let end = match v.chars().next() {
-                    Some(q @ ('"' | '\'')) => v[1..].find(q).map_or(v.len(), |e| e + 2),
-                    _ => v.find(|c: char| c.is_whitespace() || c == '>').unwrap_or(v.len()),
-                };
-                j += end;
-            }
-            i = j;
-            continue;
-        }
-        let c = rest.chars().next().unwrap_or(' ');
-        kept.push(c);
-        i += c.len_utf8();
+    // The tag rewritten without its src and srcset attributes (each with the space before it).
+    let mut out = String::from(&src[..tag.name_end]);
+    out.push_str(&format!(" src=\"{url}\""));
+    let mut from = tag.name_end;
+    for a in attrs(src, tag).into_iter().filter(|a| a.name == "src" || a.name == "srcset") {
+        out.push_str(&src[from..a.range.0]);
+        from = a.range.1;
     }
-    Ok(format!("{} src=\"{url}\"{kept}{}", &src[..tag.name_end], &src[tag.open_end..]))
+    out.push_str(&src[from..]);
+    Ok(out)
 }
 
 /// Elements that can hold what the pen adds.
@@ -579,20 +679,34 @@ pub fn add_markup(src: &str, n: usize, markup: &str) -> Result<(String, usize), 
 /// Follows the edits of the file at `path` into its new source `new`: an edit stays where its element still
 /// is, moves to the one element with its fingerprint, or is lost. Returns the document with moved edits
 /// re-keyed (lost ones dropped) and the keys of the lost ones.
-pub fn remap(doc: &Value, path: &str, new: &str) -> (Value, Vec<String>) {
+pub fn remap(doc: &Value, path: &str, old: &str, new: &str) -> (Value, Vec<String>) {
     let mut doc = doc.clone();
     let Some(els) = doc["els"].as_object() else { return (doc, vec![]) };
-    let found = resolve(&doc, path, new, &tags(new));
+    let (before, after) = (tags(old), tags(new));
+    let prints = |src: &str, list: &[Tag]| list.iter().map(|t| fingerprint(src, t)).collect::<Vec<_>>();
+    let (fp_old, fp_new) = (prints(old, &before), prints(new, &after));
     let mut out = Map::new();
     let mut lost = vec![];
     for (key, el) in els {
         match parse_src(key) {
-            Some((p, _)) if p == path => match found.iter().find(|(_, k)| *k == key) {
-                Some((n, _)) => {
-                    out.insert(format!("{path}#{n}"), el.clone());
+            Some((p, n)) if p == path => {
+                // The element is the k-th one with its fingerprint. It is found again when the new source has
+                // exactly one such element, or as many as before (then the k-th); otherwise it is ambiguous.
+                let fp = el["fp"].as_str().unwrap_or_default();
+                let was: Vec<usize> = fp_old.iter().enumerate().filter(|(_, f)| *f == fp).map(|(i, _)| i + 1).collect();
+                let now: Vec<usize> = fp_new.iter().enumerate().filter(|(_, f)| *f == fp).map(|(i, _)| i + 1).collect();
+                let found = match (was.iter().position(|m| *m == n), now.len()) {
+                    (_, 1) => Some(now[0]),
+                    (Some(k), c) if c == was.len() => Some(now[k]),
+                    _ => None,
+                };
+                match found {
+                    Some(m) => {
+                        out.insert(format!("{path}#{m}"), el.clone());
+                    }
+                    None => lost.push(key.clone()),
                 }
-                None => lost.push(key.clone()),
-            },
+            }
             _ => {
                 out.insert(key.clone(), el.clone());
             }
@@ -692,7 +806,7 @@ mod tests {
         assert!(!out.contains("<body data-hc"));
         assert_eq!(annotate("index.html", PAGE, &json!({}), false), PAGE);
 
-        let doc = set_style(&json!({}), "index.html#6", "h1|春季 新品", None, "all", "color", Some("#FFF")).unwrap();
+        let doc = set_style(&json!({}), "index.html#6", &fingerprint(PAGE, &tags(PAGE)[5]), None, "all", "color", Some("#FFF")).unwrap();
         let live = annotate("index.html", PAGE, &doc, false);
         assert!(live.contains(&format!("<h1 data-hc=\"{}\" class", id("index.html#6"))));
         assert_eq!(css(&doc, "/").unwrap(), format!("[data-hc=\"{}\"]{{color:#fff !important}}", id("index.html#6")));
@@ -700,7 +814,7 @@ mod tests {
 
     #[test]
     fn an_edit_follows_its_element_or_applies_to_nothing() {
-        let doc = set_style(&json!({}), "index.html#6", "h1|春季 新品", None, "mobile", "font-size", Some("20px")).unwrap();
+        let doc = set_style(&json!({}), "index.html#6", &fingerprint(PAGE, &tags(PAGE)[5]), None, "mobile", "font-size", Some("20px")).unwrap();
         let moved = PAGE.replace("<body>", "<body><nav>x</nav>");
         let src = tags(&moved);
         assert_eq!(resolve(&doc, "index.html", &moved, &src).get(&7).map(String::as_str), Some("index.html#6"));
@@ -716,10 +830,10 @@ mod tests {
         assert_eq!(check("font-size", "54px").unwrap(), "54px");
         assert!(check("font-size", "5000px").is_err());
         assert!(check("box-shadow", "0 0 0 red").is_err());
-        let doc = set_style(&json!({}), "a.html#1", "p|", None, "all", "color", Some("#123")).unwrap();
-        let cleared = set_style(&doc, "a.html#1", "p|", None, "all", "color", None).unwrap();
+        let doc = set_style(&json!({}), "a.html#1", "p||", None, "all", "color", Some("#123")).unwrap();
+        let cleared = set_style(&doc, "a.html#1", "p||", None, "all", "color", None).unwrap();
         assert_eq!(cleared, json!({ "els": {} }));
-        assert!(set_style(&doc, "a.html#1", "p|", None, "all", "position", None).is_err());
+        assert!(set_style(&doc, "a.html#1", "p||", None, "all", "position", None).is_err());
     }
 
     #[test]
@@ -734,9 +848,9 @@ mod tests {
         let (no_img, ..) = restructure(src, 4, false).unwrap();
         assert!(no_img.contains("{% endif %}<div>b</div>"));
 
-        let doc = set_style(&json!({}), "a.html#3", "div|a", None, "all", "color", Some("#000")).unwrap();
-        let doc = set_style(&doc, "a.html#7", "p|c", None, "all", "color", Some("#111")).unwrap();
-        let doc = set_style(&doc, "b.html#7", "p|c", None, "all", "color", Some("#222")).unwrap();
+        let doc = set_style(&json!({}), "a.html#3", "div||a", None, "all", "color", Some("#000")).unwrap();
+        let doc = set_style(&doc, "a.html#7", "p||c", None, "all", "color", Some("#111")).unwrap();
+        let doc = set_style(&doc, "b.html#7", "p||c", None, "all", "color", Some("#222")).unwrap();
         let after = shift(&doc, "a.html", 2, -4);
         let keys: Vec<&String> = after["els"].as_object().unwrap().keys().collect();
         assert_eq!(keys, ["a.html#3", "b.html#7"].map(String::from).iter().collect::<Vec<_>>());
@@ -763,9 +877,9 @@ mod tests {
 
     #[test]
     fn edits_can_be_for_one_page_or_one_width() {
-        let doc = set_style(&json!({}), "l.html#3", "h1|甲", None, "all", "color", Some("#111")).unwrap();
-        let doc = set_style(&doc, "l.html#3", "h1|甲", Some("/about"), "all", "color", Some("#222")).unwrap();
-        let doc = set_style(&doc, "l.html#3", "h1|甲", Some("/about"), "mobile", "display", Some("none")).unwrap();
+        let doc = set_style(&json!({}), "l.html#3", "h1||甲", None, "all", "color", Some("#111")).unwrap();
+        let doc = set_style(&doc, "l.html#3", "h1||甲", Some("/about"), "all", "color", Some("#222")).unwrap();
+        let doc = set_style(&doc, "l.html#3", "h1||甲", Some("/about"), "mobile", "display", Some("none")).unwrap();
         let about = css(&doc, "/about").unwrap();
         assert!(about.find("#111").unwrap() < about.find("#222").unwrap(), "{about}");
         assert!(!css(&doc, "/").unwrap().contains("#222"));
@@ -774,9 +888,9 @@ mod tests {
         assert!(tiers_of(&doc, "l.html#3", "/").is_empty());
         let reset = reset_tier(&doc, "l.html#3", "mobile");
         assert!(tiers_of(&reset, "l.html#3", "/about").is_empty());
-        let cleared = set_style(&reset, "l.html#3", "h1|甲", Some("/about"), "all", "color", None).unwrap();
+        let cleared = set_style(&reset, "l.html#3", "h1||甲", Some("/about"), "all", "color", None).unwrap();
         assert!(cleared["els"]["l.html#3"].get("pages").is_none(), "{cleared}");
-        assert!(set_style(&doc, "l.html#3", "h1|甲", Some("about"), "all", "color", Some("#000")).is_err());
+        assert!(set_style(&doc, "l.html#3", "h1||甲", Some("about"), "all", "color", Some("#000")).is_err());
 
         let files = [
             ("layout.html".to_string(), "<body>{% block m %}{% endblock %}</body>".to_string()),
@@ -792,13 +906,13 @@ mod tests {
     #[test]
     fn a_rewrite_keeps_moves_or_loses_edits() {
         let src = "<body><h1>甲</h1><p>乙</p></body>";
-        let doc = set_style(&json!({}), "a.html#2", "h1|甲", None, "all", "color", Some("#111")).unwrap();
-        let doc = set_style(&doc, "a.html#3", "p|乙", None, "all", "color", Some("#222")).unwrap();
-        let (moved, lost) = remap(&doc, "a.html", &src.replace("<body>", "<body><nav>x</nav>"));
+        let doc = set_style(&json!({}), "a.html#2", "h1||甲", None, "all", "color", Some("#111")).unwrap();
+        let doc = set_style(&doc, "a.html#3", "p||乙", None, "all", "color", Some("#222")).unwrap();
+        let (moved, lost) = remap(&doc, "a.html", src, &src.replace("<body>", "<body><nav>x</nav>"));
         assert!(lost.is_empty());
-        assert_eq!(moved["els"]["a.html#3"]["fp"], "h1|甲");
-        assert_eq!(moved["els"]["a.html#4"]["fp"], "p|乙");
-        let (kept, lost) = remap(&doc, "a.html", &src.replace("乙", "丙"));
+        assert_eq!(moved["els"]["a.html#3"]["fp"], "h1||甲");
+        assert_eq!(moved["els"]["a.html#4"]["fp"], "p||乙");
+        let (kept, lost) = remap(&doc, "a.html", src, &src.replace("乙", "丙"));
         assert_eq!(lost, ["a.html#3"]);
         assert!(kept["els"].get("a.html#3").is_none() && kept["els"].get("a.html#2").is_some());
         assert_eq!(edits_of(&doc, "a.html").len(), 2);
@@ -824,16 +938,63 @@ mod tests {
         assert!(check("translate", "12px").is_err());
         assert!(check("translate", "1px 9999px").is_err());
         assert!(check("display", "block").is_err());
-        let doc = set_style(&json!({}), "a.html#1", "p|", None, "desktop", "z-index", Some("2")).unwrap();
-        assert!(css(&doc, "/").unwrap().contains("z-index:2 !important;position:relative}"));
+        let doc = set_style(&json!({}), "a.html#1", "p||", None, "desktop", "z-index", Some("2")).unwrap();
+        assert!(css(&doc, "/").unwrap().contains(":where([data-hc=") && css(&doc, "/").unwrap().contains("z-index:2 !important}"));
     }
 
     #[test]
     fn text_edits_only_touch_plain_text() {
-        let out = set_text(PAGE, 6, "夏季<新品>\n第二行").unwrap();
+        let (out, from, by) = set_text(PAGE, 6, "夏季<新品>\n第二行").unwrap();
         assert!(out.contains(">夏季&lt;新品&gt;<br>第二行</h1>"));
+        assert_eq!((from, by), (7, 1));
         assert!(set_text(PAGE, 7, "x").is_err());
         assert!(set_text(PAGE, 8, "x").is_err());
         assert!(set_text(PAGE, 99, "x").is_err());
+        // Template code typed as text stays text.
+        let (out, ..) = set_text("<p>a</p>", 1, "{{ x }} {% if %}").unwrap();
+        assert_eq!(out, "<p>&#123;&#123; x &#125;&#125; &#123;&#37; if &#37;&#125;</p>");
+        // An expression in an attribute holding `>` does not end the tag early.
+        let src = "<a href=\"/n\" aria-label=\"{{ \"Next >\" }}\">Go</a>";
+        assert_eq!(tags(src)[0].open_end, src.find(">Go").unwrap() + 1);
+        assert!(set_text(src, 1, "\" ~ x }}").unwrap().0.contains(">&quot;") || set_text(src, 1, "\" ~ x }}").unwrap().0.contains(">\" ~ x &#125;&#125;</a>"));
+        // `</s` is not the end of `<s>`'s sibling `<span>`.
+        assert!(set_text("<s>old</span></s>", 1, "x").is_err());
+    }
+
+    #[test]
+    fn markup_in_attributes_and_raw_text_does_not_confuse_the_scanner() {
+        let src = "<section><div class=\"x\"><a title=\"</div>\">a</a></div><p>keep</p></section>";
+        let (out, ..) = restructure(src, 2, false).unwrap();
+        assert_eq!(out, "<section><p>keep</p></section>");
+        let src = "<div><textarea></div></textarea></div><p>k</p>";
+        assert_eq!(restructure(src, 1, false).unwrap().0, "<p>k</p>");
+        // Image attributes with src-like text in their values.
+        let src = "<img alt=\"a src=b\" src=\"x.png\"><img alt=\"the src is here\" src='y.png'>";
+        assert_eq!(replace_image(src, 1, "/uploads/n.png").unwrap(), "<img src=\"/uploads/n.png\" alt=\"a src=b\"><img alt=\"the src is here\" src='y.png'>");
+        assert!(replace_image(src, 2, "/uploads/n.png").unwrap().ends_with("<img src=\"/uploads/n.png\" alt=\"the src is here\">"));
+        // Tag names run to whitespace; one built by the template is never marked.
+        let src = "<x-foo_bar>a</x-foo_bar><h{{ level }}>b</h{{ level }}>";
+        let out = annotate("a.html", src, &json!({}), true);
+        assert!(out.starts_with("<x-foo_bar data-hc-src=\"a.html#1\">"), "{out}");
+        assert!(out.contains("<h{{ level }}>b"), "{out}");
+    }
+
+    #[test]
+    fn same_looking_elements_are_told_apart_or_lost() {
+        let old = "<body><div class=\"a\"></div><div class=\"b\"></div></body>";
+        let doc = set_style(&json!({}), "a.html#3", &fingerprint(old, &tags(old)[2]), None, "all", "display", Some("none")).unwrap();
+        // Another block added first: the edit stays on div.b.
+        let new = "<body><div class=\"new\"></div><div class=\"a\"></div><div class=\"b\"></div></body>";
+        let (moved, lost) = remap(&doc, "a.html", old, new);
+        assert!(lost.is_empty() && moved["els"].get("a.html#4").is_some(), "{moved}");
+        // Two identical blocks where there was one: ambiguous, so lost rather than guessed.
+        let twin = "<body><div class=\"a\"></div><div class=\"b\"></div><div class=\"b\"></div><div class=\"b\"></div></body>";
+        let old2 = "<body><div class=\"a\"></div><div class=\"b\"></div><div class=\"b\"></div></body>";
+        let doc2 = set_style(&json!({}), "a.html#3", &fingerprint(old2, &tags(old2)[2]), None, "all", "color", Some("#000")).unwrap();
+        assert_eq!(remap(&doc2, "a.html", old2, twin).1, ["a.html#3"]);
+        assert!(parse_src("a.html#03").is_none() && parse_src("a.html#+3").is_none());
+        let page = set_style(&json!({}), "a.html#3", "p||", Some("/about/"), "all", "color", Some("#000")).unwrap();
+        assert!(css(&page, "/about").unwrap().contains("#000"));
+        assert!(css(&set_style(&json!({}), "a.html#1", "p||", None, "all", "z-index", Some("2")).unwrap(), "/").unwrap().starts_with(":where("));
     }
 }

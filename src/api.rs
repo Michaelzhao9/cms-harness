@@ -348,7 +348,8 @@ async fn site_bundle(State(app): State<Shared>, Query(p): Params, headers: Heade
     };
     let param = |k: &str| p.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()).unwrap_or_default();
     let replace = matches!(param("replace").as_str(), "1" | "true");
-    let args = json!({ "zip_base64": base64::engine::general_purpose::STANDARD.encode(&body), "note": param("note"), "replace": replace });
+    let hand = matches!(param("replace_hand_edits").as_str(), "1" | "true");
+    let args = json!({ "zip_base64": base64::engine::general_purpose::STANDARD.encode(&body), "note": param("note"), "replace": replace, "replace_hand_edits": hand });
     match run_tool(&app, actor, "upload_site_bundle".into(), args).await {
         Ok(result) => Json(json!({ "ok": true, "result": result })).into_response(),
         Err(e) => error_response(StatusCode::BAD_REQUEST, e),

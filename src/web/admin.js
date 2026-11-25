@@ -515,24 +515,28 @@ let onlyThisPage = false;
 const pageAddress = () => (page.path || '/').split(/[?#]/)[0];
 
 /** Shows one property in the preview at once and saves it as a draft; returns what it was (for undo). */
-async function canvasPut(src, tier, prop, value, scope) {
+async function canvasPut(src, tag, tier, prop, value, scope) {
   post({ type: 'hc:style', src, prop, value });
   // The stylesheet gives a border width its solid style; the preview needs it too until it reloads.
   if (prop === 'border-width') post({ type: 'hc:style', src, prop: 'border-style', value: value ? 'solid' : '' });
-  const out = await canvasSave('/admin/canvas/style', { src, tier, prop, value, page: scope || '' });
+  // The tag name lets the server refuse when another element now sits at this position.
+  const out = await canvasSave('/admin/canvas/style', { src, tag, tier, prop, value, page: scope || '' });
   return out.old ?? '';
 }
 
-// Undo and redo: each step is a list of {src, tier, prop, old, value, scope}.
+// Undo and redo: each step is a list of {src, tag, tier, prop, old, value, scope}. Positions are only good
+// until the page's files change, so both lists are cleared whenever the preview loads again.
 const undone = [];
 const done = [];
 
-/** Applies a step's edits, saving each; on success it can be undone. */
+/** Applies a step's edits to the selected element, saving each; on success it can be undone. */
 async function canvasStep(src, edits) {
+  if (!csel || csel.src !== src) return;
   const step = [];
   const scope = onlyThisPage ? pageAddress() : '';
+  const tag = csel.tag;
   try {
-    for (const { tier, prop, value } of edits) step.push({ src, tier, prop, value, scope, old: await canvasPut(src, tier, prop, value, scope) });
+    for (const { tier, prop, value } of edits) step.push({ src, tag, tier, prop, value, scope, old: await canvasPut(src, tag, tier, prop, value, scope) });
   } catch (err) {
     toast(tr('没存上', 'Not saved'), err.message, true);
   }
@@ -550,7 +554,7 @@ async function canvasUndo(redo) {
   const step = (redo ? undone : done).pop();
   if (!step) return;
   try {
-    for (const e of redo ? step : [...step].reverse()) await canvasPut(e.src, e.tier, e.prop, redo ? e.value : e.old, e.scope);
+    for (const e of redo ? step : [...step].reverse()) await canvasPut(e.src, e.tag, e.tier, e.prop, redo ? e.value : e.old, e.scope);
     (redo ? done : undone).push(step);
   } catch (err) {
     toast(tr('没撤销成', 'Could not undo'), err.message, true);
@@ -558,11 +562,12 @@ async function canvasUndo(redo) {
 }
 
 /** Uploads an image for the canvas: added at `src` (`mode` add) or put into the `<img>` at `src` (replace). */
-async function canvasImage(src, mode, file) {
+async function canvasImage(src, mode, file, tag = '') {
   const body = new FormData();
   body.set('csrf', csrf);
   body.set('src', src);
   body.set('mode', mode);
+  body.set('tag', tag);
   body.set('file', file);
   const res = await fetch('/admin/canvas/image', { method: 'POST', body, headers: { 'x-hc-fetch': '1' }, credentials: 'same-origin' });
   if (!res.ok) throw new Error((await res.text()) || tr(`出错了（${res.status}）`, `Something went wrong (${res.status})`));
@@ -574,8 +579,10 @@ async function canvasImage(src, mode, file) {
 /** Takes the selected element out of its template, or copies it, then shows the page again. */
 async function canvasElement(action) {
   if (!csel) return;
+  // Taking an element out of the template is asked first: it is not on the undo list.
+  if (action === 'remove' && !window.confirm(tr('删除这个元素？删除后不能撤销，发布前可以在「发布」里不选这个文件。', 'Delete this element? It cannot be undone; before publishing you can leave its file out in Publish.'))) return;
   try {
-    await canvasSave('/admin/canvas/element', { src: csel.src, action });
+    await canvasSave('/admin/canvas/element', { src: csel.src, tag: csel.tag, action });
     closeBar();
     reloadFrames();
   } catch (err) {
@@ -699,11 +706,21 @@ if (cbar && frame) {
       placeBar();
     } else if (m.type === 'hc:deselect' || m.type === 'hc:navigated' || m.type === 'hc:ready') {
       closeBar();
-    } else if (m.type === 'hc:text' && typeof m.src === 'string' && typeof m.text === 'string') {
-      canvasSave('/admin/canvas/text', { src: m.src, text: m.text }).catch((err) => {
-        toast(tr('文字没改成', 'Text not changed'), err.message, true);
-        reloadFrames();
-      });
+      // A page (re)loaded: positions may have moved, so old undo steps could hit other elements.
+      if (m.type === 'hc:ready') {
+        done.length = 0;
+        undone.length = 0;
+      }
+    } else if (m.type === 'hc:text' && csel && m.src === csel.src && typeof m.text === 'string') {
+      canvasSave('/admin/canvas/text', { src: m.src, tag: csel.tag, text: m.text })
+        .then((out) => {
+          // New line breaks move the positions after them: the preview has to catch up.
+          if (out.reload) reloadFrames();
+        })
+        .catch((err) => {
+          toast(tr('文字没改成', 'Text not changed'), err.message, true);
+          reloadFrames();
+        });
     } else if (m.type === 'hc:move' && typeof m.src === 'string') {
       // Where things sit is an edit of the width being looked at.
       canvasStep(m.src, [{ tier: width(), prop: 'translate', value: `${Number(m.x) || 0}px ${Number(m.y) || 0}px` }]);
@@ -713,7 +730,7 @@ if (cbar && frame) {
       if (m.h != null) edits.push({ tier: width(), prop: 'height', value: `${Number(m.h)}px` });
       edits.push({ tier: width(), prop: 'translate', value: `${Number(m.x) || 0}px ${Number(m.y) || 0}px` });
       canvasStep(m.src, edits);
-    } else if (m.type === 'hc:key') {
+    } else if (m.type === 'hc:key' && csel) {
       if (m.key === 'undo' || m.key === 'redo') canvasUndo(m.key === 'redo');
       else if (m.key === 'delete') canvasElement('remove');
       else if (m.key === 'duplicate') canvasElement('duplicate');
@@ -776,7 +793,7 @@ if (cbar && frame) {
     cfile.value = '';
     if (!file || !csel) return;
     try {
-      await canvasImage(csel.src, 'replace', file);
+      await canvasImage(csel.src, 'replace', file, csel.tag);
       closeBar();
       reloadFrames();
     } catch (err) {
@@ -900,9 +917,11 @@ if (pen && frame) {
   window.addEventListener('message', (e) => {
     if (e.source !== frame.contentWindow || typeof e.data !== 'object' || !e.data) return;
     const m = e.data;
-    if (m.type === 'hc:add' && typeof m.src === 'string') {
+    // Only the tool chosen here adds anything: a page script cannot add elements on its own.
+    const chosen = $('[data-tool][aria-pressed="true"]', pen)?.dataset.tool;
+    if (m.type === 'hc:add' && typeof m.src === 'string' && chosen && m.kind === chosen) {
       pick(null);
-      const adding = m.kind === 'image' && penImage ? canvasImage(m.src, 'add', penImage) : canvasSave('/admin/canvas/add', { src: m.src, kind: String(m.kind) });
+      const adding = chosen === 'image' ? (penImage ? canvasImage(m.src, 'add', penImage) : Promise.reject(new Error(tr('先选一张图片。', 'Choose an image first.')))) : canvasSave('/admin/canvas/add', { src: m.src, kind: chosen });
       penImage = null;
       adding
         .then((out) => {

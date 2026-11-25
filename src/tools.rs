@@ -1037,6 +1037,9 @@ struct UploadSiteBundle {
     /// Also delete live files that are not in the bundle.
     #[serde(default)]
     replace: bool,
+    /// true only after the user agreed that hand edits from the canvas that no longer match may be dropped.
+    #[serde(default)]
+    replace_hand_edits: bool,
 }
 
 /// (status, current content) of a site file that exists; the draft copy when there is one.
@@ -1095,21 +1098,34 @@ fn write_site_file(conn: &Connection, actor: &Actor, a: WriteSiteFile) -> Result
     let content = if crate::site::is_binary(&a.path) { a.content.split_whitespace().collect() } else { a.content };
     crate::site::check_file(&a.path, &content)?;
     changes::check_file_count(conn, std::slice::from_ref(&a.path))?;
-    // Hand edits from the canvas follow their elements; the AI may not drop them without the user's say.
+    let canvas = follow_hand_edits(conn, &[(a.path.clone(), content.clone())], a.replace_hand_edits)?;
+    changes::stage_file(conn, actor, &a.path, &content, note)?;
+    if let Some(doc) = canvas {
+        changes::save_draft(conn, actor, &Target::Setting(crate::canvas::KEY.into()), &doc, note)?;
+    }
+    Ok(json!({ "path": a.path, "status": file_status(conn, &a.path)? }))
+}
+
+/// Hand edits from the canvas follow their elements into new file contents; the AI may not drop them without
+/// the user's say (`replace`). Returns the canvas document to save when it changed.
+fn follow_hand_edits(conn: &Connection, files: &[(String, String)], replace: bool) -> Result<Option<Value>, String> {
     let canvas = changes::setting(conn, crate::canvas::KEY, true);
-    let (moved, lost) = crate::canvas::remap(&canvas, &a.path, &content);
-    if !lost.is_empty() && !a.replace_hand_edits {
+    let mut doc = canvas.clone();
+    let mut lost = vec![];
+    for (path, content) in files.iter().filter(|(p, _)| p.ends_with(".html")) {
+        let old = crate::site::file(conn, crate::site::Mode::Preview, path)?.unwrap_or_default();
+        let (moved, gone) = crate::canvas::remap(&doc, path, &old, content);
+        doc = moved;
+        lost.extend(gone);
+    }
+    if !lost.is_empty() && !replace {
         let what: Vec<String> = lost.iter().map(|k| format!("{k}（{}）", canvas["els"][k]["fp"].as_str().unwrap_or_default())).collect();
         return Err(format!(
-            "没有写入：用户在画板上手动调整过这些元素，这样改写后它们就对不上了：{}。先告诉用户这些手动调整会丢掉，用户同意后带上 replace_hand_edits: true 再写；或者保留这些元素（标签和开头的文字不变）。",
+            "没有写入：用户在画板上手动调整过这些元素，这样改写后它们就对不上了：{}。先告诉用户这些手动调整会丢掉，用户同意后带上 replace_hand_edits: true 再写；或者保留这些元素（标签、id、class 和开头的文字不变）。",
             what.join("、")
         ));
     }
-    changes::stage_file(conn, actor, &a.path, &content, note)?;
-    if moved != canvas {
-        changes::save_draft(conn, actor, &Target::Setting(crate::canvas::KEY.into()), &moved, note)?;
-    }
-    Ok(json!({ "path": a.path, "status": file_status(conn, &a.path)? }))
+    Ok((doc != canvas).then_some(doc))
 }
 
 fn delete_site_file(conn: &Connection, actor: &Actor, a: DeleteSiteFile) -> Result<Value, String> {
@@ -1136,6 +1152,7 @@ fn upload_site_bundle(conn: &Connection, actor: &Actor, a: UploadSiteBundle) -> 
         return Err("压缩包里没有文件。".into());
     }
     let paths: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
+    let canvas = follow_hand_edits(conn, &files, a.replace_hand_edits)?;
     let fail = |e: rusqlite::Error| format!("写入站点文件失败：{e}");
     let tx = conn.unchecked_transaction().map_err(fail)?;
     let mut deleted = 0;
@@ -1153,6 +1170,9 @@ fn upload_site_bundle(conn: &Connection, actor: &Actor, a: UploadSiteBundle) -> 
     let mut written = 0;
     for (path, content) in &files {
         written += changes::stage_file(&tx, actor, path, content, note)? as usize;
+    }
+    if let Some(doc) = canvas {
+        changes::save_draft(&tx, actor, &Target::Setting(crate::canvas::KEY.into()), &doc, note)?;
     }
     tx.commit().map_err(fail)?;
     Ok(json!({ "files": files.len(), "written": written, "unchanged": files.len() - written, "deleted": deleted }))

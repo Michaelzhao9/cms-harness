@@ -220,7 +220,10 @@
   let press = null;
   let nudged = 0, nudgeFrom = null;
   let swallow = false; // the click that ends a long press selects, it does not navigate
-  const INTERACTIVE = "a[href], button, input, select, textarea, label, summary, [contenteditable], [onclick], [role=button]";
+  const INTERACTIVE = "a[href], area[href], button, input, select, textarea, label, summary, video, audio, [contenteditable], [onclick], [role=button]";
+  // Controls the visitor works with: pressing, dragging or typing in them never edits the page.
+  const CONTROLS = "input, textarea, select, option, video, audio, [contenteditable], [draggable=true]";
+  const inControl = (t) => t instanceof Element && !!t.closest(CONTROLS) && !(editing && editing.contains(t));
   const sourceOf = (t) => {
     if (!(t instanceof Element)) return null;
     const svg = t.closest("svg");
@@ -256,10 +259,20 @@
     redraw();
     if (tell) send({ type: "hc:deselect" });
   }
+  // The text as written, line breaks as "\n": not innerText, which applies text-transform (an uppercase style
+  // would be saved as capitals).
+  const plainText = (el) => Array.from(el.childNodes).map((n) => (n.nodeName === "BR" ? "\n" : n.nodeType === 3 ? n.data : n.textContent)).join("");
+  const setPlain = (el, text) => {
+    el.textContent = "";
+    text.split("\n").forEach((line, i) => {
+      if (i) el.appendChild(document.createElement("br"));
+      el.appendChild(document.createTextNode(line));
+    });
+  };
   function startEdit(el) {
     if (el.children.length && Array.from(el.children).some((c) => c.localName !== "br")) return;
     editing = el;
-    before = el.innerText;
+    before = plainText(el);
     el.setAttribute("data-hc-editing", "");
     el.contentEditable = "plaintext-only";
     el.focus();
@@ -276,8 +289,8 @@
     editing = null;
     el.removeAttribute("data-hc-editing");
     el.removeAttribute("contenteditable");
-    const text = el.innerText.replace(/\n$/, "");
-    if (!keep || text === before) { if (!keep) el.innerText = before; }
+    const text = plainText(el).replace(/\n$/, "");
+    if (!keep || text === before) { if (!keep) setPlain(el, before); }
     else send({ type: "hc:text", src: el.dataset.hcSrc, text });
     redraw();
   }
@@ -323,6 +336,7 @@
       drag = { kind: "size", el: sel, dir: handle.dataset.dir, x0: e.clientX, y0: e.clientY, t0: getT(sel), w0: b.width, h0: b.height };
       return;
     }
+    if (inControl(e.target)) return;
     press = { x: e.clientX, y: e.clientY, t: performance.now(), el: sourceOf(e.target), target: e.target };
   }, true);
   document.addEventListener("pointermove", (e) => {
@@ -366,18 +380,37 @@
       drag = null;
       guides = [];
       document.documentElement.classList.remove("hc-dragging");
-      swallow = d.kind === "move";
+      if (d.kind === "move") swallowNext();
       const t = getT(d.el);
       const moved = t[0] !== d.t0[0] || t[1] !== d.t0[1];
       if (d.kind === "move" && moved) send({ type: "hc:move", src: d.el.dataset.hcSrc, x: t[0], y: t[1], from: d.t0 });
-      if (d.kind === "size") send({ type: "hc:resize", src: d.el.dataset.hcSrc, w: d.w ?? null, h: d.h ?? null, x: t[0], y: t[1], from: d.t0 });
+      if (d.kind === "size" && (d.w != null || d.h != null)) send({ type: "hc:resize", src: d.el.dataset.hcSrc, w: d.w ?? null, h: d.h ?? null, x: t[0], y: t[1], from: d.t0 });
       redraw();
       return;
     }
     if (!p || !p.el) return;
-    if (performance.now() - p.t > HOLD) { swallow = true; select(p.el); }
+    if (performance.now() - p.t > HOLD) { swallowNext(); select(p.el); }
   }, true);
-  document.addEventListener("dragstart", (e) => { if (!picking) e.preventDefault(); }, true);
+  // A gesture the browser takes over (scrolling, a system gesture) ends ours without a save.
+  document.addEventListener("pointercancel", () => {
+    // Back to where it was when the gesture began.
+    if (drag) {
+      setProp(drag.el, "translate", `${drag.t0[0]}px ${drag.t0[1]}px`);
+      if (drag.kind === "size" && drag.w != null) setProp(drag.el, "width", drag.w0 + "px");
+      if (drag.kind === "size" && drag.h != null) setProp(drag.el, "height", drag.h0 + "px");
+    }
+    press = null;
+    drag = null;
+    guides = [];
+    document.documentElement.classList.remove("hc-dragging");
+    redraw();
+  }, true);
+  // The click that ends a long press or a drag does nothing; if none follows, the next real click still works.
+  function swallowNext() {
+    swallow = true;
+    setTimeout(() => { swallow = false; }, 400);
+  }
+  document.addEventListener("dragstart", (e) => { if (!picking && !inControl(e.target)) e.preventDefault(); }, true);
 
   // The pen: with a tool chosen (hc:tool), the next click says where to add. The admin adds it to the template
   // and reloads; then hc:place puts the new element exactly where the click was (in page coordinates).
@@ -416,14 +449,16 @@
     if (editing && editing.contains(e.target)) return;
     const el = sourceOf(e.target);
     if (!el) return deselect(true);
-    if (e.target.closest(INTERACTIVE)) return; // a quick click on a link or button does what it does
+    // A quick click on a link, a button or a field does what it does, and the selection lets go, so typing
+    // there never reaches the canvas.
+    if (e.target.closest(INTERACTIVE)) return deselect(true);
     e.preventDefault();
     select(el);
   }, true);
   document.addEventListener("dblclick", (e) => {
     if (picking) return;
     const el = sourceOf(e.target);
-    if (!el || e.target.closest("input, select, textarea")) return;
+    if (!el || inControl(e.target)) return;
     e.preventDefault();
     if (sel !== el) select(el);
     startEdit(el);
@@ -441,7 +476,7 @@
       else if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); finishEdit(true); }
       return;
     }
-    if (picking || !sel) return;
+    if (picking || !sel || inControl(e.target)) return;
     const mod = e.metaKey || e.ctrlKey;
     if (e.key === "Escape") deselect(true);
     else if (e.key === "Enter") { e.preventDefault(); startEdit(sel); }

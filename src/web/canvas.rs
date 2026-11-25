@@ -32,6 +32,9 @@ pub struct StyleForm {
     /// A page address: the edit applies on that page only. Empty: on every page using the element.
     #[serde(default)]
     page: String,
+    /// The tag name the admin saw there (checked when given).
+    #[serde(default)]
+    tag: String,
 }
 
 fn all() -> String {
@@ -43,6 +46,8 @@ pub struct TextForm {
     csrf: String,
     src: String,
     text: String,
+    #[serde(default)]
+    tag: String,
 }
 
 fn bad(msg: impl Into<String>) -> Out {
@@ -50,11 +55,21 @@ fn bad(msg: impl Into<String>) -> Out {
 }
 
 /// The draft source of the element named by `src` and its tag, or why it cannot be edited.
-fn element(conn: &Connection, src: &str) -> Result<(String, String, canvas::Tag), Out> {
+/// `expect` is the tag name the admin saw (empty: not checked): when the file changed meanwhile and another
+/// element now sits there, nothing is edited.
+fn element(conn: &Connection, src: &str, expect: &str) -> Result<(String, String, canvas::Tag), Out> {
     let (path, n) = canvas::parse_src(src).ok_or_else(|| bad("不认识这个元素：请刷新预览再选。"))?;
     let source = site::file(conn, Mode::Preview, path).map_err(internal)?.ok_or_else(|| bad("这个元素所在的文件已经不在了：请刷新预览。"))?;
     let tag = canvas::tags(&source).into_iter().nth(n - 1).ok_or_else(|| bad("这个元素已经不在文件里了：请刷新预览。"))?;
+    if !expect.is_empty() && !expect.eq_ignore_ascii_case(&tag.name) {
+        return Err(bad("这个元素已经变了（文件刚被改过）：请刷新预览再选。"));
+    }
     Ok((path.to_string(), source, tag))
+}
+
+/// The one spelling of an element's key.
+fn key(path: &str, tag: &canvas::Tag) -> String {
+    format!("{path}#{}", tag.n)
 }
 
 /// Saves the canvas document as a draft, or drops the draft when it matches what is live.
@@ -94,14 +109,15 @@ pub async fn style(State(app): State<Shared>, Extension(user): Extension<AdminUs
     blocking(move || {
         allowed(&user, &f.csrf)?;
         let conn = app.conn();
-        let (_, source, tag) = element(&conn, &f.src)?;
+        let (path, source, tag) = element(&conn, &f.src, &f.tag)?;
+        let k = key(&path, &tag);
         let fp = canvas::fingerprint(&source, &tag);
         let doc = changes::setting(&conn, canvas::KEY, true);
         // What it was, so the admin can undo this edit.
         let page = Some(f.page.as_str()).filter(|p| !p.is_empty());
-        let old = canvas::current(&doc, &f.src, page, &f.tier, &f.prop);
+        let old = canvas::current(&doc, &k, page, &f.tier, &f.prop);
         let value = Some(f.value.as_str()).filter(|v| !v.trim().is_empty());
-        let doc = canvas::set_style(&doc, &f.src, &fp, page, &f.tier, &f.prop, value).map_err(bad)?;
+        let doc = canvas::set_style(&doc, &k, &fp, page, &f.tier, &f.prop, value).map_err(bad)?;
         save_canvas(&conn, &user, &doc)?;
         done(&conn, json!({ "old": old }))
     })
@@ -113,19 +129,23 @@ pub async fn text(State(app): State<Shared>, Extension(user): Extension<AdminUse
     blocking(move || {
         allowed(&user, &f.csrf)?;
         let conn = app.conn();
-        let (path, source, tag) = element(&conn, &f.src)?;
-        let new = canvas::set_text(&source, tag.n, &f.text).map_err(bad)?;
+        let (path, source, tag) = element(&conn, &f.src, &f.tag)?;
+        let (new, from, by) = canvas::set_text(&source, tag.n, &f.text).map_err(bad)?;
         site::check_file(&path, &new).map_err(bad)?;
         changes::stage_file(&conn, &user.actor(), &path, &new, NOTE).map_err(internal)?;
-        // The element's fingerprint includes its text: style edits on it keep following it.
-        let doc = changes::setting(&conn, canvas::KEY, true);
-        if doc["els"].get(&f.src).is_some() {
+        // Line breaks are tags: the edits after it move. Its fingerprint holds its text: its own edits follow.
+        let old = changes::setting(&conn, canvas::KEY, true);
+        let mut doc = canvas::shift(&old, &path, from, by);
+        let k = key(&path, &tag);
+        if doc["els"].get(&k).is_some() {
             let tag = canvas::tags(&new).into_iter().nth(tag.n - 1).ok_or_else(|| internal("改完文字后找不到这个元素。".into()))?;
-            let mut doc = doc;
-            doc["els"][&f.src]["fp"] = json!(canvas::fingerprint(&new, &tag));
+            doc["els"][&k]["fp"] = json!(canvas::fingerprint(&new, &tag));
+        }
+        if doc != old {
             save_canvas(&conn, &user, &doc)?;
         }
-        done(&conn, json!({}))
+        // The preview's positions moved too: it reloads.
+        done(&conn, json!({ "reload": by != 0 }))
     })
     .await
 }
@@ -136,6 +156,8 @@ pub struct ElementForm {
     src: String,
     /// `remove` or `duplicate`.
     action: String,
+    #[serde(default)]
+    tag: String,
 }
 
 /// Removes an element from its template, or puts a copy of it right after itself. Hand edits of the elements
@@ -149,7 +171,7 @@ pub async fn element_action(State(app): State<Shared>, Extension(user): Extensio
             _ => return Err(bad("只能复制（duplicate）或删除（remove）。")),
         };
         let conn = app.conn();
-        let (path, source, tag) = element(&conn, &f.src)?;
+        let (path, source, tag) = element(&conn, &f.src, &f.tag)?;
         let (new, from, by) = canvas::restructure(&source, tag.n, copy).map_err(bad)?;
         site::check_file(&path, &new).map_err(bad)?;
         changes::stage_file(&conn, &user.actor(), &path, &new, NOTE).map_err(internal)?;
@@ -178,7 +200,7 @@ pub async fn add(State(app): State<Shared>, Extension(user): Extension<AdminUser
         allowed(&user, &f.csrf)?;
         let en = crate::i18n::Lang::of_prefs(&user.prefs) == crate::i18n::Lang::En;
         let conn = app.conn();
-        let (path, source, tag) = element(&conn, &f.src)?;
+        let (path, source, tag) = element(&conn, &f.src, "")?;
         let (new, n) = canvas::add(&source, tag.n, &f.kind, en).map_err(bad)?;
         site::check_file(&path, &new).map_err(bad)?;
         changes::stage_file(&conn, &user.actor(), &path, &new, NOTE).map_err(internal)?;
@@ -211,14 +233,21 @@ pub async fn image(State(app): State<Shared>, Extension(user): Extension<AdminUs
             "add" => false,
             _ => return Err(bad("只能添加（add）或替换（replace）图片。")),
         };
-        // The element must be there before anything is stored.
-        let (path, source, tag) = element(&app.conn(), &src)?;
+        // Nothing is stored for an element that is not there, or that is not an image to replace.
+        {
+            let (_, _, tag) = element(&app.conn(), &src, posted.one("tag"))?;
+            if replace && tag.name != "img" {
+                return Err(bad("只有图片能换图片。"));
+            }
+        }
         // Uploads are checked by their content: images and PDFs. Only an image fits here.
         let url = crate::media::store_upload(&app, name, bytes).map_err(bad)?;
         if url.ends_with(".pdf") {
             return Err(bad("这里只能用图片，不能用 PDF。"));
         }
+        // Read and write the template under one lock, so nothing written meanwhile is lost.
         let conn = app.conn();
+        let (path, source, tag) = element(&conn, &src, posted.one("tag"))?;
         let (new, n) = if replace {
             (canvas::replace_image(&source, tag.n, &url).map_err(bad)?, tag.n)
         } else {
@@ -226,11 +255,13 @@ pub async fn image(State(app): State<Shared>, Extension(user): Extension<AdminUs
         };
         site::check_file(&path, &new).map_err(bad)?;
         changes::stage_file(&conn, &user.actor(), &path, &new, NOTE).map_err(internal)?;
-        let doc = changes::setting(&conn, canvas::KEY, true);
-        // A replaced image keeps its position; an added one moves those after it.
-        let moved = if replace { canvas::remap(&doc, &path, &new).0 } else { canvas::shift(&doc, &path, n, 1) };
-        if moved != doc {
-            save_canvas(&conn, &user, &moved)?;
+        // A replaced image keeps its place (its fingerprint ignores `src`); an added one moves those after it.
+        if !replace {
+            let doc = changes::setting(&conn, canvas::KEY, true);
+            let moved = canvas::shift(&doc, &path, n, 1);
+            if moved != doc {
+                save_canvas(&conn, &user, &moved)?;
+            }
         }
         done(&conn, json!({ "src": format!("{path}#{n}") }))
     })
@@ -250,7 +281,8 @@ pub struct InfoQuery {
 pub async fn info(State(app): State<Shared>, axum::extract::Query(q): axum::extract::Query<InfoQuery>) -> Response {
     blocking(move || {
         let conn = app.conn();
-        let (path, _, _) = element(&conn, &q.src)?;
+        let (path, _, tag) = element(&conn, &q.src, "")?;
+        let k = key(&path, &tag);
         let mut stmt = conn
             .prepare("SELECT path, coalesce(draft, published) FROM site_files WHERE draft_deleted = 0 AND path LIKE '%.html'")
             .map_err(|e| internal(e.to_string()))?;
@@ -261,7 +293,7 @@ pub async fn info(State(app): State<Shared>, axum::extract::Query(q): axum::extr
             .map(|(p, j)| (p, j.and_then(|j| serde_json::from_str::<String>(&j).ok()).unwrap_or_default()))
             .collect();
         let doc = changes::setting(&conn, canvas::KEY, true);
-        Ok(Out::Json(json!({ "pages": canvas::pages_using(&files, &path), "tiers": canvas::tiers_of(&doc, &q.src, &q.page) })))
+        Ok(Out::Json(json!({ "pages": canvas::pages_using(&files, &path), "tiers": canvas::tiers_of(&doc, &k, &q.page) })))
     })
     .await
 }
@@ -281,8 +313,9 @@ pub async fn reset(State(app): State<Shared>, Extension(user): Extension<AdminUs
             return Err(bad("只能恢复平板（tablet）或手机（mobile）宽度。"));
         }
         let conn = app.conn();
+        let (path, _, tag) = element(&conn, &f.src, "")?;
         let doc = changes::setting(&conn, canvas::KEY, true);
-        save_canvas(&conn, &user, &canvas::reset_tier(&doc, &f.src, &f.tier))?;
+        save_canvas(&conn, &user, &canvas::reset_tier(&doc, &key(&path, &tag), &f.tier))?;
         done(&conn, json!({}))
     })
     .await
