@@ -14,17 +14,30 @@
 {{ item("/admin", "web", ("网页"|t), "browser") }}
 <span class="rule" aria-hidden="true"></span>
 <span class="cap">{{ "内容与表单"|t }}</span>
-{% for c in nav.collections -%}
-<a class="item{% if c.unused %} unused{% endif %}" href="/admin/c/{{ c.name }}"{% if nav.current == "c:" ~ c.name %} aria-current="page"{% endif %}{% if nav.collapsed %} title="{{ c.title }}{% if c.unused %} · {{ '网站上还没用到'|t }}{% endif %}"{% elif c.unused %} title="{{ '网站上还没用到'|t }}"{% endif %}>{{ i.icon("clipboard-text") }}<span class="label">{{ c.title }}</span>
+{%- macro coll(c, cls="item") -%}
+<a class="{{ cls }}{% if c.unused %} unused{% endif %}" href="{{ (c.href or ('/admin/c/' ~ c.name))|safe }}"{% if nav.current == "c:" ~ c.name %} aria-current="page"{% endif %}{% if nav.collapsed %} title="{{ c.title }}{% if c.unused %} · {{ '网站上还没用到'|t }}{% endif %}"{% elif c.unused %} title="{{ '网站上还没用到'|t }}"{% endif %}>{% if cls == "item" %}{{ i.icon("file-text" if c.single else "clipboard-text") }}{% endif %}<span class="label">{{ c.title }}</span>
 {%- if c.pending %}<span class="mk" aria-hidden="true"></span><span class="sr">{{ "有改动"|t }}</span>{% endif %}
-{%- if c.fresh %}<span class="fresh">{{ c.fresh }} {{ "条新"|t }}</span>{% else %}<span class="num">{{ c.count }}</span>{% endif %}</a>
+{%- if c.fresh %}<span class="fresh">{{ c.fresh }} {{ "条新"|t }}</span>{% elif not c.single %}<span class="num">{{ c.count }}</span>{% endif %}</a>
 {% if c.views and not nav.collapsed -%}
 <div class="views">
 {% for v in c.views %}<a class="sub" href="/admin/v/{{ v.name }}"{% if nav.current == "v:" ~ v.name %} aria-current="page"{% endif %}>{{ v.title }}</a>
 {% endfor -%}
 </div>
 {% endif -%}
+{%- endmacro -%}
+{% if nav.collapsed -%}
+{% for c in nav.collections %}{{ coll(c) }}{% endfor -%}
+{% else -%}
+{# The site's sections fold: a group opens on a click and comes open while one of its collections is shown. #}
+{% for e in nav.entries -%}
+{% if e.group -%}
+<details class="group"{% if e.open %} open{% endif %}>
+<summary class="item">{{ i.icon("folder-simple") }}<span class="label">{{ e.group }}</span>{% if e.pending %}<span class="mk" aria-hidden="true"></span><span class="sr">{{ "有改动"|t }}</span>{% endif %}{{ i.icon("caret-down", 14) }}</summary>
+<div class="views">{% for c in e.items %}{{ coll(c, "sub") }}{% endfor %}</div>
+</details>
+{% else %}{{ coll(e) }}{% endif -%}
 {% endfor -%}
+{% endif -%}
 {% if nav.members or nav.media or nav.releases -%}
 <span class="rule" aria-hidden="true"></span>
 <span class="cap">{{ "后台"|t }}</span>

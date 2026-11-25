@@ -237,3 +237,41 @@ async fn the_nav_keeps_only_what_is_useful() {
     let (_, _, settings) = get_with(&app, "/admin/settings", Some(&cookie)).await;
     assert!(settings.contains("href=\"/admin/releases\""));
 }
+
+#[tokio::test]
+async fn the_nav_follows_the_sites_sections_and_folds() {
+    let app = app();
+    let field = json!([{ "name": "title", "title": "名称", "type": "text" }]);
+    for (name, title, group, position, single) in [
+        ("rooms", "琴房租赁", Some("租赁业务"), 31, false),
+        ("gear", "设备租赁", Some("租赁业务"), 30, false),
+        ("about", "集团介绍", None, 10, true),
+        ("news", "资讯", None, 50, false),
+    ] {
+        let mut args = json!({ "name": name, "title": title, "position": position, "single": single, "fields": field, "note": "建" });
+        if let Some(g) = group {
+            args["group"] = json!(g);
+        }
+        ok(&app, &builder(), "create_collection", args);
+    }
+    let about = ok(&app, &builder(), "create_record", json!({ "collection": "about", "data": { "title": "箭丽集团" }, "note": "写" }))["id"].as_i64().unwrap();
+    // A group name longer than 40 characters is refused.
+    assert!(!err(&app, &builder(), "update_collection", json!({ "name": "news", "group": "栏".repeat(41), "note": "x" })).is_empty());
+    let (cookie, _) = admin_session(&app, "builder").await;
+    let (_, _, page) = get_with(&app, "/admin", Some(&cookie)).await;
+    let at = |s: &str| page.find(s).unwrap_or_else(|| panic!("{s} not in {page}"));
+    // In the site's order: 集团介绍 (10), then the 租赁业务 group (30, 31), then 资讯 (50).
+    assert!(at(">集团介绍<") < at(">租赁业务<") && at(">租赁业务<") < at(">设备租赁<") && at(">设备租赁<") < at(">琴房租赁<") && at(">琴房租赁<") < at(">资讯<"), "{page}");
+    // A group folds, and is closed while none of its collections is shown.
+    assert!(page.contains("<details class=\"group\">"), "{page}");
+    // A single-record collection opens its record.
+    assert!(page.contains(&format!("href=\"/admin/r/{about}\"")), "{page}");
+    // Showing one of its collections opens the group.
+    let (_, _, page) = get_with(&app, "/admin/c/rooms", Some(&cookie)).await;
+    assert!(page.contains("<details class=\"group\" open>"), "{page}");
+    // Taken out of its group, a collection stands on its own again.
+    ok(&app, &builder(), "update_collection", json!({ "name": "rooms", "group": "", "note": "出组" }));
+    ok(&app, &builder(), "update_collection", json!({ "name": "gear", "group": "", "note": "出组" }));
+    let (_, _, page) = get_with(&app, "/admin", Some(&cookie)).await;
+    assert!(!page.contains("class=\"group\""), "{page}");
+}

@@ -117,6 +117,12 @@ pub struct CollectionDef {
     /// In another language, records without a translation fall back to the default language, or are hidden.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub untranslated: Option<Untranslated>,
+    /// The admin nav's group this collection sits in (the site's section, like 租赁业务); none: at the top level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// Its place in the admin nav, lowest first; a group sits where its first collection does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<i64>,
 }
 
 impl CollectionDef {
@@ -138,6 +144,9 @@ pub fn valid_name(s: &str) -> bool {
 
 pub fn check_def(def: &CollectionDef) -> Result<(), String> {
     use FieldType::*;
+    if def.group.as_deref().is_some_and(|g| g.trim().is_empty() || g.chars().count() > 40) {
+        return Err("集合的 group（后台导航分组）要是 1 到 40 个字的名字，或者不设。".into());
+    }
     if !valid_name(&def.name) {
         return Err(format!("集合名“{}”不合法：只能用小写字母开头，后接小写字母、数字或下划线，最长 40 个字符，且不能是保留字（id、sort、limit、offset、expand）。", def.name));
     }

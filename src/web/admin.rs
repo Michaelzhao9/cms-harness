@@ -20,7 +20,10 @@ fn nav_collections(conn: &Connection) -> rusqlite::Result<Vec<Value>> {
     let mut stmt = conn.prepare(
         "SELECT c.name, json_extract(coalesce(c.draft, c.published), '$.title'),
                 coalesce(sum(r.published IS NOT NULL OR r.draft IS NOT NULL), 0),
-                c.draft IS NOT NULL OR c.draft_deleted = 1 OR coalesce(max(r.draft IS NOT NULL OR r.draft_deleted = 1), 0)
+                c.draft IS NOT NULL OR c.draft_deleted = 1 OR coalesce(max(r.draft IS NOT NULL OR r.draft_deleted = 1), 0),
+                json_extract(coalesce(c.draft, c.published), '$.group'), json_extract(coalesce(c.draft, c.published), '$.position'),
+                coalesce(json_extract(coalesce(c.draft, c.published), '$.single'), 0),
+                min(CASE WHEN r.published IS NOT NULL OR r.draft IS NOT NULL THEN r.id END)
          FROM collections c LEFT JOIN records r ON r.collection = c.name
          WHERE c.deleted = 0 OR c.draft IS NOT NULL
          GROUP BY c.name ORDER BY c.name",
@@ -29,8 +32,12 @@ fn nav_collections(conn: &Connection) -> rusqlite::Result<Vec<Value>> {
         .query_map([], |r| {
             let name: String = r.get(0)?;
             let title: Option<String> = r.get(1)?;
+            // A collection of one record (集团介绍) opens that record; a list opens the list.
+            let only: Option<i64> = if r.get::<_, bool>(6)? { r.get(7)? } else { None };
+            let href = only.map_or_else(|| format!("/admin/c/{name}"), |id| format!("/admin/r/{id}"));
             Ok(json!({ "name": name, "title": title.unwrap_or_else(|| name.clone()), "count": r.get::<_, i64>(2)?,
-                "pending": r.get::<_, bool>(3)?, "views": [] }))
+                "pending": r.get::<_, bool>(3)?, "views": [], "group": r.get::<_, Option<String>>(4)?,
+                "position": r.get::<_, Option<i64>>(5)?, "single": r.get::<_, bool>(6)?, "href": href }))
         })?
         .collect::<rusqlite::Result<_>>()?;
     let mut stmt = conn.prepare(
@@ -54,6 +61,34 @@ pub const MARKS: [(&str, &str); 5] = [("yellow", "黄"), ("blue", "蓝"), ("gree
 /// The nav context every admin page passes to `base.html`. `current` names the page: `web`, `c:<name>`, `v:<view>`,
 /// `media`, `publish`, `releases` or `settings`. It also carries the admin's look: `mark` (a `MARKS` key) and
 /// `chat` (`docked` or `floating`).
+/// The nav's entries in order: a collection on its own, or a group of them (the site's sections). Each is placed by
+/// its `position` (unset: after the rest), then its name; a group sits where its first collection does. The group
+/// holding `current` comes open; the others are folded.
+fn nav_entries(collections: &[Value], current: &str) -> Vec<Value> {
+    let mut sorted = collections.to_vec();
+    sorted.sort_by_key(|c| (c["position"].as_i64().unwrap_or(i64::MAX), c["name"].as_str().unwrap_or_default().to_string()));
+    let mut entries: Vec<Value> = vec![];
+    for c in sorted {
+        let Some(g) = c["group"].as_str().map(str::to_string) else {
+            entries.push(c);
+            continue;
+        };
+        let name = c["name"].as_str().unwrap_or_default();
+        let views = c["views"].as_array().cloned().unwrap_or_default();
+        let here = current == format!("c:{name}") || views.iter().any(|v| current == format!("v:{}", v["name"].as_str().unwrap_or_default()));
+        let pending = c["pending"].as_bool().unwrap_or(false);
+        match entries.iter_mut().find(|e| e["group"] == g.as_str()) {
+            Some(e) => {
+                e["open"] = json!(e["open"].as_bool().unwrap_or(false) || here);
+                e["pending"] = json!(e["pending"].as_bool().unwrap_or(false) || pending);
+                e["items"].as_array_mut().expect("a group has items").push(c);
+            }
+            None => entries.push(json!({ "group": g, "open": here, "pending": pending, "items": [c] })),
+        }
+    }
+    entries
+}
+
 /// The site's text files as the preview sees them (drafts over live ones): what the site is made of.
 fn site_texts(conn: &Connection) -> Vec<(String, String)> {
     let Ok(mut stmt) = conn.prepare("SELECT path, coalesce(draft, published) FROM site_files WHERE draft_deleted = 0") else { return vec![] };
@@ -79,7 +114,7 @@ pub fn site_uses(texts: &[(String, String)], name: &str) -> bool {
 pub fn nav(conn: &Connection, user: &AdminUser, current: &str, has_media: bool) -> Value {
     let mark = user.prefs["mark"].as_str().filter(|m| MARKS.iter().any(|(k, _)| k == m)).unwrap_or("yellow");
     let texts = site_texts(conn);
-    json!({
+    let mut out = json!({
         "current": current,
         "collapsed": user.prefs["nav"] == "collapsed",
         "mark": mark,
@@ -98,7 +133,10 @@ pub fn nav(conn: &Connection, user: &AdminUser, current: &str, has_media: bool) 
             c["unused"] = json!(!site_uses(&texts, &name));
             c
         }).collect::<Vec<_>>(),
-    })
+    });
+    let entries = nav_entries(out["collections"].as_array().map(Vec::as_slice).unwrap_or_default(), current);
+    out["entries"] = json!(entries);
+    out
 }
 
 #[derive(Deserialize)]

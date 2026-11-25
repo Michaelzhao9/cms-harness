@@ -66,6 +66,12 @@ input[type='email'], input[type='password'], input[type='text'], input:not([type
 .nav .views { display: flex; flex-direction: column; margin: 2px 0 6px 19px; padding-left: 12px; border-left: 1px solid rgba(0, 0, 0, .12); }
 .nav .sub { display: flex; align-items: center; min-height: 32px; padding: 0 10px; border-radius: 8px; color: var(--ink-2); font-size: 13px; }
 .nav .end { margin-top: auto; }
+/* A site section folds: its summary looks like any item, the caret turns when open. */
+.nav .group > summary { list-style: none; cursor: pointer; }
+.nav .group > summary::-webkit-details-marker { display: none; }
+.nav .group > summary > .icon:last-child { flex-shrink: 0; color: var(--muted); transition: transform .15s ease; transform: rotate(-90deg); }
+.nav .group[open] > summary > .icon:last-child { transform: none; }
+.nav .group .sub .num { margin-left: auto; }
 
 /* Collapsed: an icon rail. Labels stay for screen readers. */
 .collapsed .nav { flex-basis: 56px; align-items: center; gap: 4px; padding: 14px 0 12px; }

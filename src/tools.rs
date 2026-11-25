@@ -247,6 +247,10 @@ struct CreateCollection {
     url: Option<String>,
     /// In the site's other languages: "fallback" (default) or "hide" records without a translation.
     untranslated: Option<crate::schema::Untranslated>,
+    /// The admin nav's group, named after the site's section (租赁业务 holds 设备租赁 and 琴房租赁).
+    group: Option<String>,
+    /// Order in the admin nav, lowest first: follow the site's own navigation.
+    position: Option<i64>,
     fields: Vec<FieldDef>,
     note: String,
 }
@@ -288,6 +292,10 @@ struct UpdateCollection {
     url: Option<String>,
     /// In the site's other languages: "fallback" shows untranslated records in the default language, "hide" leaves them out.
     untranslated: Option<crate::schema::Untranslated>,
+    /// The admin nav's group; "" takes it out of its group.
+    group: Option<String>,
+    /// Order in the admin nav, lowest first.
+    position: Option<i64>,
     add_fields: Option<Vec<FieldDef>>,
     change_fields: Option<Vec<FieldChange>>,
     remove_fields: Option<Vec<String>>,
@@ -379,6 +387,8 @@ fn create_collection(conn: &Connection, actor: &Actor, a: CreateCollection) -> R
         fields: a.fields,
         url: a.url.filter(|u| !u.trim().is_empty()),
         untranslated: a.untranslated,
+        group: a.group.map(|g| g.trim().to_string()).filter(|g| !g.is_empty()),
+        position: a.position,
     };
     let taken = conn
         .query_row("SELECT 1 FROM collections WHERE name = ?1", [&def.name], |_| Ok(()))
@@ -421,6 +431,12 @@ fn update_collection(conn: &Connection, actor: &Actor, a: UpdateCollection) -> R
     }
     if let Some(u) = a.untranslated {
         def.untranslated = Some(u);
+    }
+    if let Some(g) = a.group {
+        def.group = Some(g.trim().to_string()).filter(|g| !g.is_empty());
+    }
+    if let Some(p) = a.position {
+        def.position = Some(p);
     }
     for f in a.add_fields.unwrap_or_default() {
         if def.field(&f.name).is_some() {
