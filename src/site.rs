@@ -264,7 +264,7 @@ pub fn public_paths(conn: &Connection) -> Result<Vec<(String, Option<String>)>, 
 }
 
 /// Template names a source pulls in with `extends`, `include`, `import` or `from`.
-fn referenced(src: &str) -> Vec<String> {
+pub fn referenced(src: &str) -> Vec<String> {
     let mut out = vec![];
     for word in ["extends", "include", "import", "from"] {
         let mut rest = src;

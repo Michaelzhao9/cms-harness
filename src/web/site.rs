@@ -319,7 +319,7 @@ impl Visit<'_> {
             inject.push_str(&format!("<script type=\"importmap\">{map}</script>"));
         }
         // Hand edits from the preview's canvas: one stylesheet, after the page's own head so it wins.
-        if let Some(css) = crate::canvas::css(&crate::changes::setting(self.conn, crate::canvas::KEY, self.mode == Mode::Preview)) {
+        if let Some(css) = crate::canvas::css(&crate::changes::setting(self.conn, crate::canvas::KEY, self.mode == Mode::Preview), self.path) {
             let at = crate::canvas::head_end(&html);
             html.insert_str(at, &format!("<style data-hc-canvas>{css}</style>"));
         }

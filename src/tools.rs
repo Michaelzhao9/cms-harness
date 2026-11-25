@@ -62,7 +62,7 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<UploadMedia>("upload_media", Scope::Write, "上传图片或 PDF（base64，最大 5 MB）：返回 /uploads/ 路径，可填进 media 字段。"),
             spec::<NoArgs>("list_site_files", Scope::Read, "列出网站的源文件：状态、字节数和行数（有草稿时按草稿）。不含内容，读内容用 get_site_file。"),
             spec::<PathArgs>("get_site_file", Scope::Read, "按路径读一个网站文件：内容（有草稿时返回草稿）和状态。"),
-            spec::<WriteSiteFile>("write_site_file", Scope::Structure, "新建或替换一个网站文件的草稿，发布后上线。最多 2000 个文件。路径：相对路径，字母（区分大小写）、数字和 . _ / -，不能有 ..，最长 200 个字符，不能在 admin/ api/ uploads/ _hc/ 下，也不能叫 mcp。文本文件（html css js mjs jsx ts tsx json svg txt md xml webmanifest map）：content 是文字，最大 1 MB。二进制文件（png jpg jpeg gif webp avif ico woff woff2 ttf otf mp4 webm）：content 是标准 base64，解码后最大 5 MB。`.html` 是 minijinja 模板，按路径访问（/about 对应 about.html 或 about/index.html），可以 extends 或 include 其他文件，用 collection(名字, filter?, sort?, limit?, offset?) 和 record(集合, 编号) 读线上内容，还有 site、request、member。`.jsx/.ts/.tsx` 会转换后提供（去掉 TypeScript，JSX 走 react/jsx-runtime）。写入时检查语法。"),
+            spec::<WriteSiteFile>("write_site_file", Scope::Structure, "新建或替换一个网站文件的草稿，发布后上线。最多 2000 个文件。路径：相对路径，字母（区分大小写）、数字和 . _ / -，不能有 ..，最长 200 个字符，不能在 admin/ api/ uploads/ _hc/ 下，也不能叫 mcp。文本文件（html css js mjs jsx ts tsx json svg txt md xml webmanifest map）：content 是文字，最大 1 MB。二进制文件（png jpg jpeg gif webp avif ico woff woff2 ttf otf mp4 webm）：content 是标准 base64，解码后最大 5 MB。`.html` 是 minijinja 模板，按路径访问（/about 对应 about.html 或 about/index.html），可以 extends 或 include 其他文件，用 collection(名字, filter?, sort?, limit?, offset?) 和 record(集合, 编号) 读线上内容，还有 site、request、member。`.jsx/.ts/.tsx` 会转换后提供（去掉 TypeScript，JSX 走 react/jsx-runtime）。写入时检查语法。用户在画板上手动调整过的元素（get_site_file 返回的 hand_edits）要保留：改写会让它们对不上时，工具不写入，先问用户。"),
             spec::<DeleteSiteFile>("delete_site_file", Scope::Structure, "删除一个网站文件：从没发布过的立刻消失，已上线的在发布删除后才消失。"),
             spec::<UploadSiteBundle>("upload_site_bundle", Scope::Structure, "一次上传一个网站文件的 zip（比如 Vite、Next 导出的静态网站，图片和字体一起）作为草稿：每个文件都按 write_site_file 的规则检查，解压后最大 50 MB。有一个文件不合格，整个包都不收，并列出所有问题。replace: true 时，线上有而包里没有的文件会同时标记为待删除；否则保持不变。只有一层顶层文件夹且里面有 index.html 时会去掉这层；目录和 macOS 元数据会跳过。大包也可以把 zip 原样 POST 到 /api/v1/site/bundle?note=...&replace=1。"),
         ]
@@ -1016,6 +1016,10 @@ struct WriteSiteFile {
     path: String,
     content: String,
     note: String,
+    /// true only after the user agreed that hand edits from the canvas on elements this write removes or
+    /// changes may be dropped.
+    #[serde(default)]
+    replace_hand_edits: bool,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1072,7 +1076,13 @@ fn list_site_files(conn: &Connection) -> Result<Value, String> {
 fn get_site_file(conn: &Connection, a: PathArgs) -> Result<Value, String> {
     crate::site::check_path(&a.path)?;
     let (status, content) = site_file(conn, &a.path)?.ok_or_else(|| no_file(&a.path))?;
-    Ok(json!({ "path": a.path, "status": status, "content": content, "binary": crate::site::is_binary(&a.path) }))
+    let mut out = json!({ "path": a.path, "status": status, "content": content, "binary": crate::site::is_binary(&a.path) });
+    let edits = crate::canvas::edits_of(&changes::setting(conn, crate::canvas::KEY, true), &a.path);
+    if !edits.is_empty() {
+        // What the user changed by hand on the canvas, element by element (`<path>#<n>`: the n-th start tag).
+        out["hand_edits"] = json!(edits);
+    }
+    Ok(out)
 }
 
 fn file_status(conn: &Connection, path: &str) -> Result<&'static str, String> {
@@ -1085,7 +1095,20 @@ fn write_site_file(conn: &Connection, actor: &Actor, a: WriteSiteFile) -> Result
     let content = if crate::site::is_binary(&a.path) { a.content.split_whitespace().collect() } else { a.content };
     crate::site::check_file(&a.path, &content)?;
     changes::check_file_count(conn, std::slice::from_ref(&a.path))?;
+    // Hand edits from the canvas follow their elements; the AI may not drop them without the user's say.
+    let canvas = changes::setting(conn, crate::canvas::KEY, true);
+    let (moved, lost) = crate::canvas::remap(&canvas, &a.path, &content);
+    if !lost.is_empty() && !a.replace_hand_edits {
+        let what: Vec<String> = lost.iter().map(|k| format!("{k}（{}）", canvas["els"][k]["fp"].as_str().unwrap_or_default())).collect();
+        return Err(format!(
+            "没有写入：用户在画板上手动调整过这些元素，这样改写后它们就对不上了：{}。先告诉用户这些手动调整会丢掉，用户同意后带上 replace_hand_edits: true 再写；或者保留这些元素（标签和开头的文字不变）。",
+            what.join("、")
+        ));
+    }
     changes::stage_file(conn, actor, &a.path, &content, note)?;
+    if moved != canvas {
+        changes::save_draft(conn, actor, &Target::Setting(crate::canvas::KEY.into()), &moved, note)?;
+    }
     Ok(json!({ "path": a.path, "status": file_status(conn, &a.path)? }))
 }
 

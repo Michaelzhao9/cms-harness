@@ -953,3 +953,14 @@ record:{} 还被 {} 链接着，删掉会留下死链：请先改掉那个链接
 这里放不了新元素：请点在一个区块里面。	Nothing can be added here: click inside a block.
 找不到这个区块的结尾：这里放不了新元素。	This block has no end tag: nothing can be added here.
 不能添加“{}”。	“{}” cannot be added.
+手动调整的提示	Hand edit warnings
+恢复成电脑版	Reset to desktop
+只能恢复平板（tablet）或手机（mobile）宽度。	Only the tablet or phone width can be reset.
+“{}”不是这个网站的页面地址。	“{}” is not an address on this site.
+图片	Image
+换图片	Replace image
+这里只能用图片，不能用 PDF。	Only an image fits here, not a PDF.
+没有收到图片：请先选一张。	No image received: choose one first.
+只能添加（add）或替换（replace）图片。	The mode must be add or replace.
+只有图片能换图片。	Only an image can have its picture replaced.
+“{}”不是上传的文件。	“{}” is not an uploaded file.

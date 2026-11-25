@@ -238,14 +238,30 @@ pub fn check(prop: &str, value: &str) -> Result<String, String> {
     ok.ok_or_else(|| format!("“{prop}”不能设成“{value}”。"))
 }
 
-/// Sets (`Some`) or clears (`None`) one property of the element at `key` for `tier`, with `fp` as its
-/// fingerprint. Returns the new document.
-pub fn set_style(doc: &Value, key: &str, fp: &str, tier: &str, prop: &str, value: Option<&str>) -> Result<Value, String> {
+/// Checks a page address an edit may be limited to.
+fn check_page(page: &str) -> Result<(), String> {
+    (page.starts_with('/') && page.len() <= 500 && !page.chars().any(char::is_control)).then_some(()).ok_or_else(|| format!("“{page}”不是这个网站的页面地址。"))
+}
+
+/// The styles of one element by width: for every page (`page` None) or for one page only.
+fn styles<'a>(el: &'a Value, page: Option<&str>) -> &'a Value {
+    match page {
+        Some(p) => &el["pages"][p],
+        None => &el["style"],
+    }
+}
+
+/// Sets (`Some`) or clears (`None`) one property of the element at `key` for `tier`, on every page using it
+/// or (`page`) on that page only, with `fp` as its fingerprint. Returns the new document.
+pub fn set_style(doc: &Value, key: &str, fp: &str, page: Option<&str>, tier: &str, prop: &str, value: Option<&str>) -> Result<Value, String> {
     if !TIERS.iter().any(|(t, _)| *t == tier) {
         return Err(format!("宽度只能是 all、desktop、tablet 或 mobile，不是“{tier}”。"));
     }
     if !PROPS.contains(&prop) {
         return Err(format!("不能在画板上改“{prop}”。"));
+    }
+    if let Some(p) = page {
+        check_page(p)?;
     }
     let value = value.map(|v| check(prop, v)).transpose()?;
     let mut doc = if doc.is_object() { doc.clone() } else { json!({}) };
@@ -254,54 +270,87 @@ pub fn set_style(doc: &Value, key: &str, fp: &str, tier: &str, prop: &str, value
     }
     let Some(els) = doc["els"].as_object_mut() else { unreachable!() };
     let el = els.entry(key.to_string()).or_insert_with(|| json!({}));
-    if !el["style"].is_object() {
-        el["style"] = json!({});
+    if !el.is_object() {
+        *el = json!({});
     }
     el["fp"] = json!(fp);
-    let Some(style) = el["style"].as_object_mut() else { unreachable!() };
-    let props = style.entry(tier.to_string()).or_insert_with(|| json!({}));
-    if !props.is_object() {
-        *props = json!({});
+    let ptr = match page {
+        Some(p) => format!("/pages/{}/{tier}", p.replace('~', "~0").replace('/', "~1")),
+        None => format!("/style/{tier}"),
+    };
+    // Make the path, then set or clear the property.
+    let mut at = &mut *el;
+    for part in ptr.trim_start_matches('/').split('/') {
+        let part = part.replace("~1", "/").replace("~0", "~");
+        if !at.is_object() {
+            *at = json!({});
+        }
+        at = at.as_object_mut().map(|m| m.entry(part).or_insert_with(|| json!({}))).unwrap_or_else(|| unreachable!());
+    }
+    if !at.is_object() {
+        *at = json!({});
     }
     match value {
-        Some(v) => props[prop] = json!(v),
+        Some(v) => at[prop] = json!(v),
         None => {
-            props.as_object_mut().map(|m| m.remove(prop));
+            at.as_object_mut().map(|m| m.remove(prop));
         }
     }
-    style.retain(|_, m| m.as_object().is_some_and(|m| !m.is_empty()));
-    if style.is_empty() {
+    // Drop what became empty.
+    let prune = |m: &mut Value| {
+        if let Some(o) = m.as_object_mut() {
+            o.retain(|_, t| t.as_object().is_some_and(|t| !t.is_empty()));
+        }
+    };
+    prune(&mut el["style"]);
+    if let Some(pages) = el["pages"].as_object_mut() {
+        pages.values_mut().for_each(prune);
+        pages.retain(|_, t| t.as_object().is_some_and(|t| !t.is_empty()));
+    }
+    let empty = |v: &Value| v.as_object().is_none_or(|o| o.is_empty());
+    if empty(&el["pages"]) {
+        el.as_object_mut().map(|o| o.remove("pages"));
+    }
+    if empty(&el["style"]) && el.get("pages").is_none() {
         els.remove(key);
+    } else if el.get("style").is_none() {
+        el["style"] = json!({});
     }
     Ok(doc)
 }
 
-/// The stylesheet of every hand edit, or `None` when there are none.
-pub fn css(doc: &Value) -> Option<String> {
+/// The rule of one element's properties, or `None` when none of them is valid.
+fn rule(key: &str, props: &Map<String, Value>) -> Option<String> {
+    let decls: Vec<String> = props.iter().filter_map(|(p, v)| v.as_str().and_then(|v| check(p, v).ok()).map(|v| format!("{p}:{v} !important"))).collect();
+    if decls.is_empty() {
+        return None;
+    }
+    let mut extra = String::new();
+    if props.contains_key("border-width") {
+        extra.push_str(";border-style:solid !important");
+    }
+    if props.contains_key("z-index") {
+        extra.push_str(";position:relative");
+    }
+    if props.contains_key("width") || props.contains_key("height") {
+        extra.push_str(";box-sizing:border-box !important;max-width:none !important");
+    }
+    Some(format!("[data-hc=\"{}\"]{{{}{extra}}}", id(key), decls.join(";")))
+}
+
+/// The stylesheet of every hand edit that applies on the page at `page` (its address), or `None` when there
+/// are none. Edits for that page only come after the ones for every page, so they win.
+pub fn css(doc: &Value, page: &str) -> Option<String> {
     let els: &Map<String, Value> = doc["els"].as_object()?;
     let mut out = String::new();
     for (tier, media) in TIERS {
         let mut rules = String::new();
-        for (key, el) in els {
-            let Some(props) = el["style"][tier].as_object().filter(|m| !m.is_empty()) else { continue };
-            let decls: Vec<String> = props
-                .iter()
-                .filter_map(|(p, v)| v.as_str().and_then(|v| check(p, v).ok()).map(|v| format!("{p}:{v} !important")))
-                .collect();
-            if decls.is_empty() {
-                continue;
+        for scope in [None, Some(page)] {
+            for (key, el) in els {
+                if let Some(r) = styles(el, scope)[tier].as_object().and_then(|props| rule(key, props)) {
+                    rules.push_str(&r);
+                }
             }
-            let mut extra = String::new();
-            if props.contains_key("border-width") {
-                extra.push_str(";border-style:solid !important");
-            }
-            if props.contains_key("z-index") {
-                extra.push_str(";position:relative");
-            }
-            if props.contains_key("width") || props.contains_key("height") {
-                extra.push_str(";box-sizing:border-box !important;max-width:none !important");
-            }
-            rules.push_str(&format!("[data-hc=\"{}\"]{{{}{extra}}}", id(key), decls.join(";")));
         }
         if rules.is_empty() {
             continue;
@@ -441,13 +490,72 @@ pub fn new_element(kind: &str, en: bool) -> Option<&'static str> {
     })
 }
 
+/// An uploaded file's address, the only image source the canvas writes into a template.
+fn upload_url(url: &str) -> Result<&str, String> {
+    let ok = url.starts_with("/uploads/") && !url.contains("..") && url.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b));
+    ok.then_some(url).ok_or_else(|| format!("“{url}”不是上传的文件。"))
+}
+
+/// The markup of an image added with the pen.
+pub fn image_element(url: &str) -> Result<String, String> {
+    Ok(format!("<img src=\"{}\" alt=\"\" style=\"width:240px;height:auto\">", upload_url(url)?))
+}
+
+/// Points the `<img>` at position `n` to the uploaded file `url` (dropping its `srcset`, which would win).
+pub fn replace_image(src: &str, n: usize, url: &str) -> Result<String, String> {
+    let url = upload_url(url)?;
+    let all = tags(src);
+    let tag = all.get(n.wrapping_sub(1)).ok_or("这个元素已经不在文件里了：请刷新预览。")?;
+    if tag.name != "img" {
+        return Err("只有图片能换图片。".into());
+    }
+    // The tag's attributes, rewritten without src and srcset.
+    let attrs = &src[tag.name_end..tag.open_end];
+    let mut kept = String::new();
+    let mut i = 0;
+    let b = attrs.as_bytes();
+    while i < b.len() {
+        let rest = &attrs[i..];
+        let lower = rest.to_ascii_lowercase();
+        let name_len = rest.find(|c: char| c.is_whitespace() || c == '=' || c == '>' || c == '/').unwrap_or(rest.len());
+        let starts_attr = i > 0 && b[i - 1].is_ascii_whitespace() && name_len > 0;
+        if starts_attr && (lower[..name_len] == *"src" || lower[..name_len] == *"srcset") {
+            // Skip the attribute and its value, with the space before it.
+            while kept.ends_with(char::is_whitespace) {
+                kept.pop();
+            }
+            let mut j = i + name_len;
+            let after = attrs[j..].trim_start();
+            if let Some(v) = after.strip_prefix('=') {
+                let v = v.trim_start();
+                j = attrs.len() - v.len();
+                let end = match v.chars().next() {
+                    Some(q @ ('"' | '\'')) => v[1..].find(q).map_or(v.len(), |e| e + 2),
+                    _ => v.find(|c: char| c.is_whitespace() || c == '>').unwrap_or(v.len()),
+                };
+                j += end;
+            }
+            i = j;
+            continue;
+        }
+        let c = rest.chars().next().unwrap_or(' ');
+        kept.push(c);
+        i += c.len_utf8();
+    }
+    Ok(format!("{} src=\"{url}\"{kept}{}", &src[..tag.name_end], &src[tag.open_end..]))
+}
+
 /// Elements that can hold what the pen adds.
 const CONTAINERS: [&str; 13] = ["body", "main", "section", "article", "header", "footer", "aside", "nav", "div", "li", "form", "figure", "td"];
 
 /// Adds a `kind` element as the last child of the element at position `n` (or of its nearest container that
 /// is), with English placeholder text when `en`. Returns the new source and the new element's position.
 pub fn add(src: &str, n: usize, kind: &str, en: bool) -> Result<(String, usize), String> {
-    let markup = new_element(kind, en).ok_or_else(|| format!("不能添加“{kind}”。"))?;
+    add_markup(src, n, new_element(kind, en).ok_or_else(|| format!("不能添加“{kind}”。"))?)
+}
+
+/// Adds `markup` (one element) where `add` would.
+pub fn add_markup(src: &str, n: usize, markup: &str) -> Result<(String, usize), String> {
     let all = tags(src);
     let tag = all.get(n.wrapping_sub(1)).ok_or("这个元素已经不在文件里了：请刷新预览。")?;
     // The clicked element if it can hold children, else the innermost container around it in this file; with
@@ -468,9 +576,100 @@ pub fn add(src: &str, n: usize, kind: &str, en: bool) -> Result<(String, usize),
     Ok((format!("{}{markup}{}", &src[..at], &src[at..]), new_n))
 }
 
+/// Follows the edits of the file at `path` into its new source `new`: an edit stays where its element still
+/// is, moves to the one element with its fingerprint, or is lost. Returns the document with moved edits
+/// re-keyed (lost ones dropped) and the keys of the lost ones.
+pub fn remap(doc: &Value, path: &str, new: &str) -> (Value, Vec<String>) {
+    let mut doc = doc.clone();
+    let Some(els) = doc["els"].as_object() else { return (doc, vec![]) };
+    let found = resolve(&doc, path, new, &tags(new));
+    let mut out = Map::new();
+    let mut lost = vec![];
+    for (key, el) in els {
+        match parse_src(key) {
+            Some((p, _)) if p == path => match found.iter().find(|(_, k)| *k == key) {
+                Some((n, _)) => {
+                    out.insert(format!("{path}#{n}"), el.clone());
+                }
+                None => lost.push(key.clone()),
+            },
+            _ => {
+                out.insert(key.clone(), el.clone());
+            }
+        }
+    }
+    doc["els"] = Value::Object(out);
+    (doc, lost)
+}
+
+/// The hand edits of one file, for the AI to see: element, what it is (tag and its first text), styles by width.
+pub fn edits_of(doc: &Value, path: &str) -> Vec<Value> {
+    doc["els"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(k, _)| parse_src(k).is_some_and(|(p, _)| p == path))
+        .map(|(k, el)| json!({ "element": k, "is": el["fp"], "style": el["style"] }))
+        .collect()
+}
+
 /// The value one edit has now, for undo: `None` when it is not set.
-pub fn current(doc: &Value, key: &str, tier: &str, prop: &str) -> Option<String> {
-    doc["els"][key]["style"][tier][prop].as_str().map(String::from)
+pub fn current(doc: &Value, key: &str, page: Option<&str>, tier: &str, prop: &str) -> Option<String> {
+    styles(&doc["els"][key], page)[tier][prop].as_str().map(String::from)
+}
+
+/// The widths (other than `all`) at which the element at `key` has edits of its own, on every page or on `page`.
+pub fn tiers_of(doc: &Value, key: &str, page: &str) -> Vec<String> {
+    let el = &doc["els"][key];
+    TIERS
+        .iter()
+        .filter(|(t, _)| *t != "all")
+        .filter(|(t, _)| [None, Some(page)].iter().any(|s| styles(el, *s)[*t].as_object().is_some_and(|m| !m.is_empty())))
+        .map(|(t, _)| t.to_string())
+        .collect()
+}
+
+/// Removes every edit the element at `key` has for `tier` (on every page and on each one), so it looks the
+/// way the wider widths make it.
+pub fn reset_tier(doc: &Value, key: &str, tier: &str) -> Value {
+    let mut doc = doc.clone();
+    let el = &mut doc["els"][key];
+    if let Some(m) = el["style"].as_object_mut() {
+        m.remove(tier);
+    }
+    if let Some(pages) = el["pages"].as_object_mut() {
+        for p in pages.values_mut() {
+            p.as_object_mut().map(|m| m.remove(tier));
+        }
+        pages.retain(|_, t| t.as_object().is_some_and(|t| !t.is_empty()));
+    }
+    let empty = |v: &Value| v.as_object().is_none_or(|o| o.is_empty());
+    if empty(&el["style"]) && empty(&el["pages"]) {
+        doc["els"].as_object_mut().map(|m| m.remove(key));
+    }
+    doc
+}
+
+/// How many pages show the file at `path`: the page files that are it or pull it in (through `extends`,
+/// `include` or `import`), counting layouts and fragments only through the pages that use them. Record
+/// page templates (`_item.html`) count once per collection using them.
+pub fn pages_using(files: &[(String, String)], path: &str) -> usize {
+    let refs: HashMap<&str, Vec<String>> = files.iter().map(|(p, s)| (p.as_str(), crate::site::referenced(s))).collect();
+    let used: std::collections::HashSet<&str> = refs.values().flatten().map(String::as_str).collect();
+    let reaches = |from: &str| {
+        let mut seen = std::collections::HashSet::new();
+        let mut todo = vec![from.to_string()];
+        while let Some(f) = todo.pop() {
+            if f == path {
+                return true;
+            }
+            if seen.insert(f.clone()) {
+                todo.extend(refs.get(f.as_str()).into_iter().flatten().cloned());
+            }
+        }
+        false
+    };
+    files.iter().filter(|(p, _)| p.ends_with(".html") && (!used.contains(p.as_str()) || p.ends_with("_item.html")) && reaches(p)).count()
 }
 
 #[cfg(test)]
@@ -493,21 +692,21 @@ mod tests {
         assert!(!out.contains("<body data-hc"));
         assert_eq!(annotate("index.html", PAGE, &json!({}), false), PAGE);
 
-        let doc = set_style(&json!({}), "index.html#6", "h1|春季 新品", "all", "color", Some("#FFF")).unwrap();
+        let doc = set_style(&json!({}), "index.html#6", "h1|春季 新品", None, "all", "color", Some("#FFF")).unwrap();
         let live = annotate("index.html", PAGE, &doc, false);
         assert!(live.contains(&format!("<h1 data-hc=\"{}\" class", id("index.html#6"))));
-        assert_eq!(css(&doc).unwrap(), format!("[data-hc=\"{}\"]{{color:#fff !important}}", id("index.html#6")));
+        assert_eq!(css(&doc, "/").unwrap(), format!("[data-hc=\"{}\"]{{color:#fff !important}}", id("index.html#6")));
     }
 
     #[test]
     fn an_edit_follows_its_element_or_applies_to_nothing() {
-        let doc = set_style(&json!({}), "index.html#6", "h1|春季 新品", "mobile", "font-size", Some("20px")).unwrap();
+        let doc = set_style(&json!({}), "index.html#6", "h1|春季 新品", None, "mobile", "font-size", Some("20px")).unwrap();
         let moved = PAGE.replace("<body>", "<body><nav>x</nav>");
         let src = tags(&moved);
         assert_eq!(resolve(&doc, "index.html", &moved, &src).get(&7).map(String::as_str), Some("index.html#6"));
         let gone = PAGE.replace("春季 新品", "冬季");
         assert!(resolve(&doc, "index.html", &gone, &tags(&gone)).is_empty());
-        assert!(css(&doc).unwrap().starts_with("@media (max-width: 599.98px){"));
+        assert!(css(&doc, "/").unwrap().starts_with("@media (max-width: 599.98px){"));
     }
 
     #[test]
@@ -517,10 +716,10 @@ mod tests {
         assert_eq!(check("font-size", "54px").unwrap(), "54px");
         assert!(check("font-size", "5000px").is_err());
         assert!(check("box-shadow", "0 0 0 red").is_err());
-        let doc = set_style(&json!({}), "a.html#1", "p|", "all", "color", Some("#123")).unwrap();
-        let cleared = set_style(&doc, "a.html#1", "p|", "all", "color", None).unwrap();
+        let doc = set_style(&json!({}), "a.html#1", "p|", None, "all", "color", Some("#123")).unwrap();
+        let cleared = set_style(&doc, "a.html#1", "p|", None, "all", "color", None).unwrap();
         assert_eq!(cleared, json!({ "els": {} }));
-        assert!(set_style(&doc, "a.html#1", "p|", "all", "position", None).is_err());
+        assert!(set_style(&doc, "a.html#1", "p|", None, "all", "position", None).is_err());
     }
 
     #[test]
@@ -535,9 +734,9 @@ mod tests {
         let (no_img, ..) = restructure(src, 4, false).unwrap();
         assert!(no_img.contains("{% endif %}<div>b</div>"));
 
-        let doc = set_style(&json!({}), "a.html#3", "div|a", "all", "color", Some("#000")).unwrap();
-        let doc = set_style(&doc, "a.html#7", "p|c", "all", "color", Some("#111")).unwrap();
-        let doc = set_style(&doc, "b.html#7", "p|c", "all", "color", Some("#222")).unwrap();
+        let doc = set_style(&json!({}), "a.html#3", "div|a", None, "all", "color", Some("#000")).unwrap();
+        let doc = set_style(&doc, "a.html#7", "p|c", None, "all", "color", Some("#111")).unwrap();
+        let doc = set_style(&doc, "b.html#7", "p|c", None, "all", "color", Some("#222")).unwrap();
         let after = shift(&doc, "a.html", 2, -4);
         let keys: Vec<&String> = after["els"].as_object().unwrap().keys().collect();
         assert_eq!(keys, ["a.html#3", "b.html#7"].map(String::from).iter().collect::<Vec<_>>());
@@ -563,13 +762,70 @@ mod tests {
     }
 
     #[test]
+    fn edits_can_be_for_one_page_or_one_width() {
+        let doc = set_style(&json!({}), "l.html#3", "h1|甲", None, "all", "color", Some("#111")).unwrap();
+        let doc = set_style(&doc, "l.html#3", "h1|甲", Some("/about"), "all", "color", Some("#222")).unwrap();
+        let doc = set_style(&doc, "l.html#3", "h1|甲", Some("/about"), "mobile", "display", Some("none")).unwrap();
+        let about = css(&doc, "/about").unwrap();
+        assert!(about.find("#111").unwrap() < about.find("#222").unwrap(), "{about}");
+        assert!(!css(&doc, "/").unwrap().contains("#222"));
+        assert_eq!(current(&doc, "l.html#3", Some("/about"), "all", "color").as_deref(), Some("#222"));
+        assert_eq!(tiers_of(&doc, "l.html#3", "/about"), ["mobile"]);
+        assert!(tiers_of(&doc, "l.html#3", "/").is_empty());
+        let reset = reset_tier(&doc, "l.html#3", "mobile");
+        assert!(tiers_of(&reset, "l.html#3", "/about").is_empty());
+        let cleared = set_style(&reset, "l.html#3", "h1|甲", Some("/about"), "all", "color", None).unwrap();
+        assert!(cleared["els"]["l.html#3"].get("pages").is_none(), "{cleared}");
+        assert!(set_style(&doc, "l.html#3", "h1|甲", Some("about"), "all", "color", Some("#000")).is_err());
+
+        let files = [
+            ("layout.html".to_string(), "<body>{% block m %}{% endblock %}</body>".to_string()),
+            ("a.html".to_string(), "{% extends 'layout.html' %}".to_string()),
+            ("b.html".to_string(), "{% extends \"layout.html\" %}{% include 'part.html' %}".to_string()),
+            ("part.html".to_string(), "<p>x</p>".to_string()),
+        ];
+        assert_eq!(pages_using(&files, "layout.html"), 2);
+        assert_eq!(pages_using(&files, "part.html"), 1);
+        assert_eq!(pages_using(&files, "a.html"), 1);
+    }
+
+    #[test]
+    fn a_rewrite_keeps_moves_or_loses_edits() {
+        let src = "<body><h1>甲</h1><p>乙</p></body>";
+        let doc = set_style(&json!({}), "a.html#2", "h1|甲", None, "all", "color", Some("#111")).unwrap();
+        let doc = set_style(&doc, "a.html#3", "p|乙", None, "all", "color", Some("#222")).unwrap();
+        let (moved, lost) = remap(&doc, "a.html", &src.replace("<body>", "<body><nav>x</nav>"));
+        assert!(lost.is_empty());
+        assert_eq!(moved["els"]["a.html#3"]["fp"], "h1|甲");
+        assert_eq!(moved["els"]["a.html#4"]["fp"], "p|乙");
+        let (kept, lost) = remap(&doc, "a.html", &src.replace("乙", "丙"));
+        assert_eq!(lost, ["a.html#3"]);
+        assert!(kept["els"].get("a.html#3").is_none() && kept["els"].get("a.html#2").is_some());
+        assert_eq!(edits_of(&doc, "a.html").len(), 2);
+    }
+
+    #[test]
+    fn images_are_uploads_only() {
+        let src = "<div><img class=\"a\" srcset='x 1x, y 2x' src=\"{{ item.cover }}\" alt=\"封面\"><p>x</p></div>";
+        let out = replace_image(src, 2, "/uploads/2026/a-b_c.webp").unwrap();
+        assert_eq!(out, "<div><img src=\"/uploads/2026/a-b_c.webp\" class=\"a\" alt=\"封面\"><p>x</p></div>");
+        assert!(replace_image(src, 3, "/uploads/a.png").is_err());
+        assert!(replace_image(src, 2, "https://evil.example/a.png").is_err());
+        assert!(replace_image(src, 2, "/uploads/a\" onerror=\"x").is_err());
+        assert!(image_element("/uploads/../a.png").is_err());
+        let (added, n) = add_markup(src, 1, &image_element("/uploads/a.png").unwrap()).unwrap();
+        assert!(added.ends_with("<p>x</p><img src=\"/uploads/a.png\" alt=\"\" style=\"width:240px;height:auto\"></div>"));
+        assert_eq!(n, 4);
+    }
+
+    #[test]
     fn positions_and_sizes_are_checked() {
         assert_eq!(check("translate", "12.345px -8px").unwrap(), "12.35px -8px");
         assert!(check("translate", "12px").is_err());
         assert!(check("translate", "1px 9999px").is_err());
         assert!(check("display", "block").is_err());
-        let doc = set_style(&json!({}), "a.html#1", "p|", "desktop", "z-index", Some("2")).unwrap();
-        assert!(css(&doc).unwrap().contains("z-index:2 !important;position:relative}"));
+        let doc = set_style(&json!({}), "a.html#1", "p|", None, "desktop", "z-index", Some("2")).unwrap();
+        assert!(css(&doc, "/").unwrap().contains("z-index:2 !important;position:relative}"));
     }
 
     #[test]

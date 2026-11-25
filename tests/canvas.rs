@@ -1,8 +1,50 @@
 //! The preview canvas: hand edits are drafts, reach the preview at once and the live site on publish.
 mod common;
-use axum::http::StatusCode;
+use axum::http::{header, Request, StatusCode};
 use common::*;
+use http_body_util::BodyExt;
 use serde_json::{json, Value};
+use tower::ServiceExt;
+
+/// A multipart POST with the admin session: fields, then one image file `file`.
+async fn post_image(app: &cms_harness::Shared, s: &(String, String), fields: &[(&str, &str)], file: &[u8]) -> (StatusCode, String) {
+    let b = "XBOUNDARYX";
+    let mut body = vec![];
+    for (name, value) in fields.iter().chain([("csrf", s.1.as_str())].iter()) {
+        body.extend(format!("--{b}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes());
+    }
+    body.extend(format!("--{b}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.png\"\r\nContent-Type: image/png\r\n\r\n").as_bytes());
+    body.extend(file);
+    body.extend(format!("\r\n--{b}--\r\n").as_bytes());
+    let req = Request::post("/admin/canvas/image").header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={b}")).header(header::COOKIE, s.0.as_str());
+    let resp = cms_harness::api::router(app.clone()).oneshot(req.body(axum::body::Body::from(body)).unwrap()).await.unwrap();
+    let status = resp.status();
+    (status, String::from_utf8_lossy(&resp.into_body().collect().await.unwrap().to_bytes()).into_owned())
+}
+
+fn png() -> Vec<u8> {
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::RgbImage::new(4, 3).write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
+#[tokio::test]
+async fn images_are_added_and_replaced_with_uploads() {
+    let (app, s, _) = setup().await;
+    let (status, body) = post_image(&app, &s, &[("src", "index.html#5"), ("mode", "add")], &png()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let added: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(added["src"], "index.html#7");
+    let draft = ok(&app, &reader(), "get_site_file", json!({ "path": "index.html" }))["content"].as_str().unwrap().to_string();
+    let url = draft.split("<img src=\"").nth(1).unwrap().split('"').next().unwrap().to_string();
+    assert!(url.starts_with("/uploads/") && url.ends_with(".png"), "{draft}");
+    let (status, body) = post_image(&app, &s, &[("src", "index.html#7"), ("mode", "replace")], &png()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, _) = post_image(&app, &s, &[("src", "index.html#5"), ("mode", "replace")], &png()).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = post_image(&app, &s, &[("src", "index.html#5"), ("mode", "add")], b"not an image").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
 
 const PAGE: &str = "<!doctype html><html><head><title>首页</title></head><body><h1>春季新品</h1><p>{{ site.name }}</p></body></html>";
 
@@ -113,4 +155,52 @@ async fn elements_are_copied_and_deleted_and_edits_move_with_them() {
     assert!(canvas["els"].as_object().is_none_or(|m| m.is_empty()), "{canvas}");
     let (status, _, _) = post_form(&app, "/admin/canvas/element", Some(&s), &[("src", "index.html#1"), ("action", "remove")]).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn the_ai_sees_hand_edits_and_does_not_drop_them_silently() {
+    let (app, s, _) = setup().await;
+    post_form(&app, "/admin/canvas/style", Some(&s), &[("src", "index.html#5"), ("prop", "color"), ("value", "#123456")]).await;
+    let file = ok(&app, &builder(), "get_site_file", json!({ "path": "index.html" }));
+    assert_eq!(file["hand_edits"][0]["element"], "index.html#5", "{file}");
+    // Something added above: the edit moves with its element.
+    let moved = PAGE.replace("<body>", "<body><nav>导航</nav>");
+    ok(&app, &builder(), "write_site_file", json!({ "path": "index.html", "content": moved, "note": "加导航" }));
+    let canvas = cms_harness::changes::setting(&app.conn(), "canvas", true);
+    assert!(canvas["els"].get("index.html#6").is_some(), "{canvas}");
+    // The element itself rewritten: refused until the user agrees.
+    let gone = moved.replace("春季新品", "冬季");
+    let e = err(&app, &builder(), "write_site_file", json!({ "path": "index.html", "content": gone, "note": "改标题" }));
+    assert!(e.contains("replace_hand_edits") && e.contains("index.html#6"), "{e}");
+    ok(&app, &builder(), "write_site_file", json!({ "path": "index.html", "content": gone, "note": "改标题", "replace_hand_edits": true }));
+    let canvas = cms_harness::changes::setting(&app.conn(), "canvas", true);
+    assert!(canvas["els"].as_object().is_none_or(|m| m.is_empty()), "{canvas}");
+}
+
+#[tokio::test]
+async fn a_shared_element_changes_every_page_or_only_this_one() {
+    let app = app();
+    let w = |p: &str, c: &str| ok(&app, &builder(), "write_site_file", json!({ "path": p, "content": c, "note": "页" }));
+    w("layout.html", "<!doctype html><html><head><title>t</title></head><body><header>站点</header>{% block main %}{% endblock %}</body></html>");
+    w("index.html", "{% extends 'layout.html' %}{% block main %}<p>首页</p>{% endblock %}");
+    w("about.html", "{% extends 'layout.html' %}{% block main %}<p>关于</p>{% endblock %}");
+    publish_all(&app);
+    let s = admin_session(&app, "builder").await;
+    let (_, _, body) = get_with(&app, "/admin/canvas/info?src=layout.html%235&page=%2Fabout", Some(&s.0)).await;
+    let info: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(info["pages"], 2, "{body}");
+    post_form(&app, "/admin/canvas/style", Some(&s), &[("src", "layout.html#5"), ("prop", "color"), ("value", "#111111")]).await;
+    post_form(&app, "/admin/canvas/style", Some(&s), &[("src", "layout.html#5"), ("prop", "color"), ("value", "#222222"), ("page", "/about")]).await;
+    post_form(&app, "/admin/canvas/style", Some(&s), &[("src", "layout.html#5"), ("prop", "display"), ("value", "none"), ("tier", "mobile")]).await;
+    publish_all(&app);
+    let home = get_text(&app, "/").await;
+    let about = get_text(&app, "/about").await;
+    assert!(home.contains("#111111") && !home.contains("#222222"), "{home}");
+    assert!(about.contains("#111111") && about.contains("#222222"), "{about}");
+    let (_, _, body) = get_with(&app, "/admin/canvas/info?src=layout.html%235&page=%2F", Some(&s.0)).await;
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["tiers"], json!(["mobile"]));
+    let (status, _, _) = post_form(&app, "/admin/canvas/reset", Some(&s), &[("src", "layout.html#5"), ("tier", "mobile")]).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, _, body) = get_with(&app, "/admin/canvas/info?src=layout.html%235&page=%2F", Some(&s.0)).await;
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["tiers"], json!([]));
 }

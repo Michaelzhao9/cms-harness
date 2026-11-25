@@ -433,9 +433,13 @@ fn setting_pairs(key: &str, old: &Value, new: &Value) -> Vec<Value> {
         let flat = |v: &Value| {
             let mut m = std::collections::BTreeMap::new();
             for (el, e) in v["els"].as_object().into_iter().flatten() {
-                for (tier, props) in e["style"].as_object().into_iter().flatten() {
-                    for (p, val) in props.as_object().into_iter().flatten() {
-                        m.insert((el.clone(), tier.clone(), p.clone()), val.as_str().unwrap_or_default().to_string());
+                let scopes = std::iter::once((el.clone(), &e["style"]))
+                    .chain(e["pages"].as_object().into_iter().flatten().map(|(page, s)| (format!("{el} · {page}"), s)));
+                for (name, style) in scopes {
+                    for (tier, props) in style.as_object().into_iter().flatten() {
+                        for (p, val) in props.as_object().into_iter().flatten() {
+                            m.insert((name.clone(), tier.clone(), p.clone()), val.as_str().unwrap_or_default().to_string());
+                        }
                     }
                 }
             }

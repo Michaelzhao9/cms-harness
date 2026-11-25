@@ -111,7 +111,8 @@
       }
       const b = sel.getBoundingClientRect();
       const box = document.createElement("div");
-      box.className = "hc-sel";
+      box.className = "hc-sel" + (sharedSel ? " shared" : "");
+      overlay.classList.toggle("hc-shared", sharedSel);
       place(box, b, 3);
       overlay.appendChild(box);
       if (!editing) {
@@ -150,7 +151,7 @@
   const redraw = () => {
     if (queued) return;
     queued = true;
-    requestAnimationFrame(() => { queued = false; draw(); });
+    requestAnimationFrame(() => { queued = false; draw(); checkSoon(); });
   };
 
   const activate = (n, scroll) => {
@@ -213,6 +214,7 @@
   // Anything longer, a right-click, or a click on something that does nothing selects instead.
   const HOLD = 200, MOVE = 4;
   let sel = null; // the selected element
+  let sharedSel = false; // it is in a template other pages use too (the admin says so)
   let editing = null; // the element whose text is being edited, and its text before
   let before = "";
   let press = null;
@@ -238,6 +240,7 @@
   }
   function select(el, menu) {
     if (editing && editing !== el) finishEdit(true);
+    if (sel !== el) sharedSel = false;
     sel = el;
     lastRect = "";
     const cs = getComputedStyle(el);
@@ -462,6 +465,40 @@
   }, true);
   document.addEventListener("focusout", (e) => { if (editing && e.target === editing) finishEdit(true); }, true);
 
+  // ---- checks: hand-edited elements that run off the screen, cover other content, or have tiny text ----
+  // Measured at this width only, as warnings; nothing is changed.
+  const MIN_TEXT = 12;
+  let lastWarn = "";
+  function check() {
+    const edited = [...document.querySelectorAll("[data-hc-src]")].filter((el) => el.dataset.hc || /translate|width|height/.test(el.getAttribute("style") || ""));
+    const width = document.documentElement.clientWidth;
+    const content = [...document.querySelectorAll("[data-hc-src]")].filter((el) => {
+      const b = el.getBoundingClientRect();
+      return b.width && b.height && !el.querySelector("[data-hc-src]");
+    }).slice(0, 600);
+    const items = [];
+    for (const el of edited) {
+      const b = el.getBoundingClientRect();
+      if (!b.width || !b.height) continue;
+      const src = el.dataset.hcSrc;
+      if (b.right > width + 1 || b.left < -1) items.push({ src, kind: "overflow" });
+      const text = (el.innerText || "").trim();
+      if (text && parseFloat(getComputedStyle(el).fontSize) < MIN_TEXT) items.push({ src, kind: "small" });
+      const hit = content.find((o) => {
+        if (o === el || o.dataset.hcSrc === src || o.contains(el) || el.contains(o)) return false;
+        const r = o.getBoundingClientRect();
+        const w = Math.min(b.right, r.right) - Math.max(b.left, r.left);
+        const h = Math.min(b.bottom, r.bottom) - Math.max(b.top, r.top);
+        return w > 2 && h > 2 && w * h > 0.1 * Math.min(b.width * b.height, r.width * r.height);
+      });
+      if (hit) items.push({ src, kind: "overlap" });
+    }
+    const key = JSON.stringify(items);
+    if (key !== lastWarn) { lastWarn = key; send({ type: "hc:warnings", items }); }
+  }
+  let checkTimer = 0;
+  const checkSoon = () => { clearTimeout(checkTimer); checkTimer = setTimeout(check, 300); };
+
   // ---- messages from the admin ----
   window.addEventListener("message", (e) => {
     if (e.source !== window.parent || e.origin !== ORIGIN || !e.data || typeof e.data !== "object") return;
@@ -477,7 +514,17 @@
       }
       redraw();
     } else if (m.type === "hc:deselect") deselect(false);
+    else if (m.type === "hc:shared") { sharedSel = !!m.on; redraw(); }
     else if (m.type === "hc:tool") setTool(typeof m.kind === "string" ? m.kind : null);
+    else if (m.type === "hc:focus" && typeof m.src === "string") {
+      const el = document.querySelector(`[data-hc-src="${CSS.escape(m.src)}"]`);
+      if (el) {
+        // Vertically only: an element that runs off the side must not scroll the page sideways.
+        const r = el.getBoundingClientRect();
+        scrollTo({ top: scrollY + r.top - (innerHeight - r.height) / 2, behavior: "smooth" });
+        setTimeout(() => select(el), 350);
+      }
+    }
     else if (m.type === "hc:place" && typeof m.src === "string") placeAt(m.src, Number(m.x) || 0, Number(m.y) || 0, Number(m.sx) || 0, Number(m.sy) || 0);
     else if (m.type === "hc:mark-color" && typeof m.color === "string" && CSS.supports("color", m.color)) {
       document.documentElement.style.setProperty("--mark", m.color);

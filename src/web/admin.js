@@ -509,25 +509,30 @@ function hex(rgb) {
   return '#' + m.slice(0, 3).map((n) => Math.round(Number(n)).toString(16).padStart(2, '0')).join('');
 }
 
-/** Sets one property: shown in the preview at once, saved as a draft. */
+// An element of a shared template (a layout, an include) changes on every page using it, unless "only this
+// page" is on: then edits carry the page's address.
+let onlyThisPage = false;
+const pageAddress = () => (page.path || '/').split(/[?#]/)[0];
+
 /** Shows one property in the preview at once and saves it as a draft; returns what it was (for undo). */
-async function canvasPut(src, tier, prop, value) {
+async function canvasPut(src, tier, prop, value, scope) {
   post({ type: 'hc:style', src, prop, value });
   // The stylesheet gives a border width its solid style; the preview needs it too until it reloads.
   if (prop === 'border-width') post({ type: 'hc:style', src, prop: 'border-style', value: value ? 'solid' : '' });
-  const out = await canvasSave('/admin/canvas/style', { src, tier, prop, value });
+  const out = await canvasSave('/admin/canvas/style', { src, tier, prop, value, page: scope || '' });
   return out.old ?? '';
 }
 
-// Undo and redo: each step is a list of {src, tier, prop, old, value}.
+// Undo and redo: each step is a list of {src, tier, prop, old, value, scope}.
 const undone = [];
 const done = [];
 
 /** Applies a step's edits, saving each; on success it can be undone. */
 async function canvasStep(src, edits) {
   const step = [];
+  const scope = onlyThisPage ? pageAddress() : '';
   try {
-    for (const { tier, prop, value } of edits) step.push({ src, tier, prop, value, old: await canvasPut(src, tier, prop, value) });
+    for (const { tier, prop, value } of edits) step.push({ src, tier, prop, value, scope, old: await canvasPut(src, tier, prop, value, scope) });
   } catch (err) {
     toast(tr('没存上', 'Not saved'), err.message, true);
   }
@@ -545,11 +550,25 @@ async function canvasUndo(redo) {
   const step = (redo ? undone : done).pop();
   if (!step) return;
   try {
-    for (const e of redo ? step : [...step].reverse()) await canvasPut(e.src, e.tier, e.prop, redo ? e.value : e.old);
+    for (const e of redo ? step : [...step].reverse()) await canvasPut(e.src, e.tier, e.prop, redo ? e.value : e.old, e.scope);
     (redo ? done : undone).push(step);
   } catch (err) {
     toast(tr('没撤销成', 'Could not undo'), err.message, true);
   }
+}
+
+/** Uploads an image for the canvas: added at `src` (`mode` add) or put into the `<img>` at `src` (replace). */
+async function canvasImage(src, mode, file) {
+  const body = new FormData();
+  body.set('csrf', csrf);
+  body.set('src', src);
+  body.set('mode', mode);
+  body.set('file', file);
+  const res = await fetch('/admin/canvas/image', { method: 'POST', body, headers: { 'x-hc-fetch': '1' }, credentials: 'same-origin' });
+  if (!res.ok) throw new Error((await res.text()) || tr(`出错了（${res.status}）`, `Something went wrong (${res.status})`));
+  const out = await res.json();
+  setPending(out.pending);
+  return out;
 }
 
 /** Takes the selected element out of its template, or copies it, then shows the page again. */
@@ -631,6 +650,31 @@ function fillBar() {
   const names = { desktop: tr('只改电脑', 'Desktop only'), tablet: tr('只改平板', 'Tablet only'), mobile: tr('只改手机', 'Phone only') };
   tierBtn.textContent = tierOnly ? names[tierBtn.dataset.tier] : tr('所有宽度', 'All widths');
   tierBtn.setAttribute('aria-pressed', String(tierOnly));
+  const scope = $('[data-c-scope]', cbar);
+  const pages = csel.pages || 1;
+  scope.hidden = pages < 2;
+  scope.textContent = onlyThisPage ? tr('只改这一页', 'This page only') : tr(`共用 · ${pages} 页`, `Shared · ${pages} pages`);
+  scope.setAttribute('aria-pressed', String(onlyThisPage));
+  scope.title = tr('这个元素在共用的模板里，改了会影响所有用它的页面。点一下改成只改这一页。', 'This element is in a shared template: edits change every page using it. Click to edit this page only.');
+  $('[data-c-image]', cbar).hidden = csel.tag !== 'img';
+  // A narrower width with edits of its own can go back to what the wider width shows.
+  $('[data-c-reset]', cbar).hidden = width() === 'desktop' || !(csel.tiers || []).includes(width());
+  placeBar();
+}
+
+/** Asks how many pages share the selected element and where it has edits of its own. */
+async function canvasInfo() {
+  const sel = csel;
+  if (!sel) return;
+  try {
+    const res = await fetch(`/admin/canvas/info?src=${encodeURIComponent(sel.src)}&page=${encodeURIComponent(pageAddress())}`, { credentials: 'same-origin' });
+    if (!res.ok || csel !== sel) return;
+    Object.assign(sel, await res.json());
+    post({ type: 'hc:shared', on: sel.pages > 1 });
+    fillBar();
+  } catch {
+    // The bar works without it.
+  }
 }
 
 function closeBar() {
@@ -643,10 +687,13 @@ if (cbar && frame) {
     if (e.source !== frame.contentWindow || typeof e.data !== 'object' || !e.data) return;
     const m = e.data;
     if (m.type === 'hc:select' && typeof m.src === 'string') {
-      csel = { src: m.src, tag: String(m.tag || ''), text: String(m.text || ''), rect: m.rect || {}, style: m.style || {} };
+      const same = csel?.src === m.src;
+      csel = { src: m.src, tag: String(m.tag || ''), text: String(m.text || ''), rect: m.rect || {}, style: m.style || {}, pages: same ? csel.pages : 1, tiers: same ? csel.tiers : [] };
+      if (!same) onlyThisPage = false;
       fillBar();
       cbar.hidden = false;
       placeBar();
+      canvasInfo();
     } else if (m.type === 'hc:rect' && csel && m.rect) {
       csel.rect = m.rect;
       placeBar();
@@ -709,6 +756,33 @@ if (cbar && frame) {
     tierOnly = !tierOnly;
     fillBar();
   });
+  $('[data-c-scope]', cbar).addEventListener('click', () => {
+    onlyThisPage = !onlyThisPage;
+    fillBar();
+  });
+  $('[data-c-reset]', cbar).addEventListener('click', async () => {
+    if (!csel) return;
+    try {
+      await canvasSave('/admin/canvas/reset', { src: csel.src, tier: width() });
+      reloadFrames();
+    } catch (err) {
+      toast(tr('没恢复成', 'Not reset'), err.message, true);
+    }
+  });
+  const cfile = $('[data-c-file]', cbar);
+  $('[data-c-image]', cbar).addEventListener('click', () => cfile.click());
+  cfile.addEventListener('change', async () => {
+    const file = cfile.files[0];
+    cfile.value = '';
+    if (!file || !csel) return;
+    try {
+      await canvasImage(csel.src, 'replace', file);
+      closeBar();
+      reloadFrames();
+    } catch (err) {
+      toast(tr('图片没换成', 'Image not replaced'), err.message, true);
+    }
+  });
   $('[data-c-copy]', cbar).addEventListener('click', () => canvasElement('duplicate'));
   $('[data-c-remove]', cbar).addEventListener('click', () => canvasElement('remove'));
   for (const b of $$('[data-c-layer]', cbar)) {
@@ -746,10 +820,46 @@ if (cbar && frame) {
   });
 }
 
+// ---------- warnings: hand edits that run off the screen, cover content or have tiny text ----------
+
+const warnBtn = $('[data-warn]');
+let warnings = [];
+let warnAt = 0;
+const WARN_TEXT = {
+  overflow: () => tr('超出了屏幕', 'runs off the screen'),
+  overlap: () => tr('盖住了别的内容', 'covers other content'),
+  small: () => tr('字太小', 'text is too small'),
+};
+if (warnBtn && frame) {
+  window.addEventListener('message', (e) => {
+    if (e.source !== frame.contentWindow || typeof e.data !== 'object' || !e.data) return;
+    if (e.data.type === 'hc:warnings' && Array.isArray(e.data.items)) {
+      warnings = e.data.items.filter((w) => typeof w.src === 'string' && WARN_TEXT[w.kind]).slice(0, 50);
+      warnAt = 0;
+      warnBtn.hidden = !warnings.length;
+      $('[data-warn-n]', warnBtn).textContent = warnings.length;
+      const list = warnings.map((w) => WARN_TEXT[w.kind]()).join(tr('；', '; '));
+      warnBtn.title = tr(`这个宽度下：${list}。点一下看下一处。`, `At this width: ${list}. Click to see the next one.`);
+    } else if (e.data.type === 'hc:ready') {
+      warnings = [];
+      warnBtn.hidden = true;
+    }
+  });
+  warnBtn.addEventListener('click', () => {
+    if (!warnings.length) return;
+    const w = warnings[warnAt % warnings.length];
+    warnAt += 1;
+    post({ type: 'hc:focus', src: w.src });
+    // Which problem this one is, in the button itself.
+    $('[data-warn-n]', warnBtn).textContent = `${WARN_TEXT[w.kind]()} ${((warnAt - 1) % warnings.length) + 1}/${warnings.length}`;
+  });
+}
+
 // ---------- the pen: tools that add elements, and undo/redo ----------
 
 const pen = $('[data-pen]');
 let placing = null; // an element just added, to put where the click was once the preview reloads
+let penImage = null; // the image file chosen for the image tool, until the click that places it
 
 if (pen && frame) {
   const tools = $('[data-pen-tools]', pen);
@@ -766,10 +876,24 @@ if (pen && frame) {
     const open = toggle.getAttribute('aria-expanded') !== 'true';
     toggle.setAttribute('aria-expanded', String(open));
     tools.hidden = !open;
+    stage.classList.toggle('pen-open', open);
     if (!open) pick(null);
     refreshUndo();
   });
-  for (const b of $$('[data-tool]', pen)) b.addEventListener('click', () => pick(b.getAttribute('aria-pressed') === 'true' ? null : b.dataset.tool));
+  const penFile = $('[data-pen-file]', pen);
+  for (const b of $$('[data-tool]', pen)) {
+    b.addEventListener('click', () => {
+      if (b.getAttribute('aria-pressed') === 'true') return pick(null);
+      // The image tool asks for the picture first; the click on the page then says where.
+      if (b.dataset.tool === 'image') return penFile.click();
+      pick(b.dataset.tool);
+    });
+  }
+  penFile.addEventListener('change', () => {
+    penImage = penFile.files[0] || null;
+    penFile.value = '';
+    if (penImage) pick('image');
+  });
   $('[data-undo]', pen).addEventListener('click', () => canvasUndo(false).then(refreshUndo));
   $('[data-redo]', pen).addEventListener('click', () => canvasUndo(true).then(refreshUndo));
   setInterval(refreshUndo, 1000);
@@ -778,7 +902,9 @@ if (pen && frame) {
     const m = e.data;
     if (m.type === 'hc:add' && typeof m.src === 'string') {
       pick(null);
-      canvasSave('/admin/canvas/add', { src: m.src, kind: String(m.kind) })
+      const adding = m.kind === 'image' && penImage ? canvasImage(m.src, 'add', penImage) : canvasSave('/admin/canvas/add', { src: m.src, kind: String(m.kind) });
+      penImage = null;
+      adding
         .then((out) => {
           placing = { src: out.src, x: m.x, y: m.y, sx: m.sx, sy: m.sy };
           reloadFrames();

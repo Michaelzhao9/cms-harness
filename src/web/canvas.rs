@@ -29,6 +29,9 @@ pub struct StyleForm {
     /// Empty clears the property.
     #[serde(default)]
     value: String,
+    /// A page address: the edit applies on that page only. Empty: on every page using the element.
+    #[serde(default)]
+    page: String,
 }
 
 fn all() -> String {
@@ -76,6 +79,10 @@ fn done(conn: &Connection, extra: Value) -> Result<Out, Out> {
 
 fn allowed(user: &AdminUser, csrf: &str) -> Result<(), Out> {
     session::check_csrf(user, csrf).map_err(|s| Out::Fail(s, "表单已失效，请刷新页面后再试。".into()))?;
+    may_edit(user)
+}
+
+fn may_edit(user: &AdminUser) -> Result<(), Out> {
     if !user.actor().can(crate::auth::Scope::Structure) {
         return Err(Out::Fail(StatusCode::FORBIDDEN, "你的角色不能改网页。".into()));
     }
@@ -91,9 +98,10 @@ pub async fn style(State(app): State<Shared>, Extension(user): Extension<AdminUs
         let fp = canvas::fingerprint(&source, &tag);
         let doc = changes::setting(&conn, canvas::KEY, true);
         // What it was, so the admin can undo this edit.
-        let old = canvas::current(&doc, &f.src, &f.tier, &f.prop);
+        let page = Some(f.page.as_str()).filter(|p| !p.is_empty());
+        let old = canvas::current(&doc, &f.src, page, &f.tier, &f.prop);
         let value = Some(f.value.as_str()).filter(|v| !v.trim().is_empty());
-        let doc = canvas::set_style(&doc, &f.src, &fp, &f.tier, &f.prop, value).map_err(bad)?;
+        let doc = canvas::set_style(&doc, &f.src, &fp, page, &f.tier, &f.prop, value).map_err(bad)?;
         save_canvas(&conn, &user, &doc)?;
         done(&conn, json!({ "old": old }))
     })
@@ -180,6 +188,102 @@ pub async fn add(State(app): State<Shared>, Extension(user): Extension<AdminUser
             save_canvas(&conn, &user, &moved)?;
         }
         done(&conn, json!({ "src": format!("{path}#{n}") }))
+    })
+    .await
+}
+
+/// Uploads an image and adds it with the pen (`mode=add`, into the element `src` like `add`), or points the
+/// `<img>` at `src` to it (`mode=replace`). Multipart: `csrf`, `src`, `mode`, `file`.
+pub async fn image(State(app): State<Shared>, Extension(user): Extension<AdminUser>, req: axum::extract::Request) -> Response {
+    let posted = match super::content::checked(&user, req).await {
+        Ok(p) => p,
+        Err(o) => return axum::response::IntoResponse::into_response(o),
+    };
+    blocking(move || {
+        // `checked` has seen the CSRF token.
+        may_edit(&user)?;
+        let Some((_, name, bytes)) = posted.files.iter().find(|(input, _, _)| input == "file") else {
+            return Err(bad("没有收到图片：请先选一张。"));
+        };
+        let src = posted.one("src").to_string();
+        let replace = match posted.one("mode") {
+            "replace" => true,
+            "add" => false,
+            _ => return Err(bad("只能添加（add）或替换（replace）图片。")),
+        };
+        // The element must be there before anything is stored.
+        let (path, source, tag) = element(&app.conn(), &src)?;
+        // Uploads are checked by their content: images and PDFs. Only an image fits here.
+        let url = crate::media::store_upload(&app, name, bytes).map_err(bad)?;
+        if url.ends_with(".pdf") {
+            return Err(bad("这里只能用图片，不能用 PDF。"));
+        }
+        let conn = app.conn();
+        let (new, n) = if replace {
+            (canvas::replace_image(&source, tag.n, &url).map_err(bad)?, tag.n)
+        } else {
+            canvas::add_markup(&source, tag.n, &canvas::image_element(&url).map_err(bad)?).map_err(bad)?
+        };
+        site::check_file(&path, &new).map_err(bad)?;
+        changes::stage_file(&conn, &user.actor(), &path, &new, NOTE).map_err(internal)?;
+        let doc = changes::setting(&conn, canvas::KEY, true);
+        // A replaced image keeps its position; an added one moves those after it.
+        let moved = if replace { canvas::remap(&doc, &path, &new).0 } else { canvas::shift(&doc, &path, n, 1) };
+        if moved != doc {
+            save_canvas(&conn, &user, &moved)?;
+        }
+        done(&conn, json!({ "src": format!("{path}#{n}") }))
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+pub struct InfoQuery {
+    src: String,
+    /// The address of the page being looked at.
+    #[serde(default)]
+    page: String,
+}
+
+/// What the bar shows about the selected element: how many pages share it (its file is a layout or a
+/// fragment), and the widths at which it has edits of its own.
+pub async fn info(State(app): State<Shared>, axum::extract::Query(q): axum::extract::Query<InfoQuery>) -> Response {
+    blocking(move || {
+        let conn = app.conn();
+        let (path, _, _) = element(&conn, &q.src)?;
+        let mut stmt = conn
+            .prepare("SELECT path, coalesce(draft, published) FROM site_files WHERE draft_deleted = 0 AND path LIKE '%.html'")
+            .map_err(|e| internal(e.to_string()))?;
+        let files: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))
+            .map_err(|e| internal(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .map(|(p, j)| (p, j.and_then(|j| serde_json::from_str::<String>(&j).ok()).unwrap_or_default()))
+            .collect();
+        let doc = changes::setting(&conn, canvas::KEY, true);
+        Ok(Out::Json(json!({ "pages": canvas::pages_using(&files, &path), "tiers": canvas::tiers_of(&doc, &q.src, &q.page) })))
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+pub struct ResetForm {
+    csrf: String,
+    src: String,
+    tier: String,
+}
+
+/// Drops the element's edits for one width, so it looks as the wider widths make it ("reset to desktop").
+pub async fn reset(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Form(f): Form<ResetForm>) -> Response {
+    blocking(move || {
+        allowed(&user, &f.csrf)?;
+        if !["tablet", "mobile"].contains(&f.tier.as_str()) {
+            return Err(bad("只能恢复平板（tablet）或手机（mobile）宽度。"));
+        }
+        let conn = app.conn();
+        let doc = changes::setting(&conn, canvas::KEY, true);
+        save_canvas(&conn, &user, &canvas::reset_tier(&doc, &f.src, &f.tier))?;
+        done(&conn, json!({}))
     })
     .await
 }

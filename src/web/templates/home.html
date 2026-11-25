@@ -35,6 +35,7 @@
 <a href="{{ links.draft|safe }}" aria-pressed="{{ 'true' if version == 'draft' else 'false' }}">{{ "草稿"|t }}</a><a href="{{ links.live|safe }}" aria-pressed="{{ 'true' if version == 'live' else 'false' }}">{{ "线上"|t }}</a><a class="ib sm" href="{{ links.split|safe }}" aria-label="{{ '草稿和线上并排对比'|t }}" aria-pressed="{{ 'true' if version == 'split' else 'false' }}">{{ i.icon("columns", 17) }}</a>
 </div>
 <a class="ib sm marks" href="{{ links.marks|safe }}" aria-label="{{ '在草稿上标出改动'|t }}" aria-pressed="{{ 'true' if marks else 'false' }}" data-marks>{{ i.icon("highlighter", 17) }}</a>
+<button type="button" class="ib warn js-only" aria-label="{{ '手动调整的提示'|t }}" data-warn hidden>{{ i.icon("warning", 16) }}<span class="n" data-warn-n></span></button>
 <a class="btn publish" href="/admin/publish" data-publish{% if not chat.pending %} hidden{% endif %}>{{ "发布"|t }}<span class="count">{{ chat.pending }}</span></a>
 </header>
 <div class="stage w-{{ width }} v-{{ version }}{% if not marks %} nomarks{% endif %}" data-stage data-preview="{{ preview_base|safe }}" data-live="{{ live_base|safe }}" data-path="{{ path|safe }}">
@@ -87,8 +88,12 @@
 </div>
 </details>
 <span class="cb-sep" aria-hidden="true"></span>
+<button type="button" class="cb wide shared" aria-pressed="false" data-c-scope hidden></button>
 <button type="button" class="cb wide" aria-pressed="false" data-c-tier data-tier="{{ width }}">{{ "所有宽度"|t }}</button>
+<button type="button" class="cb wide" data-c-reset hidden>{{ "恢复成电脑版"|t }}</button>
 <span class="cb-sep" aria-hidden="true"></span>
+<button type="button" class="cb wide" data-c-image hidden>{{ "换图片"|t }}</button>
+<input type="file" accept="image/*" class="sr" tabindex="-1" aria-hidden="true" data-c-file>
 <button type="button" class="cb" aria-label="{{ '问 AI'|t }}" data-c-ai>{{ i.icon("sparkle", 16) }}</button>
 <button type="button" class="cb" aria-label="{{ '复制一份'|t }}" aria-keyshortcuts="Meta+D" data-c-copy>{{ i.icon("copy", 15) }}</button>
 <button type="button" class="cb" aria-label="{{ '删除'|t }}" aria-keyshortcuts="Delete" data-c-remove>{{ i.icon("trash", 15) }}</button>
@@ -100,6 +105,8 @@
 <button type="button" class="pt" aria-label="{{ '圆形'|t }}" aria-pressed="false" data-tool="circle">{{ i.icon("circle", 18) }}</button>
 <button type="button" class="pt" aria-label="{{ '线'|t }}" aria-pressed="false" data-tool="line">{{ i.icon("line-segment", 18) }}</button>
 <button type="button" class="pt" aria-label="{{ '按钮'|t }}" aria-pressed="false" data-tool="button">{{ i.icon("pill", 19) }}</button>
+<button type="button" class="pt" aria-label="{{ '图片'|t }}" aria-pressed="false" data-tool="image">{{ i.icon("images", 19) }}</button>
+<input type="file" accept="image/*" class="sr" tabindex="-1" aria-hidden="true" data-pen-file>
 <span class="pt-sep" aria-hidden="true"></span>
 <button type="button" class="pt" aria-label="{{ '撤销'|t }}" aria-keyshortcuts="Meta+Z" data-undo>{{ i.icon("undo", 18) }}</button>
 <button type="button" class="pt" aria-label="{{ '重做'|t }}" aria-keyshortcuts="Meta+Shift+Z" data-redo>{{ i.icon("redo", 18) }}</button>

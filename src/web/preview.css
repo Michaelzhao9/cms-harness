@@ -28,3 +28,6 @@ html.hc-picking, html.hc-picking * { cursor: crosshair !important; }
 #hc-overlay .hc-guide { position: absolute; background: #ff2d78; }
 html.hc-dragging, html.hc-dragging * { user-select: none !important; cursor: grabbing !important; }
 html.hc-tool, html.hc-tool * { cursor: crosshair !important; }
+#hc-overlay .hc-sel.shared { box-shadow: 0 0 0 1.5px #7c5cff; }
+#hc-overlay.hc-shared .hc-handle { border-color: #7c5cff; }
+#hc-overlay.hc-shared .hc-size { background: #7c5cff; }
