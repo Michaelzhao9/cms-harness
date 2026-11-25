@@ -941,3 +941,15 @@ record:{} 还被 {} 链接着，删掉会留下死链：请先改掉那个链接
 这个元素不能复制或删除。	This element cannot be copied or deleted.
 找不到这个元素的结尾：它不能复制或删除。	This element has no end tag: it cannot be copied or deleted.
 只能复制（duplicate）或删除（remove）。	The action must be duplicate or remove.
+添加	Add
+文字	Text
+矩形	Rectangle
+圆形	Circle
+线	Line
+按钮	Button
+撤销	Undo
+重做	Redo
+画笔：添加文字、形状	Pen: add text and shapes
+这里放不了新元素：请点在一个区块里面。	Nothing can be added here: click inside a block.
+找不到这个区块的结尾：这里放不了新元素。	This block has no end tag: nothing can be added here.
+不能添加“{}”。	“{}” cannot be added.

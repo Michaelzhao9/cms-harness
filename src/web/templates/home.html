@@ -93,6 +93,19 @@
 <button type="button" class="cb" aria-label="{{ '复制一份'|t }}" aria-keyshortcuts="Meta+D" data-c-copy>{{ i.icon("copy", 15) }}</button>
 <button type="button" class="cb" aria-label="{{ '删除'|t }}" aria-keyshortcuts="Delete" data-c-remove>{{ i.icon("trash", 15) }}</button>
 </div>
+<div class="pen js-only" data-pen>
+<div class="pen-tools" role="toolbar" aria-label="{{ '添加'|t }}" data-pen-tools hidden>
+<button type="button" class="pt" aria-label="{{ '文字'|t }}" aria-pressed="false" data-tool="text">{{ i.icon("text-t", 19) }}</button>
+<button type="button" class="pt" aria-label="{{ '矩形'|t }}" aria-pressed="false" data-tool="rect">{{ i.icon("square", 18) }}</button>
+<button type="button" class="pt" aria-label="{{ '圆形'|t }}" aria-pressed="false" data-tool="circle">{{ i.icon("circle", 18) }}</button>
+<button type="button" class="pt" aria-label="{{ '线'|t }}" aria-pressed="false" data-tool="line">{{ i.icon("line-segment", 18) }}</button>
+<button type="button" class="pt" aria-label="{{ '按钮'|t }}" aria-pressed="false" data-tool="button">{{ i.icon("pill", 19) }}</button>
+<span class="pt-sep" aria-hidden="true"></span>
+<button type="button" class="pt" aria-label="{{ '撤销'|t }}" aria-keyshortcuts="Meta+Z" data-undo>{{ i.icon("undo", 18) }}</button>
+<button type="button" class="pt" aria-label="{{ '重做'|t }}" aria-keyshortcuts="Meta+Shift+Z" data-redo>{{ i.icon("redo", 18) }}</button>
+</div>
+<button type="button" class="pen-btn" aria-label="{{ '画笔：添加文字、形状'|t }}" aria-expanded="false" data-pen-toggle>{{ i.icon("pencil-simple", 21) }}</button>
+</div>
 {%- endif %}
 {% if published %}<div class="pubbed" role="status" data-published>{{ i.icon("check", 14) }}{{ "已发布，线上已经是最新的"|t }}<a href="{{ links.live|safe }}">{{ "看线上"|t }}</a></div>{% endif %}
 </div>

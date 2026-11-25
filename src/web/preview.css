@@ -27,3 +27,4 @@ html.hc-picking, html.hc-picking * { cursor: crosshair !important; }
 #hc-overlay .hc-handle[data-dir="e"], #hc-overlay .hc-handle[data-dir="w"] { cursor: ew-resize; }
 #hc-overlay .hc-guide { position: absolute; background: #ff2d78; }
 html.hc-dragging, html.hc-dragging * { user-select: none !important; cursor: grabbing !important; }
+html.hc-tool, html.hc-tool * { cursor: crosshair !important; }

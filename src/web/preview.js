@@ -312,7 +312,7 @@
     return best;
   };
   document.addEventListener("pointerdown", (e) => {
-    if (picking || e.button !== 0 || editing && editing.contains(e.target)) return;
+    if (picking || tool || e.button !== 0 || editing && editing.contains(e.target)) return;
     const handle = e.target instanceof Element && e.target.closest(".hc-handle");
     if (handle && sel) {
       e.preventDefault();
@@ -375,7 +375,39 @@
     if (performance.now() - p.t > HOLD) { swallow = true; select(p.el); }
   }, true);
   document.addEventListener("dragstart", (e) => { if (!picking) e.preventDefault(); }, true);
+
+  // The pen: with a tool chosen (hc:tool), the next click says where to add. The admin adds it to the template
+  // and reloads; then hc:place puts the new element exactly where the click was (in page coordinates).
+  let tool = null;
+  const setTool = (kind) => {
+    tool = kind || null;
+    document.documentElement.classList.toggle("hc-tool", !!tool);
+  };
+  function placeAt(src, x, y, sx, sy) {
+    scrollTo(sx, sy);
+    const el = document.querySelector(`[data-hc-src="${CSS.escape(src)}"]`);
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const dx = Math.round(x - (r.left + scrollX)), dy = Math.round(y - (r.top + scrollY));
+    setProp(el, "translate", `${dx}px ${dy}px`);
+    select(el);
+    send({ type: "hc:move", src, x: dx, y: dy, from: [0, 0] });
+  }
   document.addEventListener("click", (e) => {
+    if (tool) {
+      e.preventDefault();
+      e.stopPropagation();
+      // What was clicked; on empty space, the element nearest the click.
+      const dist = (el) => {
+        const b = el.getBoundingClientRect();
+        return Math.hypot(Math.max(b.left - e.clientX, 0, e.clientX - b.right), Math.max(b.top - e.clientY, 0, e.clientY - b.bottom));
+      };
+      const near = () => [...document.querySelectorAll("body [data-hc-src]")].filter((el) => el.getBoundingClientRect().width).sort((a, b) => dist(a) - dist(b))[0];
+      const at = document.elementsFromPoint(e.clientX, e.clientY).map(sourceOf).find(Boolean) || near();
+      if (at) send({ type: "hc:add", kind: tool, src: at.dataset.hcSrc, x: e.clientX + scrollX, y: e.clientY + scrollY, sx: scrollX, sy: scrollY });
+      setTool(null);
+      return;
+    }
     if (picking) return;
     if (swallow) { swallow = false; e.preventDefault(); e.stopPropagation(); return; }
     if (editing && editing.contains(e.target)) return;
@@ -445,6 +477,8 @@
       }
       redraw();
     } else if (m.type === "hc:deselect") deselect(false);
+    else if (m.type === "hc:tool") setTool(typeof m.kind === "string" ? m.kind : null);
+    else if (m.type === "hc:place" && typeof m.src === "string") placeAt(m.src, Number(m.x) || 0, Number(m.y) || 0, Number(m.sx) || 0, Number(m.sy) || 0);
     else if (m.type === "hc:mark-color" && typeof m.color === "string" && CSS.supports("color", m.color)) {
       document.documentElement.style.setProperty("--mark", m.color);
     }

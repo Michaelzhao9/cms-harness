@@ -35,6 +35,7 @@ pub fn router(app: Shared) -> Router {
         .route("/admin/canvas/style", post(canvas::style))
         .route("/admin/canvas/text", post(canvas::text))
         .route("/admin/canvas/element", post(canvas::element_action))
+        .route("/admin/canvas/add", post(canvas::add))
         .route("/admin/chat", post(chat::post).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
         .route("/admin/chat/new", post(chat::new))
         .route("/admin/chat/stop", post(chat::stop))

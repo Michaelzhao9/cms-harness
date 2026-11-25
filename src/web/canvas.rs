@@ -154,3 +154,32 @@ pub async fn element_action(State(app): State<Shared>, Extension(user): Extensio
     })
     .await
 }
+
+#[derive(Deserialize)]
+pub struct AddForm {
+    csrf: String,
+    /// The element clicked: the new one goes into it, or into the nearest block around it.
+    src: String,
+    /// `text`, `rect`, `circle`, `line` or `button`.
+    kind: String,
+}
+
+/// Adds an element with the pen. Returns its `src`, so the preview can put it where the click was.
+pub async fn add(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Form(f): Form<AddForm>) -> Response {
+    blocking(move || {
+        allowed(&user, &f.csrf)?;
+        let en = crate::i18n::Lang::of_prefs(&user.prefs) == crate::i18n::Lang::En;
+        let conn = app.conn();
+        let (path, source, tag) = element(&conn, &f.src)?;
+        let (new, n) = canvas::add(&source, tag.n, &f.kind, en).map_err(bad)?;
+        site::check_file(&path, &new).map_err(bad)?;
+        changes::stage_file(&conn, &user.actor(), &path, &new, NOTE).map_err(internal)?;
+        let doc = changes::setting(&conn, canvas::KEY, true);
+        let moved = canvas::shift(&doc, &path, n, 1);
+        if moved != doc {
+            save_canvas(&conn, &user, &moved)?;
+        }
+        done(&conn, json!({ "src": format!("{path}#{n}") }))
+    })
+    .await
+}

@@ -746,6 +746,54 @@ if (cbar && frame) {
   });
 }
 
+// ---------- the pen: tools that add elements, and undo/redo ----------
+
+const pen = $('[data-pen]');
+let placing = null; // an element just added, to put where the click was once the preview reloads
+
+if (pen && frame) {
+  const tools = $('[data-pen-tools]', pen);
+  const toggle = $('[data-pen-toggle]', pen);
+  const pick = (kind) => {
+    for (const b of $$('[data-tool]', pen)) b.setAttribute('aria-pressed', String(b.dataset.tool === kind));
+    post({ type: 'hc:tool', kind });
+  };
+  const refreshUndo = () => {
+    $('[data-undo]', pen).disabled = !done.length;
+    $('[data-redo]', pen).disabled = !undone.length;
+  };
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    toggle.setAttribute('aria-expanded', String(open));
+    tools.hidden = !open;
+    if (!open) pick(null);
+    refreshUndo();
+  });
+  for (const b of $$('[data-tool]', pen)) b.addEventListener('click', () => pick(b.getAttribute('aria-pressed') === 'true' ? null : b.dataset.tool));
+  $('[data-undo]', pen).addEventListener('click', () => canvasUndo(false).then(refreshUndo));
+  $('[data-redo]', pen).addEventListener('click', () => canvasUndo(true).then(refreshUndo));
+  setInterval(refreshUndo, 1000);
+  window.addEventListener('message', (e) => {
+    if (e.source !== frame.contentWindow || typeof e.data !== 'object' || !e.data) return;
+    const m = e.data;
+    if (m.type === 'hc:add' && typeof m.src === 'string') {
+      pick(null);
+      canvasSave('/admin/canvas/add', { src: m.src, kind: String(m.kind) })
+        .then((out) => {
+          placing = { src: out.src, x: m.x, y: m.y, sx: m.sx, sy: m.sy };
+          reloadFrames();
+        })
+        .catch((err) => toast(tr('没加上', 'Not added'), err.message, true));
+    } else if (m.type === 'hc:ready' && placing) {
+      post(Object.assign({ type: 'hc:place' }, placing));
+      placing = null;
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && toggle.getAttribute('aria-expanded') === 'true') pick(null);
+  });
+}
+
 // The publish toast and its query flag go away after a while.
 const pubbed = $('[data-published]');
 if (pubbed) {

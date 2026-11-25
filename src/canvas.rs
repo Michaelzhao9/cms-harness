@@ -427,6 +427,47 @@ pub fn shift(doc: &Value, path: &str, from: usize, by: isize) -> Value {
     doc
 }
 
+/// What the pen adds: one element each, plain markup with its own look, so it shows on any site.
+pub fn new_element(kind: &str, en: bool) -> Option<&'static str> {
+    Some(match kind {
+        "text" if en => "<p style=\"margin:0\">Double-click to edit</p>",
+        "button" if en => "<a href=\"#\" style=\"display:inline-block;padding:12px 24px;border-radius:999px;background:#1d1d1f;color:#fff;text-decoration:none\">Button</a>",
+        "text" =>"<p style=\"margin:0\">双击改文字</p>",
+        "rect" => "<div style=\"width:160px;height:100px;border-radius:8px;background:#e5e5ea\"></div>",
+        "circle" => "<div style=\"width:100px;height:100px;border-radius:50%;background:#e5e5ea\"></div>",
+        "line" => "<hr style=\"width:200px;margin:0;border:0;border-top:2px solid #1d1d1f\">",
+        "button" => "<a href=\"#\" style=\"display:inline-block;padding:12px 24px;border-radius:999px;background:#1d1d1f;color:#fff;text-decoration:none\">按钮</a>",
+        _ => return None,
+    })
+}
+
+/// Elements that can hold what the pen adds.
+const CONTAINERS: [&str; 13] = ["body", "main", "section", "article", "header", "footer", "aside", "nav", "div", "li", "form", "figure", "td"];
+
+/// Adds a `kind` element as the last child of the element at position `n` (or of its nearest container that
+/// is), with English placeholder text when `en`. Returns the new source and the new element's position.
+pub fn add(src: &str, n: usize, kind: &str, en: bool) -> Result<(String, usize), String> {
+    let markup = new_element(kind, en).ok_or_else(|| format!("不能添加“{kind}”。"))?;
+    let all = tags(src);
+    let tag = all.get(n.wrapping_sub(1)).ok_or("这个元素已经不在文件里了：请刷新预览。")?;
+    // The clicked element if it can hold children, else the innermost container around it in this file; with
+    // none (a page that fills a layout's block), right after the clicked element.
+    let container = all
+        .iter()
+        .rev()
+        .filter(|t| CONTAINERS.contains(&t.name.as_str()) && t.start <= tag.start)
+        .find(|t| element_range(src, t).is_some_and(|(_, end)| end >= tag.open_end));
+    let at = match container {
+        Some(c) => {
+            let (_, end) = element_range(src, c).ok_or("找不到这个区块的结尾：这里放不了新元素。")?;
+            src[..end].rfind("</").unwrap_or(end)
+        }
+        None => element_range(src, tag).ok_or("这里放不了新元素：请点在一个区块里面。")?.1,
+    };
+    let new_n = all.iter().filter(|t| t.start < at).count() + 1;
+    Ok((format!("{}{markup}{}", &src[..at], &src[at..]), new_n))
+}
+
 /// The value one edit has now, for undo: `None` when it is not set.
 pub fn current(doc: &Value, key: &str, tier: &str, prop: &str) -> Option<String> {
     doc["els"][key]["style"][tier][prop].as_str().map(String::from)
@@ -501,6 +542,24 @@ mod tests {
         let keys: Vec<&String> = after["els"].as_object().unwrap().keys().collect();
         assert_eq!(keys, ["a.html#3", "b.html#7"].map(String::from).iter().collect::<Vec<_>>());
         assert_eq!(after["els"]["a.html#3"]["style"]["all"]["color"], "#111");
+    }
+
+    #[test]
+    fn the_pen_adds_into_the_nearest_container() {
+        let src = "<body><section><h2>甲</h2></section><p>乙</p></body>";
+        let (out, n) = add(src, 3, "rect", false).unwrap();
+        assert!(out.starts_with("<body><section><h2>甲</h2><div style="), "{out}");
+        assert_eq!(n, 4);
+        assert_eq!(tags(&out)[n - 1].name, "div");
+        let (out, n) = add(src, 4, "text", false).unwrap();
+        assert!(out.ends_with("<p>乙</p><p style=\"margin:0\">双击改文字</p></body>"), "{out}");
+        assert_eq!(n, 5);
+        assert!(add(src, 2, "script", false).is_err());
+        // A page that only fills a layout's block: after the clicked element.
+        let block = "{% extends 'l.html' %}{% block main %}<h1>甲</h1><p>乙</p>{% endblock %}";
+        let (out, n) = add(block, 1, "line", false).unwrap();
+        assert!(out.contains("<h1>甲</h1><hr style="), "{out}");
+        assert_eq!(n, 2);
     }
 
     #[test]
