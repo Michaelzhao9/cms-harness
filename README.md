@@ -88,7 +88,7 @@ The chat model can come from the environment instead of Settings: `LLM_PROVIDER`
 - 📝 **Drafts everywhere.** Content, collections, pages, admin screens and settings are drafts until published. The live site always shows the published version, whoever visits. Compare draft and live side by side.
 - 🗂️ **Admin screens that follow the site.** When the site gains a form, members or orders, the assistant builds the screen to manage them in the same turn. The admin nav groups collections by the site's own sections. A collection no page uses is marked *Not on the site yet*, with one button that asks the chat to put it there.
 - 🧠 **Any model.** Claude, OpenAI, Gemini, DeepSeek, Qwen, Kimi, GLM, Doubao, SiliconFlow, Mistral, xAI, Groq, OpenRouter, a local Ollama or LM Studio, or any OpenAI-compatible API. Paste a key and it lists the models you can use.
-- 🔌 **Your agent, too.** A built-in MCP server and a REST API with 37 tools and scoped keys (`read`, `write`, `structure`, `publish`).
+- 🔌 **Your agent, too.** A built-in MCP server and a REST API with 41 tools and scoped keys (`read`, `write`, `structure`, `publish`).
 - 🌍 **Web search for the chat (off by default).** `web_search` and `fetch_page` through a self-hosted SearXNG, Brave or Tavily, with any model. Pages come back as material, never instructions, and private or local addresses are refused at every redirect.
 - 📚 **Skills.** Install a skill folder (with a `SKILL.md`) from GitHub or a zip. The chat reads it when the task needs it.
 
@@ -111,6 +111,9 @@ Hand edits are drafts too, like everything else.
 - 🧩 **Your stack, no build step.** HTML with `{{ }}` templates, plus CSS, JavaScript, JSX and TypeScript transpiled on the fly. React, Vue or Three.js load through an import map. You can also upload a site built with Vite.
 - 🖼️ **Images in the right size.** `{{ item.cover|thumb(640) }}` serves a smaller copy, made once and kept.
 - 👥 **Members and access rules.** Sign-up and login for visitors, kept apart from admin accounts. Each collection says who can read it (public, members, each member their own, private) and who can submit to it.
+- 🧩 **One environment, many surfaces.** The site is the first surface. When students and teachers, or customers and staff, need different screens, the assistant builds a surface for each (`/teacher/`, `/student/`), with its own pages and its own rule for who may enter, over data the whole environment shares. A members-only surface is guarded by the system, so its pages never check for themselves. The admin lists every surface, and **Environment** shows them all with the data they share.
+- 🛡️ **Protection built in.** Every page and endpoint built in the environment is behind one door: rate limits, vulnerability scanners shut out, no pages for AI crawlers and scripting tools (search engines still pass), and an in-browser check for clients that read page after page, with no outside service. **Protection** in the admin shows what was stopped; under attack, switch to strict and it applies at once. Only a builder changes these settings: neither the chat nor an API key can.
+- 🗂️ **Manage any data directly.** Every collection's list can be searched (text anywhere in a record, drafts too), exported as CSV, and filled from a CSV whose rows arrive as drafts. Every row is checked before anything comes in: one that does not fit and nothing does. In an export, text a spreadsheet would run as a formula is defused.
 - 🔎 **Full-text search.** `search("query")` in a page, `GET /api/v1/search` and a `search` tool. Chinese works without a dictionary, and visitors only ever find what they may open.
 
 ### Run it your way
@@ -228,6 +231,7 @@ Properties and values come from fixed lists, typed text is escaped so it can nev
 Each collection sets:
 - who can read it (`read`): `public`, `members`, `owner` (each member sees their own), or `private` (default: admin and keys only);
 - who can submit to it from the site (`create`): `none` (default), `members` or `public`. Submissions go live at once, record who sent them, and show as "N new" in the admin. Forms post to `POST /<collection>/new`; the API takes `POST /api/v1/content/<collection>`.
+- who can change (`update`) and remove (`delete`) a record from the site: `none` (default), `owner` (the member who added it), `members`, or a condition such as `record.owner == member.id and data.status == record.status`. A condition can use `record.<field>`, `record.id`, `record.owner`, `member` (logged in), `member.id`, `member.email`, `member.name`, `data.<field>` (what the record would become), `== != < <= > >=`, `and or not` and brackets. Changes and removals are live at once, and history keeps what the record was. The API takes `PATCH` and `DELETE /api/v1/content/<collection>/<id>`.
 
 A collection can also sit in a `group` (the site's section) with a `position`: the admin nav lists collections in that order, and each group folds.
 </details>
@@ -269,11 +273,13 @@ Only fields declared with `index` or `unique` can filter and sort.
 | `restore_version` `discard_draft` | write | put a version back as a draft, drop a draft |
 | `list_views` / `set_view` `delete_view` | read / structure | admin screens |
 | `get_site_notes` / `set_site_notes` | read / structure | notes for the assistant |
+| `check_page` | read | check a draft page: render errors, dead links, missing files, omissions |
 | `list_site_files` `get_site_file` | read | read site files (with their hand edits) |
 | `write_site_file` `delete_site_file` `upload_site_bundle` | structure | write site files, upload a built site |
 | `get_site_settings` / `set_site_settings` | read / structure | site name, languages, template text, import map, script origins |
 | `translation_status` / `set_translation` | read / write | what is missing or out of date; write a translation |
 | `set_member_login` | structure | turn member accounts on or off |
+| `list_ends` / `set_end` `delete_end` | read / structure | list surfaces; create, change (title, who may enter), delete a surface with its files |
 | `list_members` / `set_member_status` | read / write | list members, disable or enable one |
 | `upload_media` | write | upload an image or PDF |
 

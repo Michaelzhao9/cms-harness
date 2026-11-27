@@ -59,6 +59,10 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<NoArgs>("get_site_settings", Scope::Read, "读取网站的前端设置：import_map（浏览器里 import 的包从哪个网址加载）和 script_origins（网站允许加载脚本的其他来源，默认 https://esm.sh）。"),
             spec::<SetSiteSettings>("set_site_settings", Scope::Structure, "修改网站的设置（草稿，发布后生效）：name 是站点名称（网页标题、内置页面和后台都用它），import_map、script_origins 管前端脚本。只传要改的项，传 null 恢复默认。例：用 React 时 import_map 设为 {\"imports\": {\"react\": \"https://esm.sh/react@19\", \"react/jsx-runtime\": \"https://esm.sh/react@19/jsx-runtime\", \"react-dom/client\": \"https://esm.sh/react-dom@19/client\"}}。"),
             spec::<SetMemberLogin>("set_member_login", Scope::Structure, "打开或关闭网站的会员注册和登录（草稿，发布后生效）。打开后网站有 /account/signup、/account/login、/account/logout 页面和 /api/v1/members/* 接口，模板里 member 是当前登录的会员；后台左边会自动出现「用户管理」，关闭后它自动消失；要改它的样子，用 set_view 并写 collection: \"_members\"（字段 email、name、status、created_at、last_login）。网站要做登录功能时用它，不要自己建会员集合。"),
+            spec::<CheckPage>("check_page", Scope::Read, "检查草稿里的一个页面，就像预览会显示的那样：渲染有没有报错（带原因）、站内链接和引用的文件有没有指向不存在的地方、标题和各级小标题，以及该补的东西（没有 title、没有 viewport、图片没有 alt 等）。写完或改完页面后调用它，ok 不是 true 就先修好。path 是页面的网址，比如 / 或 /about。"),
+            spec::<NoArgs>("list_ends", Scope::Read, "列出这个环境里的端：第一个是网站本身（name 为空，网址 /），其余每个端是一个有名字的文件夹（文件写在 <name>/ 下，网址 /<name>/），带标题、谁能进（enter）、状态和文件数。"),
+            spec::<SetEnd>("set_end", Scope::Structure, "新建或修改一个端（草稿，发布后生效）。不同的人要用不同的界面时（学生端、老师端、门店端），给每一种人建一个端：name 是它的文件夹名和网址（/<name>/），title 是给人看的名字，enter 是谁能进：public（默认）或 members（只有登录的会员，没登录的访客会被带去登录，端里的页面不用自己检查）。端的页面用 write_site_file 写在 <name>/ 下，比如 teacher/index.html。数据是整个环境共用的，各个端读写同一批集合。"),
+            spec::<DeleteEnd>("delete_end", Scope::Structure, "删除一个端，连同它文件夹里的所有文件（草稿，发布后才真正删除）。"),
             spec::<ListMembers>("list_members", Scope::Read, "列出网站的注册会员（不含密码）：可按状态 active/disabled 和关键词筛选。"),
             spec::<SetMemberStatus>("set_member_status", Scope::Write, "停用或恢复一个会员（立即生效）：停用后他不能登录，已登录的会话也会失效。"),
             spec::<UploadMedia>("upload_media", Scope::Write, "上传图片或 PDF（base64，最大 5 MB）：返回 /uploads/ 路径，可填进 media 字段。"),
@@ -179,6 +183,19 @@ fn dispatch(app: &App, conn: &Connection, actor: &Actor, name: &str, args: Value
             let a: SetMemberLogin = parse(name, args)?;
             crate::members::set_login(conn, actor, a.enabled, check_note(&a.note)?)
         }
+        "check_page" => {
+            let a: CheckPage = parse(name, args)?;
+            crate::check::page(app, conn, &a.path)
+        }
+        "list_ends" => parse::<NoArgs>(name, args).and_then(|_| crate::ends::list(conn, &app.name(conn, true))),
+        "set_end" => {
+            let a: SetEnd = parse(name, args)?;
+            crate::ends::set(conn, actor, &a.name, a.title, a.enter, check_note(&a.note)?)
+        }
+        "delete_end" => {
+            let a: DeleteEnd = parse(name, args)?;
+            crate::ends::delete(conn, actor, &a.name, check_note(&a.note)?)
+        }
         "list_members" => {
             let a: ListMembers = parse(name, args)?;
             crate::members::list(conn, a.status.as_deref(), a.query.as_deref(), a.limit.unwrap_or(50), a.offset.unwrap_or(0))
@@ -242,6 +259,14 @@ struct CreateCollection {
     read: Option<crate::schema::Read>,
     /// Who may add records from the site, live at once: none (default), members, public.
     create: Option<crate::schema::Create>,
+    /// Who may change a live record from the site (PATCH /api/v1/content/<name>/<id>), live at once: none (default),
+    /// owner (the member who added it), members, or a condition such as
+    /// "record.owner == member.id and data.status == record.status". In a condition: record.<field>, record.id,
+    /// record.owner; member (logged in), member.id, member.email, member.name; data.<field> (what the record would
+    /// become); numbers, 'text', true, false, null; == != < <= > >=; and, or, not; brackets.
+    update: Option<String>,
+    /// Who may remove a live record from the site (DELETE /api/v1/content/<name>/<id>): the same rules as `update`.
+    delete: Option<String>,
     /// Where each record's page lives, like "/news/{slug}"; "/<name>/{slug}" when left out. Pages appear once the
     /// site has a detail template: "<name>/_item.html" or the site-wide "_item.html".
     url: Option<String>,
@@ -288,6 +313,10 @@ struct UpdateCollection {
     read: Option<crate::schema::Read>,
     /// none, members or public.
     create: Option<crate::schema::Create>,
+    /// Who may change a live record from the site: none, owner, members, or a condition (see create_collection).
+    update: Option<String>,
+    /// Who may remove a live record from the site: none, owner, members, or a condition.
+    delete: Option<String>,
     /// Where each record's page lives, like "/news/{slug}" or "/products/{category.slug}/{slug}"; "" for the default.
     url: Option<String>,
     /// In the site's other languages: "fallback" shows untranslated records in the default language, "hide" leaves them out.
@@ -383,6 +412,8 @@ fn create_collection(conn: &Connection, actor: &Actor, a: CreateCollection) -> R
         access: crate::schema::Access {
             read: a.read.unwrap_or(if a.public_read { crate::schema::Read::Public } else { crate::schema::Read::Private }),
             create: a.create.unwrap_or_default(),
+            update: crate::schema::kept_rule(a.update),
+            delete: crate::schema::kept_rule(a.delete),
         },
         fields: a.fields,
         url: a.url.filter(|u| !u.trim().is_empty()),
@@ -425,6 +456,12 @@ fn update_collection(conn: &Connection, actor: &Actor, a: UpdateCollection) -> R
     }
     if let Some(c) = a.create {
         def.access.create = c;
+    }
+    if a.update.is_some() {
+        def.access.update = crate::schema::kept_rule(a.update);
+    }
+    if a.delete.is_some() {
+        def.access.delete = crate::schema::kept_rule(a.delete);
     }
     if let Some(u) = a.url {
         def.url = Some(u.trim().to_string()).filter(|u| !u.is_empty());
@@ -546,6 +583,8 @@ struct QueryRecords {
     /// 1 to 100, default 20.
     limit: Option<i64>,
     offset: Option<i64>,
+    /// Text to look for anywhere in a record, in any field; drafts are searched too.
+    search: Option<String>,
 }
 
 struct RecRow {
@@ -823,6 +862,7 @@ fn query_records(conn: &Connection, a: QueryRecords) -> Result<Value, String> {
         limit: a.limit.unwrap_or(20),
         offset: a.offset.unwrap_or(0),
         owner: None,
+        search: a.search,
     };
     let (rows, total) = query::run(conn, &def, &q, false)?;
     let items: Vec<Value> = rows.into_iter().map(|r| json!({ "id": r.id, "status": r.status, "data": r.doc })).collect();
@@ -930,6 +970,32 @@ struct DeleteView {
 #[serde(deny_unknown_fields)]
 struct SetMemberLogin {
     enabled: bool,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CheckPage {
+    /// The page's address: "/" is the home page, "/about" is about.html.
+    path: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SetEnd {
+    /// The folder its files live in and its address: "teacher" holds teacher/… and answers at /teacher/.
+    name: String,
+    /// What people call it, like 老师端. Required for a new one.
+    title: Option<String>,
+    /// Who may open its pages: public (default) or members.
+    enter: Option<crate::ends::Enter>,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeleteEnd {
+    name: String,
     note: String,
 }
 

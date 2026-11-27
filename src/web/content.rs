@@ -223,7 +223,13 @@ fn list_ctx(app: &App, user: &AdminUser, def: &CollectionDef, view: Option<&View
         filters.push(json!({ "name": name, "title": f.map_or("编号", |f| f.title.as_str()), "value": value, "options": options }));
     }
 
+    // The search box: text anywhere in a record. It stays in the tab and page links.
+    let search = param(params, "q").trim();
+    kept.push(("q", search));
     let mut args = json!({ "collection": def.name, "limit": PER_PAGE, "offset": (page - 1) * PER_PAGE, "status": statuses });
+    if !search.is_empty() {
+        args["search"] = json!(search);
+    }
     if !filter.is_empty() {
         args["filter"] = Value::Object(filter);
     }
@@ -339,6 +345,9 @@ fn list_ctx(app: &App, user: &AdminUser, def: &CollectionDef, view: Option<&View
         "layout": view.map_or(crate::schema::Layout::Table, |v| v.layout),
         "density": view.map_or(crate::schema::Density::Comfortable, |v| v.density),
         "list_error": list_error,
+        "q": search,
+        "imported": param(params, "imported").parse::<i64>().ok(),
+        "sheet": view.is_none() && !def.single,
         "pager": pager,
         "can_create": allows(Action::Create) && user.actor().can(Scope::Write),
         "new_href": format!("{base}?new=1"),

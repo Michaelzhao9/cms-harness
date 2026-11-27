@@ -2,6 +2,7 @@
 //! adds go live at once (a form submission, a comment, an order), stamped with their owner.
 
 use crate::changes;
+use crate::members::Member;
 use crate::schema::{fill_defaults, normalize, Access, CollectionDef, Create, FieldType, Read};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -67,28 +68,13 @@ pub fn submit(conn: &Connection, collection: &str, data: &Value, who: &Submitter
     if data.to_string().len() > MAX_SUBMIT_BYTES {
         return Err("提交的内容太长了。".into());
     }
-    let (key, limit, actor, owner) = match who {
-        Submitter::Member(id) => (format!("submit:m:{id}"), MEMBER_PER_HOUR, format!("member:{id}"), Some(*id)),
-        // The client address is only a rate-limit key, deleted within the hour; history just says 访客.
-        Submitter::Public(client) => (format!("submit:ip:{client}"), PUBLIC_PER_HOUR, "访客".to_string(), None),
+    let (key, actor) = throttle(conn, who)?;
+    let owner = match who {
+        Submitter::Member(id) => Some(*id),
+        Submitter::Public(_) => None,
     };
-    conn.execute("DELETE FROM member_attempts WHERE at <= datetime('now', '-1 hour')", []).map_err(db)?;
-    let recent: i64 = conn.query_row("SELECT count(*) FROM member_attempts WHERE key = ?1", [&key], |r| r.get(0)).map_err(db)?;
-    if recent >= limit {
-        return Err("提交太频繁，请过一会儿再试。".into());
-    }
-    let mut doc = fill_defaults(&def, normalize(&def, &json!({}), data)?)?;
-    for f in def.fields.iter().filter(|f| f.kind == FieldType::Richtext) {
-        if let Some(html) = doc.get(&f.name).and_then(Value::as_str) {
-            let clean = ammonia::Builder::default().rm_tags(["img"]).clean(html).to_string();
-            doc[&f.name] = json!(clean);
-        }
-    }
-    // The generic message: the real one names the other record's id and value, which a visitor must not learn.
-    if let Err(e) = changes::check_unique(conn, &def, None, &doc, true) {
-        let field = def.fields.iter().find(|f| e.contains(&format!("“{}”", f.name))).map_or("填写的内容", |f| f.title.as_str());
-        return Err(format!("“{field}”这个值已经有人用过了。"));
-    }
+    let doc = clean(&def, fill_defaults(&def, normalize(&def, &json!({}), data)?)?);
+    unique(conn, &def, None, &doc)?;
     check_live_relations(conn, &def, &doc)?;
     conn.execute("INSERT INTO member_attempts(key) VALUES (?1)", [&key]).map_err(db)?;
     let tx = conn.unchecked_transaction().map_err(db)?;
@@ -99,15 +85,192 @@ pub fn submit(conn: &Connection, collection: &str, data: &Value, who: &Submitter
     .map_err(db)?;
     let id = tx.last_insert_rowid();
     crate::routes::assign(&tx, &def, id, &doc)?;
-    tx.execute("INSERT INTO releases(actor, note) VALUES (?1, '访客提交')", [&actor]).map_err(db)?;
-    let release = tx.last_insert_rowid();
-    tx.execute(
-        "INSERT INTO versions(release_id, target, doc, prev, actor, note) VALUES (?1, ?2, ?3, NULL, ?4, '访客提交')",
-        params![release, format!("record:{id}"), doc.to_string(), actor],
-    )
-    .map_err(db)?;
+    history(&tx, &actor, id, Some(&doc.to_string()), None, "访客提交")?;
     tx.commit().map_err(db)?;
     Ok(id)
+}
+
+/// The rate-limit key and the history name of `who`; an error when they wrote too much within the hour.
+fn throttle(conn: &Connection, who: &Submitter) -> Result<(String, String), String> {
+    let (key, limit, actor) = match who {
+        Submitter::Member(id) => (format!("submit:m:{id}"), MEMBER_PER_HOUR, format!("member:{id}")),
+        // The client address is only a rate-limit key, deleted within the hour; history just says 访客.
+        Submitter::Public(client) => (format!("submit:ip:{client}"), PUBLIC_PER_HOUR, "访客".to_string()),
+    };
+    conn.execute("DELETE FROM member_attempts WHERE at <= datetime('now', '-1 hour')", []).map_err(db)?;
+    let recent: i64 = conn.query_row("SELECT count(*) FROM member_attempts WHERE key = ?1", [&key], |r| r.get(0)).map_err(db)?;
+    if recent >= limit {
+        return Err("提交太频繁，请过一会儿再试。".into());
+    }
+    Ok((key, actor))
+}
+
+/// Rich text from the site is cleaned, and keeps no images.
+fn clean(def: &CollectionDef, mut doc: Value) -> Value {
+    for f in def.fields.iter().filter(|f| f.kind == FieldType::Richtext) {
+        if let Some(html) = doc.get(&f.name).and_then(Value::as_str) {
+            let clean = ammonia::Builder::default().rm_tags(["img"]).clean(html).to_string();
+            doc[&f.name] = json!(clean);
+        }
+    }
+    doc
+}
+
+/// `check_unique` with a generic message: the real one names the other record's id and value, which a visitor
+/// must not learn.
+fn unique(conn: &Connection, def: &CollectionDef, id: Option<i64>, doc: &Value) -> Result<(), String> {
+    changes::check_unique(conn, def, id, doc, true).map_err(|e| {
+        let field = def.fields.iter().find(|f| e.contains(&format!("“{}”", f.name))).map_or("填写的内容", |f| f.title.as_str());
+        format!("“{field}”这个值已经有人用过了。")
+    })
+}
+
+/// One line of history for a record a visitor or member wrote: what it is now (none: removed) and what it was.
+fn history(conn: &Connection, actor: &str, id: i64, doc: Option<&str>, prev: Option<&str>, note: &str) -> Result<(), String> {
+    conn.execute("INSERT INTO releases(actor, note) VALUES (?1, ?2)", params![actor, note]).map_err(db)?;
+    let release = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO versions(release_id, target, doc, prev, actor, note) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![release, format!("record:{id}"), doc, prev, actor, note],
+    )
+    .map_err(db)?;
+    Ok(())
+}
+
+/// Why a change from the site was turned away.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    /// Not logged in.
+    Login,
+    /// Not allowed, or no such record: the two get one answer, so nobody learns which records exist.
+    Forbidden,
+    /// The values sent do not fit the collection.
+    Invalid,
+    /// Something else still needs this record.
+    Conflict,
+    /// Too many writes within the hour.
+    Busy,
+    Broken,
+}
+
+pub type Refused = (Refusal, String);
+
+fn broken(e: String) -> Refused {
+    (Refusal::Broken, e)
+}
+
+/// A live record of `collection` that the collection's rule (`update` or `delete`) lets `who` act on, with the
+/// definition, the stored document as text, any pending draft, and who they are in history. `data` is what the
+/// request sends, for rules that look at it.
+#[allow(clippy::type_complexity)]
+fn permitted(
+    conn: &Connection, collection: &str, id: i64, who: &Submitter, verb: &str, rule: fn(&Access) -> Option<&str>, data: Option<&Value>,
+) -> Result<(CollectionDef, String, Value, Option<String>, Option<Member>, String, String), Refused> {
+    let refuse = |title: &str| (Refusal::Forbidden, format!("“{title}”不接受{verb}。"));
+    let def = changes::live_def(conn, collection).map_err(|_| refuse(collection))?;
+    let Some(rule) = rule(&def.access).map(str::to_string) else { return Err(refuse(&def.title)) };
+    let (key, actor) = throttle(conn, who).map_err(|e| (Refusal::Busy, e))?;
+    let member = match who {
+        Submitter::Member(id) => conn
+            .query_row("SELECT id, email, name FROM members WHERE id = ?1 AND status = 'active'", [id], |r| Ok(Member { id: r.get(0)?, email: r.get(1)?, name: r.get(2)? }))
+            .optional()
+            .map_err(|e| broken(db(e)))?,
+        Submitter::Public(_) => None,
+    };
+    let no = || match member {
+        Some(_) => (Refusal::Forbidden, format!("没有权限{verb}这条内容，或者它不存在。")),
+        None => (Refusal::Login, format!("请先登录再{verb}。")),
+    };
+    let row: Option<(String, Option<String>)> = conn
+        .query_row("SELECT published, draft FROM records WHERE id = ?1 AND collection = ?2 AND published IS NOT NULL", params![id, collection], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()
+        .map_err(|e| broken(db(e)))?;
+    let Some((text, draft)) = row else { return Err(no()) };
+    let old: Value = serde_json::from_str(&text).map_err(|e| broken(format!("记录 {id} 的内容已损坏：{e}")))?;
+    // Before the values are looked at closely: someone who may not write learns nothing about what would fit.
+    let wanted = data.map(|d| merged(&old, d));
+    if !crate::rules::allows(conn, &def, &rule, member.as_ref(), id, wanted.as_ref()).map_err(broken)? {
+        return Err(no());
+    }
+    Ok((def, text, old, draft, member, key, actor))
+}
+
+/// `base` with the keys of `over` written on top.
+fn merged(base: &Value, over: &Value) -> Value {
+    let mut out = base.clone();
+    if let (Some(out), Some(over)) = (out.as_object_mut(), over.as_object()) {
+        out.extend(over.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+    out
+}
+
+/// Changes the fields in `data` of a live record, when the collection's `update` rule lets `who`. Live at once,
+/// like a submission; a draft the admin has pending gets the same fields, so publishing it does not undo this.
+pub fn update(conn: &Connection, collection: &str, id: i64, data: &Value, who: &Submitter) -> Result<(), Refused> {
+    if data.to_string().len() > MAX_SUBMIT_BYTES {
+        return Err((Refusal::Invalid, "提交的内容太长了。".into()));
+    }
+    let (def, text, old, draft, member, key, actor) = permitted(conn, collection, id, who, "修改", |a| a.update.as_deref(), Some(data))?;
+    let invalid = |e: String| (Refusal::Invalid, e);
+    let doc = clean(&def, normalize(&def, &old, data).map_err(invalid)?);
+    // Again on what will really be stored: cleaning may have changed a value the rule looks at.
+    let rule = def.access.update.as_deref().unwrap_or("none");
+    if !crate::rules::allows(conn, &def, rule, member.as_ref(), id, Some(&doc)).map_err(broken)? {
+        return Err((Refusal::Forbidden, "没有权限修改这条内容，或者它不存在。".into()));
+    }
+    unique(conn, &def, Some(id), &doc).map_err(invalid)?;
+    check_live_relations(conn, &def, &doc).map_err(invalid)?;
+    let pending = match draft {
+        Some(d) => {
+            let d: Value = serde_json::from_str(&d).map_err(|e| broken(format!("记录 {id} 的草稿已损坏：{e}")))?;
+            let sent: Value = data.as_object().map(|o| o.keys().map(|k| (k.clone(), doc[k].clone())).collect::<serde_json::Map<_, _>>().into()).unwrap_or_default();
+            Some(merged(&d, &sent).to_string())
+        }
+        None => None,
+    };
+    let run = || -> Result<(), String> {
+        conn.execute("INSERT INTO member_attempts(key) VALUES (?1)", [&key]).map_err(db)?;
+        let tx = conn.unchecked_transaction().map_err(db)?;
+        tx.execute("UPDATE records SET published = ?2, draft = coalesce(?3, draft), updated_at = datetime('now') WHERE id = ?1", params![id, doc.to_string(), pending])
+            .map_err(db)?;
+        history(&tx, &actor, id, Some(&doc.to_string()), Some(&text), "访客修改")?;
+        tx.commit().map_err(db)
+    };
+    run().map_err(broken)
+}
+
+/// Removes a live record, when the collection's `delete` rule lets `who` and no other live record points at it.
+/// History keeps what it was, so the admin can bring it back.
+pub fn delete(conn: &Connection, collection: &str, id: i64, who: &Submitter) -> Result<(), Refused> {
+    let (_, text, _, _, _, key, actor) = permitted(conn, collection, id, who, "删除", |a| a.delete.as_deref(), None)?;
+    if pointed_at(conn, collection, id).map_err(broken)? {
+        return Err((Refusal::Conflict, "还有别的内容用到这一条，不能删除。".into()));
+    }
+    let run = || -> Result<(), String> {
+        conn.execute("INSERT INTO member_attempts(key) VALUES (?1)", [&key]).map_err(db)?;
+        let tx = conn.unchecked_transaction().map_err(db)?;
+        tx.execute("UPDATE records SET published = NULL, updated_at = datetime('now') WHERE id = ?1", [id]).map_err(db)?;
+        history(&tx, &actor, id, None, Some(&text), "访客删除")?;
+        tx.commit().map_err(db)
+    };
+    run().map_err(broken)
+}
+
+/// Whether a live record of any collection has a relation to record `id` of `collection`. Publishing checks
+/// every live relation, so a removal that left one dangling would block all later publishes.
+fn pointed_at(conn: &Connection, collection: &str, id: i64) -> Result<bool, String> {
+    for (name, def) in changes::live_defs(conn)? {
+        for f in def.fields.iter().filter(|f| f.kind == FieldType::Relation && f.target.as_deref() == Some(collection) && crate::schema::valid_name(&f.name)) {
+            let sql = format!(
+                "SELECT 1 FROM records, json_each(CASE json_type(published,'$.{0}') WHEN 'array' THEN json_extract(published,'$.{0}')                  ELSE json_array(json_extract(published,'$.{0}')) END) AS v WHERE collection = ?1 AND published IS NOT NULL AND v.value = ?2 LIMIT 1",
+                f.name
+            );
+            if conn.query_row(&sql, params![name, id], |_| Ok(())).optional().map_err(db)?.is_some() {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// Relation values must point at live records of the target collection.

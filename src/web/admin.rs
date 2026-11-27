@@ -136,7 +136,40 @@ pub fn nav(conn: &Connection, user: &AdminUser, current: &str, has_media: bool) 
     });
     let entries = nav_entries(out["collections"].as_array().map(Vec::as_slice).unwrap_or_default(), current);
     out["entries"] = json!(entries);
+    // The 端, once there is more than the site itself: with one there is nothing to choose between.
+    let ends = ends_of(conn, "");
+    if ends.len() > 1 {
+        out["ends"] = json!(ends);
+    }
     out
+}
+
+/// Every 端 as the admin shows it: `ends::list` plus where it opens in the workbench.
+fn ends_of(conn: &Connection, site_name: &str) -> Vec<Value> {
+    let Ok(Value::Array(list)) = crate::ends::list(conn, site_name) else { return vec![] };
+    list.into_iter()
+        .map(|mut e| {
+            e["href"] = json!(match e["name"].as_str().unwrap_or_default() {
+                "" => "/admin".to_string(),
+                name => format!("/admin?p=/{name}/"),
+            });
+            e
+        })
+        .collect()
+}
+
+/// `GET /admin/env`: the environment at a glance: every 端 and the data they share.
+pub async fn env(State(app): State<Shared>, Extension(user): Extension<AdminUser>) -> Response {
+    content::blocking(move || {
+        let (ends, collections) = {
+            let conn = app.conn();
+            let ends = ends_of(&conn, &app.name(&conn, true));
+            (ends, nav_collections(&conn).map_err(|e| content::internal(format!("读取集合失败：{e}")))?)
+        };
+        let ctx = json!({ "ends": ends, "collections": collections });
+        Ok(Out::Page(StatusCode::OK, "env.html", content::shell(&app, &user, "env", ctx)))
+    })
+    .await
 }
 
 #[derive(Deserialize)]

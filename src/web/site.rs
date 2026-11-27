@@ -96,6 +96,19 @@ pub async fn preview(State(app): State<Shared>, req: Request) -> Response {
     .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("服务器内部错误：{e}")).into_response())
 }
 
+/// The draft of the page (or file) at `path`, as the preview renders it: (status, body). For `check_page`, which
+/// looks at what was just written without a browser.
+pub fn draft(app: &App, conn: &Connection, path: &str) -> (u16, Vec<u8>) {
+    use futures_util::FutureExt;
+    let v = Visit { app, conn, mode: Mode::Preview, base: "", path, query: &[], if_none_match: None, framers: "'self'".into(), member: None, lang: crate::i18n::Lang::Zh,
+        admin_url: "/admin".into(), host: String::new(), accept_language: String::new(), site: Default::default() };
+    let resp = v.respond();
+    let status = resp.status().as_u16();
+    // Every site response is built in memory, so its body is ready at once.
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).now_or_never().and_then(Result::ok).map(|b| b.to_vec()).unwrap_or_default();
+    (status, body)
+}
+
 /// An unknown, expired or ended preview token: nothing.
 fn gone() -> Response {
     let headers = [(header::CONTENT_TYPE, "text/plain; charset=utf-8"), (header::CACHE_CONTROL, "no-store"), (header::CONTENT_SECURITY_POLICY, "sandbox; default-src 'none'")];
@@ -213,6 +226,12 @@ impl Visit<'_> {
     }
 
     fn route(&self, rel: &str) -> Result<Response, String> {
+        // An 端 only members may enter: a visitor goes to log in and comes back. Before the page cache, so closing
+        // an 端 also closes the pages visitors already saw. The admin's preview has its own permission.
+        if self.mode == Mode::Live && self.member.is_none() && crate::ends::closed(&crate::ends::load(self.conn, false), rel) {
+            let next: String = self.path.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+            return Ok(self.finish((StatusCode::SEE_OTHER, [(header::LOCATION, format!("/account/login?next={next}"))]).into_response(), None));
+        }
         if let Some(hit) = self.cache_key().and_then(|k| self.app.cache.get(self.conn, &k)) {
             let mut resp = (StatusCode::from_u16(hit.status).unwrap_or(StatusCode::OK), hit.body).into_response();
             for (k, v) in hit.headers {
@@ -259,7 +278,7 @@ impl Visit<'_> {
                 return Ok(self.finish(([(header::CONTENT_TYPE, "application/xml; charset=utf-8")], xml).into_response(), None));
             }
             "robots.txt" => {
-                return Ok(self.finish(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], site::robots(&self.app.origin)).into_response(), None));
+                return Ok(self.finish(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], format!("{}{}", crate::shield::robots(&self.app.shield.config()), site::robots(&self.app.origin))).into_response(), None));
             }
             _ => {}
         }

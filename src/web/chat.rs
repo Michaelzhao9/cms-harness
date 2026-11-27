@@ -159,6 +159,7 @@ pub fn view(app: &App, user: &AdminUser) -> Value {
         "builder": user.role == "builder",
         "lang": lang.code(),
         "turns": turns,
+        "tasks": c.tasks,
         "status": { "label": t(&label), "step": steps_now },
         "pending": order.len(),
         "summary": { "changes": last_changes.len(), "places": places.join(if lang == crate::i18n::Lang::En { ", " } else { "、" }) },
@@ -230,7 +231,13 @@ pub async fn home(State(app): State<Shared>, Extension(user): Extension<AdminUse
                 "marks": link(&width, &version, !marks), "reload": link(&width, &version, marks),
             },
         });
-        Ok(Out::Page(StatusCode::OK, "home.html", content::shell(&app, &user, "web", ctx)))
+        let mut ctx = content::shell(&app, &user, "web", ctx);
+        // Which 端 the preview is in: the one whose folder the path is under, else the site.
+        if let Some(ends) = ctx["nav"]["ends"].as_array_mut() {
+            let inside = ends.iter().position(|e| e["name"].as_str().is_some_and(|n| !n.is_empty() && p.trim_start_matches('/').split('/').next() == Some(n)));
+            ends[inside.unwrap_or(0)]["here"] = json!(true);
+        }
+        Ok(Out::Page(StatusCode::OK, "home.html", ctx))
     })
     .await
 }

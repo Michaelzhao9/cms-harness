@@ -69,12 +69,23 @@ pub enum Create {
     Public,
 }
 
-#[derive(Serialize, JsonSchema, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[derive(Serialize, JsonSchema, Clone, Default, PartialEq, Eq, Debug)]
 pub struct Access {
     #[serde(default)]
     pub read: Read,
     #[serde(default)]
     pub create: Create,
+    /// Who may change a live record from the site: a rule (see `rules`); nobody when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update: Option<String>,
+    /// Who may remove a live record from the site: a rule; nobody when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delete: Option<String>,
+}
+
+/// A rule as it is kept: trimmed, and nothing at all for `none` or an empty one.
+pub fn kept_rule(rule: Option<String>) -> Option<String> {
+    rule.map(|r| r.trim().to_string()).filter(|r| !r.is_empty() && r != "none")
 }
 
 impl<'de> Deserialize<'de> for Access {
@@ -88,10 +99,12 @@ impl<'de> Deserialize<'de> for Access {
             create: Create,
             #[serde(default)]
             public_read: bool,
+            update: Option<String>,
+            delete: Option<String>,
         }
         let r = Raw::deserialize(d)?;
         let read = r.read.unwrap_or(if r.public_read { Read::Public } else { Read::Private });
-        Ok(Access { read, create: r.create })
+        Ok(Access { read, create: r.create, update: kept_rule(r.update), delete: kept_rule(r.delete) })
     }
 }
 
@@ -196,6 +209,11 @@ pub fn check_def(def: &CollectionDef) -> Result<(), String> {
     }
     if let Some(p) = &def.url {
         crate::routes::check_pattern(def, p)?;
+    }
+    for (name, rule) in [("update", &def.access.update), ("delete", &def.access.delete)] {
+        if let Some(rule) = rule {
+            crate::rules::check(def, rule).map_err(|e| format!("集合的 {name} 规则“{rule}”写得不对：{e}"))?;
+        }
     }
     Ok(())
 }

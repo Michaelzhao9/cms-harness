@@ -23,7 +23,7 @@ pub fn router(app: Shared) -> Router {
         .route("/mcp", post(mcp).layer(DefaultBodyLimit::max(8 * MIB)))
         .route("/api/v1/site/bundle", post(site_bundle).layer(DefaultBodyLimit::max(crate::site::MAX_BUNDLE_BYTES)))
         .route("/api/v1/content/{collection}", get(list).post(submit).layer(DefaultBodyLimit::max(crate::access::MAX_SUBMIT_BYTES + 1024)))
-        .route("/api/v1/content/{collection}/{id}", get(one))
+        .route("/api/v1/content/{collection}/{id}", get(one).patch(change).delete(remove).layer(DefaultBodyLimit::max(crate::access::MAX_SUBMIT_BYTES + 1024)))
         .route("/api/v1/search", get(search))
         .route("/api/v1/media", post(upload).layer(DefaultBodyLimit::max(media::UPLOAD_BODY_LIMIT)))
         .route("/uploads/{*path}", get(serve))
@@ -118,6 +118,60 @@ async fn submit(State(app): State<Shared>, Path(c): Path<String>, peer: Option<a
         Ok(Ok(id)) => (StatusCode::CREATED, Json(json!({ "ok": true, "id": id }))).into_response(),
         Ok(Err(e)) => {
             let status = if e.contains("太频繁") { StatusCode::TOO_MANY_REQUESTS } else if e.contains("登录") { StatusCode::UNAUTHORIZED } else if e.contains("不接受") || e.starts_with("没有可以提交") { StatusCode::FORBIDDEN } else { StatusCode::BAD_REQUEST };
+            error_response(status, e)
+        }
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+type Peer = Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>;
+
+/// `PATCH /api/v1/content/<collection>/<id>`: a member changes the fields sent, when the collection's `update`
+/// rule allows it. Live at once.
+async fn change(State(app): State<Shared>, Path((c, id)): Path<(String, String)>, peer: Peer, h: HeaderMap, body: Bytes) -> Response {
+    let data: Value = match serde_json::from_slice(&body) {
+        Ok(Value::Object(o)) => Value::Object(o),
+        _ => return error_response(StatusCode::BAD_REQUEST, "请提交一个 JSON 对象，里面只放要改的字段，例如 {\"name\": \"小王\"}。".into()),
+    };
+    written(app, id, peer, h, move |conn, id, who| crate::access::update(conn, &c, id, &data, who)).await
+}
+
+/// `DELETE /api/v1/content/<collection>/<id>`: a member removes a record, when the `delete` rule allows it.
+async fn remove(State(app): State<Shared>, Path((c, id)): Path<(String, String)>, peer: Peer, h: HeaderMap) -> Response {
+    written(app, id, peer, h, move |conn, id, who| crate::access::delete(conn, &c, id, who)).await
+}
+
+/// Runs a member's or visitor's write to one record and answers for it.
+async fn written(
+    app: Shared, id: String, peer: Peer, h: HeaderMap,
+    write: impl FnOnce(&Connection, i64, &crate::access::Submitter) -> Result<(), crate::access::Refused> + Send + 'static,
+) -> Response {
+    use crate::access::Refusal;
+    // The same answer as a record that is not there: ids are whole numbers.
+    let id: i64 = id.parse().unwrap_or(-1);
+    let trust = std::env::var("HC_TRUST_PROXY").is_ok_and(|v| v == "1");
+    let client = crate::web::client_key(&h, peer.map(|axum::Extension(axum::extract::ConnectInfo(a))| a), trust);
+    let token = crate::web::session::cookie_value(&h, crate::members::COOKIE);
+    let done = tokio::task::spawn_blocking(move || {
+        let conn = app.conn();
+        let who = match crate::access::viewer(&conn, None, token.as_deref()) {
+            crate::access::Viewer::Member(id) => crate::access::Submitter::Member(id),
+            _ => crate::access::Submitter::Public(client),
+        };
+        write(&conn, id, &who)
+    })
+    .await;
+    match done {
+        Ok(Ok(())) => Json(json!({ "ok": true, "id": id })).into_response(),
+        Ok(Err((why, e))) => {
+            let status = match why {
+                Refusal::Login => StatusCode::UNAUTHORIZED,
+                Refusal::Forbidden => StatusCode::FORBIDDEN,
+                Refusal::Invalid => StatusCode::BAD_REQUEST,
+                Refusal::Conflict => StatusCode::CONFLICT,
+                Refusal::Busy => StatusCode::TOO_MANY_REQUESTS,
+                Refusal::Broken => StatusCode::INTERNAL_SERVER_ERROR,
+            };
             error_response(status, e)
         }
         Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),

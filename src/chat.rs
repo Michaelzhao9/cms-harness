@@ -12,10 +12,15 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-pub const MAX_MODEL_CALLS: usize = 30;
+/// Model calls one turn may make: room to build a whole site in one go. 停下 ends it sooner.
+pub const MAX_MODEL_CALLS: usize = 100;
+/// The same call this many times in a row is a model going in circles: the turn ends there.
+pub const STUCK_AFTER: usize = 5;
 /// How much of the "what the admin is looking at" context reaches the model.
 pub const CTX_LIMIT: usize = 500;
 pub const ASK_USER: &str = "ask_user";
+pub const SET_TASKS: &str = "set_tasks";
+const MAX_TASKS: usize = 20;
 pub const USE_SKILL: &str = "use_skill";
 pub const READ_SKILL_FILE: &str = "read_skill_file";
 const CHANGE_FIELDS: usize = 5;
@@ -47,6 +52,13 @@ pub struct Change {
     pub after: Value,
 }
 
+/// One line of the model's plan for a request, shown to the admin while it works.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Task {
+    pub text: String,
+    pub done: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Question {
     pub text: String,
@@ -64,6 +76,8 @@ pub struct Conversation {
     pub error: Option<String>,
     pub changes: Vec<Change>,
     pub question: Option<Question>,
+    /// The model's plan for the request it is on (`set_tasks`); empty when it made none.
+    pub tasks: Vec<Task>,
     /// Text of the reply streaming in right now.
     pub streaming: String,
     /// Bumped on every update; the event stream sends a fresh view when it moves.
@@ -226,6 +240,10 @@ pub fn start(app: Shared, user: &AdminUser, text: String, attachments: Vec<Attac
             return Err("上一条还在处理，请等它结束再发。".to_string());
         }
         let mut content = std::mem::take(&mut c.pending_results);
+        // A new request starts with no plan; an answer to the model's question carries on with the one it had.
+        if c.pending_ask.is_none() {
+            c.tasks.clear();
+        }
         if let Some(ask) = c.pending_ask.take() {
             let answer = blocks.iter().filter_map(|b| if let Block::Text(t) = b { Some(t.as_str()) } else { None }).collect::<Vec<_>>().join("\n");
             content.push(Block::ToolResult { tool_use_id: ask, content: format!("用户的回答：{answer}"), is_error: false });
@@ -257,6 +275,30 @@ fn ask_user_tool() -> ToolDef {
     }
 }
 
+fn set_tasks_tool() -> ToolDef {
+    ToolDef {
+        name: SET_TASKS.into(),
+        description: "把这次要做的事列成任务清单给管理员看：要做的事有三步以上时，开始动手前先列出来；每做完一项就再调用一次，带上完整的清单，把做完的标成 done。清单最多 20 项，每项一句话。".into(),
+        input_schema: json!({"type": "object", "properties": {
+            "tasks": {"type": "array", "maxItems": MAX_TASKS, "items": {"type": "object", "properties": {"text": {"type": "string"}, "done": {"type": "boolean"}}, "required": ["text"]}}
+        }, "required": ["tasks"]}),
+    }
+}
+
+/// The list a `set_tasks` call carries, or what is wrong with it.
+fn parse_tasks(input: &Value) -> Result<Vec<Task>, String> {
+    let list = input["tasks"].as_array().ok_or("tasks 要是一组任务：[{\"text\": \"建集合\", \"done\": false}]。")?;
+    if list.len() > MAX_TASKS {
+        return Err(format!("任务清单最多 {MAX_TASKS} 项：把相近的合成一项。"));
+    }
+    list.iter()
+        .map(|t| {
+            let text = t["text"].as_str().map(str::trim).filter(|s| !s.is_empty()).ok_or("每一项任务都要有 text。")?;
+            Ok(Task { text: text.chars().take(120).collect(), done: t["done"].as_bool().unwrap_or(false) })
+        })
+        .collect()
+}
+
 fn skill_tools() -> Vec<ToolDef> {
     vec![
         ToolDef {
@@ -281,6 +323,7 @@ pub fn chat_tools(actor: &Actor) -> Vec<ToolDef> {
         .map(|s| ToolDef { name: s.name.into(), description: s.description.into(), input_schema: s.schema.clone() })
         .collect();
     out.push(ask_user_tool());
+    out.push(set_tasks_tool());
     out
 }
 
@@ -294,6 +337,9 @@ const RULES: &str = "你是这个网站后台里的助手，替管理员修改�
   · 没有这类功能、没有数据的东西，绝不建管理界面，也不为了看起来完整去建空界面。\n\
   · 后台左边跟着网站的栏目走：一个栏目下有几块不同的内容（租赁业务下的设备租赁、琴房租赁），就给这几个集合设同一个 group（栏目名），用 position 按网站导航的顺序排；只有一页的内容（集团介绍、联系我们）建成 single 集合。不要把不同栏目的东西塞进一个“分类”集合。\n\
   · 网站上删掉某个功能时，同一轮里用 delete_view 删掉它的管理界面。\n\
+- 要做的事有三步以上时（建一个网站、一套系统），开始动手前先用 set_tasks 把任务清单列给管理员看，每做完一项就再调用一次把它标成完成。小改动不用列。\n\
+- 写完或改完一个页面，用 check_page 看一眼它的草稿：ok 不是 true（渲染报错、链接或文件指向不存在的地方）就先修好，再告诉管理员做完了。warnings 里的问题顺手补上。\n\
+- 这个环境可以有多个端：网站本身是第一个。不同的人要用不同的界面时（学生和老师、顾客和店员），用 set_end 给每一种人建一个端，页面写在它的文件夹下（teacher/index.html 的网址是 /teacher/）。只给登录会员用的端设 enter: members：没登录的访客会被带去登录，页面里不用自己检查。数据是所有端共用的：会员能改、能删哪些记录，用集合的 update、delete 规则定（owner，或一句条件，比如 record.owner == member.id），会员在页面里用 PATCH、DELETE /api/v1/content/<集合>/<编号> 来改和删。只有一种使用者时不要建端。\n\
 - 这个系统完全独立运行：不要把数据推送或同步到任何外部平台，也不要接入外部服务。需要保存的数据，都建成这里的集合。\n\
 - 网站一开始只有一个内置的欢迎页；网站的页面都由你写网站文件来做（写了 index.html 就替换欢迎页），内容通过 collection()、record()、search() 取，分页的总数用 count(\"集合名\", filter={...})（collection() 一次最多 100 条）。上传的图片按显示的宽度用缩小版：{{ p.image|thumb(640) }}（列表、卡片用 384 到 828，大图横幅用 1920），不要直接放原图。\n\
 - 每条记录自动有自己的页面：给集合写一个详情模板「集合名/_item.html」（全站通用的叫 _item.html），模板里用 item 取这条记录；网址默认是 /集合名/网址名，网址名从标题自动生成。要别的网址就在集合上设 url，比如 /products/{category.slug}/{slug} 或 /{slug}。列表页写成「集合名/index.html」。\n\
@@ -360,7 +406,7 @@ fn step_kind(name: &str) -> StepKind {
     }
     match tools::specs().iter().find(|s| s.name == name).map(|s| s.scope) {
         Some(Scope::Write | Scope::Structure | Scope::Publish) => StepKind::Write,
-        _ if name == "list_pending" => StepKind::Check,
+        _ if name == "list_pending" || name == "check_page" => StepKind::Check,
         _ => StepKind::Read,
     }
 }
@@ -379,6 +425,10 @@ fn step_label(name: &str, input: &Value) -> String {
         "update_record" => format!("修改记录 #{}", s("id")),
         "delete_record" => format!("删除记录 #{}", s("id")),
         "list_pending" => "检查待发布的改动".into(),
+        "check_page" => format!("检查页面 {}", s("path")),
+        "list_ends" => "查看所有端".into(),
+        "set_end" => format!("建立端 {}", s("name")),
+        "delete_end" => format!("删除端 {}", s("name")),
         crate::websearch::WEB_SEARCH => format!("搜索网页 {}", s("query")),
         crate::websearch::FETCH_PAGE => format!("读取网页 {}", s("url")),
         "search" => format!("搜索 {}", s("q")),
@@ -555,6 +605,8 @@ async fn run(app: Shared, token: String, id: u64, actor: Actor, model: Arc<dyn c
         c.running = false;
         c.streaming.clear();
     });
+    // What the model last asked for, and how many times in a row it has asked for exactly that.
+    let (mut last_asked, mut repeats) = (String::new(), 0);
     for _ in 0..MAX_MODEL_CALLS {
         let messages = app.chat.get(&token);
         if messages.id != id {
@@ -589,6 +641,15 @@ async fn run(app: Shared, token: String, id: u64, actor: Actor, model: Arc<dyn c
         }
         match stop {
             Stop::ToolUse => {
+                let asked = uses.iter().map(|(_, n, v)| format!("{n} {v}")).collect::<Vec<_>>().join("\n");
+                repeats = if asked == last_asked { repeats + 1 } else { 1 };
+                last_asked = asked;
+                if repeats >= STUCK_AFTER {
+                    // The history must stay valid for the next turn: every tool_use gets its result.
+                    let results = uses.iter().map(|(tool_id, _, _)| Block::ToolResult { tool_use_id: tool_id.clone(), content: "这一步和前几次一模一样，没有再做。".into(), is_error: true }).collect();
+                    app.chat.update(&token, id, |c| c.messages.push(Message { role: Role::User, content: results }));
+                    return finish(&app, Some(format!("模型连续 {STUCK_AFTER} 次做了同一个操作，像是卡住了，先停在这里。换个说法，或者把要求拆小一点再试。")));
+                }
                 let mut results = vec![];
                 let mut ask: Option<(String, Question)> = None;
                 let mut halted = false;
@@ -606,6 +667,16 @@ async fn run(app: Shared, token: String, id: u64, actor: Actor, model: Arc<dyn c
                         };
                         app.chat.update(&token, id, |c| c.steps.push(Step { kind: StepKind::Ask, label: step_label(ASK_USER, input), error: None }));
                         ask = Some((tool_id.clone(), q));
+                        continue;
+                    }
+                    if name == SET_TASKS {
+                        results.push(match parse_tasks(input) {
+                            Ok(tasks) => {
+                                app.chat.update(&token, id, |c| c.tasks = tasks);
+                                Block::ToolResult { tool_use_id: tool_id.clone(), content: "记下了，管理员看得到这份清单。".into(), is_error: false }
+                            }
+                            Err(e) => Block::ToolResult { tool_use_id: tool_id.clone(), content: e, is_error: true },
+                        });
                         continue;
                     }
                     let turn = Turn { app: &app, token: &token, id, actor: &actor, tools: &tools_list };

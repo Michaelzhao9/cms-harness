@@ -169,14 +169,57 @@ async fn a_tool_error_goes_back_as_is_error_and_the_loop_continues() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_turn_stops_after_thirty_model_calls() {
+async fn a_long_turn_keeps_going_up_to_the_call_cap() {
     let app = app();
-    let m = with_model(&app, Scripted { repeat: Some(tool("t", "list_collections", json!({}))), ..Default::default() });
+    // Different work each time, more of it than one turn allows.
+    let script: VecDeque<Reply> = (0..chat::MAX_MODEL_CALLS + 5).map(|i| tool("t", if i % 2 == 0 { "list_collections" } else { "list_pending" }, json!({}))).collect();
+    let m = with_model(&app, Scripted { replies: Mutex::new(script), ..Default::default() });
     let u = admin("builder");
-    chat::start(app.clone(), &u, "一直查".into(), vec![], None).unwrap();
+    chat::start(app.clone(), &u, "建一个大网站".into(), vec![], None).unwrap();
     let c = idle(&app, &u.token_hash).await;
+    const { assert!(chat::MAX_MODEL_CALLS >= 100, "room for a whole site in one turn") };
     assert_eq!(m.seen.lock().unwrap().len(), chat::MAX_MODEL_CALLS);
-    assert!(c.error.unwrap().contains("30"));
+    assert!(c.error.unwrap().contains(&chat::MAX_MODEL_CALLS.to_string()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_model_keeps_a_task_list_the_admin_sees() {
+    let app = app();
+    let plan = |first: bool| json!({"tasks": [{"text": "建作业集合", "done": first}, {"text": "写学生首页", "done": false}]});
+    let m = with_model(&app, Scripted {
+        replies: Mutex::new(VecDeque::from([tool("t1", "set_tasks", plan(false)), tool("t2", "set_tasks", plan(true)), tool("t3", "set_tasks", json!({"tasks": "乱写"})), done("做了一半")])),
+        ..Default::default()
+    });
+    let u = admin("builder");
+    chat::start(app.clone(), &u, "做一个作业系统".into(), vec![], None).unwrap();
+    let c = idle(&app, &u.token_hash).await;
+    assert!(m.seen.lock().unwrap()[0].0.contains(&"set_tasks".to_string()), "the model is offered the tool");
+    let shown: Vec<(&str, bool)> = c.tasks.iter().map(|t| (t.text.as_str(), t.done)).collect();
+    assert_eq!(shown, vec![("建作业集合", true), ("写学生首页", false)], "the last good list stands");
+    assert!(last_results(&m)[0].2, "a list that is not a list is refused, and says so");
+    let view = cms_harness::web::chat::view(&app, &u);
+    assert_eq!((view["tasks"][0]["text"].as_str(), view["tasks"][0]["done"].as_bool()), (Some("建作业集合"), Some(true)), "{view}");
+    let log = cms_harness::render::admin_page("chat_log.html", json!({"chat": view, "lang": "zh", "csrf": "c"})).unwrap();
+    assert!(log.contains("<li class=\"done\">") && log.contains("建作业集合") && log.contains("写学生首页"), "the chat shows the list: {log}");
+
+    // A new request starts with a clean list.
+    with_model(&app, Scripted { replies: Mutex::new(VecDeque::from([done("好")])), ..Default::default() });
+    chat::start(app.clone(), &u, "换个话题".into(), vec![], None).unwrap();
+    assert!(idle(&app, &u.token_hash).await.tasks.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_turn_that_keeps_making_the_same_call_is_stopped_as_stuck() {
+    let app = app();
+    let m = with_model(&app, Scripted { repeat: Some(tool("t", "get_collection", json!({"name": "nope"}))), ..Default::default() });
+    let u = admin("builder");
+    chat::start(app.clone(), &u, "看看 nope".into(), vec![], None).unwrap();
+    let c = idle(&app, &u.token_hash).await;
+    assert_eq!(m.seen.lock().unwrap().len(), chat::STUCK_AFTER, "not all the way to the cap");
+    assert!(c.error.as_deref().unwrap().contains("卡住"), "{:?}", c.error);
+    // The history stays valid: every call the model made has its answer, so "继续" can pick up from here.
+    let last = c.messages.last().unwrap();
+    assert!(matches!(last.content.first(), Some(Block::ToolResult { is_error: true, .. })), "{last:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

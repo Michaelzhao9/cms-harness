@@ -2,11 +2,13 @@ pub mod auth;
 pub mod store;
 pub mod schema;
 pub mod changes;
+pub mod check;
 pub mod query;
 pub mod api;
 pub mod media;
 pub mod tools;
 pub mod render;
+pub mod rules;
 pub mod site;
 pub mod llm;
 pub mod chat;
@@ -16,6 +18,7 @@ pub mod members;
 pub mod access;
 pub mod backup;
 pub mod cache;
+pub mod ends;
 pub mod canvas;
 pub mod export;
 pub mod i18n;
@@ -23,6 +26,7 @@ pub mod langs;
 pub mod routes;
 pub mod schedule;
 pub mod search;
+pub mod shield;
 pub mod web;
 
 use rusqlite::Connection;
@@ -54,6 +58,8 @@ pub struct App {
     pub ping_nonce: Mutex<Option<String>>,
     /// Rendered live pages, kept until something they read is published again.
     pub cache: cache::Cache,
+    /// 防护: who is asking how often, and the settings that decide what they get.
+    pub shield: shield::Shield,
 }
 
 impl App {
@@ -63,7 +69,10 @@ impl App {
     }
 
     pub fn new(conn: Connection, data_dir: PathBuf, origin: String, site_name: String) -> Shared {
+        let shield = shield::Shield::default();
+        shield.set_config(shield::load(&conn));
         Arc::new(App {
+            shield,
             data_dir,
             secure_cookies: origin.starts_with("https://"),
             origin,

@@ -322,6 +322,9 @@ pub fn public_paths(conn: &Connection) -> Result<Vec<(String, Option<String>)>, 
         urls.push((url, lastmod.map(|d| d.chars().take(10).collect())));
     }
     urls.extend(crate::routes::public_pages(conn));
+    // Pages of an 端 only members may enter are not public.
+    let ends = crate::ends::load(conn, false);
+    urls.retain(|(u, _)| !crate::ends::closed(&ends, u.trim_start_matches('/')));
     // A site without its own home page still has the built-in welcome.
     if !urls.iter().any(|(u, _)| u == "/") {
         urls.insert(0, ("/".into(), None));
@@ -489,7 +492,7 @@ impl Server<'_> {
         let filters = if filter.is_null() { vec![] } else { crate::query::parse_filter(&def, filter)? };
         let live = self.mode == Mode::Live;
         let status = if live { vec![] } else { vec![Status::Draft, Status::Changed, Status::Published] };
-        let q = Query { filters, status, sort: None, limit: 1, offset: 0, owner };
+        let q = Query { filters, status, sort: None, limit: 1, offset: 0, owner, search: None };
         Ok(crate::query::run(self.conn, &def, &q, live)?.1)
     }
 
@@ -513,7 +516,7 @@ impl Server<'_> {
         let live = self.mode == Mode::Live;
         // Preview: drafts over live copies, without records waiting to be deleted.
         let status = if live { vec![] } else { vec![Status::Draft, Status::Changed, Status::Published] };
-        let q = Query { filters, status, sort, limit, offset, owner };
+        let q = Query { filters, status, sort, limit, offset, owner, search: None };
         let (rows, _) = crate::query::run(self.conn, &def, &q, live)?;
         let mut out = vec![];
         let lang = self.lang.clone().filter(|l| !l.is_default());

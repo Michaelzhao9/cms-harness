@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ "防护"|t }}{% endblock %}
+{% block main %}
+<div class="page shield">
+<h1>{{ "防护"|t }}</h1>
+<p class="lede">{{ "这个环境里的每一个页面和接口都在这道门后面，新建的东西不用做任何事就已经被保护。这里的设置改了马上生效，不用发布；对话和接口密钥都改不了它。"|t }}</p>
+{% if error %}<p class="note bad" role="alert">{{ error|t }}</p>{% endif %}
+{% if saved %}<p class="note good" role="status">{{ "已保存，马上生效。"|t }}</p>{% endif %}
+
+<form method="post" action="/admin/shield" class="guard">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<fieldset{% if not builder %} disabled{% endif %}>
+<legend>{{ "档位"|t }}</legend>
+<label class="pick"><input type="radio" name="mode" value="standard"{% if config.mode == "standard" %} checked{% endif %}><span><b>{{ "标准"|t }}</b>{{ "限速，拦下爬虫和探测，翻页太快的要先通过验证。"|t }}</span></label>
+<label class="pick"><input type="radio" name="mode" value="strict"{% if config.mode == "strict" %} checked{% endif %}><span><b>{{ "强化"|t }}</b>{{ "正在被攻击或被大量抓取时用：每个访客打开第一个页面前都要先通过验证，搜索引擎除外。"|t }}</span></label>
+<label class="pick"><input type="radio" name="mode" value="off"{% if config.mode == "off" %} checked{% endif %}><span><b>{{ "关闭"|t }}</b>{{ "什么都不拦。只在排查问题时用。"|t }}</span></label>
+</fieldset>
+
+<fieldset{% if not builder %} disabled{% endif %}>
+<legend>{{ "自报家门的爬虫"|t }}</legend>
+<label class="pick"><input type="checkbox" name="block_ai"{% if config.block_ai %} checked{% endif %}><span><b>{{ "不给 AI 爬虫看页面"|t }}</b>{{ "GPTBot、ClaudeBot、Bytespider 这类为 AI 模型收集文字的爬虫。同时写进 robots.txt。"|t }}</span></label>
+<label class="pick"><input type="checkbox" name="block_tools"{% if config.block_tools %} checked{% endif %}><span><b>{{ "不给脚本工具看页面"|t }}</b>{{ "python-requests、Scrapy、curl、无头浏览器。接口不受影响，接口本来就是给程序用的。"|t }}</span></label>
+<p class="by">{{ "搜索引擎（Google、百度、Bing 等）始终放行。"|t }}</p>
+</fieldset>
+
+<fieldset{% if not builder %} disabled{% endif %}>
+<legend>{{ "上限"|t }}</legend>
+<div class="fd"><label class="lb" for="sh-pm">{{ "每个访客每分钟最多多少次请求"|t }}</label><input class="in" id="sh-pm" type="number" name="per_minute" min="10" max="100000" value="{{ config.per_minute }}"></div>
+<div class="fd"><label class="lb" for="sh-pp">{{ "每个访客每分钟打开多少个页面后要验证"|t }}</label><input class="in" id="sh-pp" type="number" name="pages_per_minute" min="5" max="10000" value="{{ config.pages_per_minute }}"></div>
+<p class="by">{{ "一再超过上限的访客会被关在门外 10 分钟；访问漏洞探测路径的（比如 /wp-login.php、/.env）关 1 小时。"|t }}</p>
+</fieldset>
+
+<fieldset{% if not builder %} disabled{% endif %}>
+<legend>{{ "封禁名单"|t }}</legend>
+<div class="fd"><label class="lb" for="sh-bl">{{ "每行一个访客地址，名单里的地址什么都拿不到（后台除外）"|t }}</label><textarea class="in" id="sh-bl" name="blocked" rows="4" spellcheck="false">{{ blocked_text }}</textarea></div>
+</fieldset>
+{% if builder %}<button type="submit" class="btn">{{ "保存"|t }}</button>{% else %}<p class="by">{{ "只有搭建者可以改防护设置。"|t }}</p>{% endif %}
+</form>
+
+<section aria-labelledby="sh-ev">
+<h2 id="sh-ev">{{ "拦下的请求"|t }}</h2>
+<p class="by">{{ "过去 24 小时记下"|t }} {{ stopped }} {{ "次。同一个访客同一种情况每分钟只记一次，记录保留 7 天。"|t }}</p>
+{% if events -%}
+<div class="scroll">
+<table class="table">
+<thead><tr><th scope="col">{{ "时间（UTC）"|t }}</th><th scope="col">{{ "原因"|t }}</th><th scope="col">{{ "访客地址"|t }}</th><th scope="col">{{ "访问的路径"|t }}</th><th scope="col">{{ "自称是"|t }}</th></tr></thead>
+<tbody>
+{% for e in events -%}
+<tr class="row"><td class="lead">{{ e.at }}</td><td>{{ e.label|t }}</td><td><code>{{ e.client }}</code></td><td><code>{{ e.path }}</code></td><td class="ua">{{ e.ua }}</td></tr>
+{% endfor -%}
+</tbody>
+</table>
+</div>
+{% else -%}
+<p class="empty">{{ "还没有拦下过什么。"|t }}</p>
+{% endif -%}
+</section>
+</div>
+{% endblock %}

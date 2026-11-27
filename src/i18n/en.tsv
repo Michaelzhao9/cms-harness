@@ -1010,3 +1010,65 @@ record:{} 还被 {} 链接着，删掉会留下死链：请先改掉那个链接
 设置好对话用的模型后，可以让对话把它做到网站上。	Once a chat model is set up, the chat can put it on the site.
 ：每次发布改了什么，也可以恢复到以前的版本。	: what each publish changed, and going back to an earlier version.
 关闭并排对比	Close side by side
+环境	Environment
+端	Surfaces
+这个环境里的每一个端和它们共用的数据。端是给一类人用的一组页面，有自己的网址和进入规则；数据不属于哪个端，谁都按规则读写。	Every surface in this environment and the data they share. A surface is a set of pages for one kind of person, with its own address and its own rule for who may enter. Data belongs to no surface: each reads and writes it as the rules allow.
+登录的会员才能进	Members only
+所有人都能进	Open to everyone
+要新建一个端，在对话里说给谁用、要做什么。	To add a surface, tell the chat who it is for and what it should do.
+数据	Data
+单页	Single
+条	records
+还没有数据。	No data yet.
+防护	Protection
+这个环境里的每一个页面和接口都在这道门后面，新建的东西不用做任何事就已经被保护。这里的设置改了马上生效，不用发布；对话和接口密钥都改不了它。	Every page and endpoint of this environment is behind this door: whatever is built is protected without doing anything. Changes here apply at once, without a publish. Neither the chat nor an API key can change them.
+已保存，马上生效。	Saved. In effect now.
+档位	Level
+标准	Standard
+限速，拦下爬虫和探测，翻页太快的要先通过验证。	Rate limits, crawlers and probes stopped, and a check for clients that read page after page.
+强化	Strict
+正在被攻击或被大量抓取时用：每个访客打开第一个页面前都要先通过验证，搜索引擎除外。	For when the site is under attack or being scraped: every visitor passes a check before the first page. Search engines are exempt.
+什么都不拦。只在排查问题时用。	Stops nothing. For troubleshooting only.
+自报家门的爬虫	Crawlers that say who they are
+不给 AI 爬虫看页面	No pages for AI crawlers
+GPTBot、ClaudeBot、Bytespider 这类为 AI 模型收集文字的爬虫。同时写进 robots.txt。	Crawlers that collect text for AI models, such as GPTBot, ClaudeBot and Bytespider. Also written into robots.txt.
+不给脚本工具看页面	No pages for scripting tools
+python-requests、Scrapy、curl、无头浏览器。接口不受影响，接口本来就是给程序用的。	python-requests, Scrapy, curl and headless browsers. The API is not affected: it is there for programs.
+搜索引擎（Google、百度、Bing 等）始终放行。	Search engines (Google, Baidu, Bing and others) always pass.
+上限	Limits
+每个访客每分钟最多多少次请求	Requests one visitor may make in a minute
+每个访客每分钟打开多少个页面后要验证	Pages one visitor may open in a minute before a check
+一再超过上限的访客会被关在门外 10 分钟；访问漏洞探测路径的（比如 /wp-login.php、/.env）关 1 小时。	A visitor who keeps going over the limit is shut out for 10 minutes; one who asks for a scanner's path (such as /wp-login.php or /.env), for an hour.
+封禁名单	Block list
+每行一个访客地址，名单里的地址什么都拿不到（后台除外）	One visitor address per line. A listed address gets nothing, except the admin
+只有搭建者可以改防护设置。	Only builders can change the protection.
+拦下的请求	Stopped requests
+过去 24 小时记下	Recorded in the last 24 hours:
+次。同一个访客同一种情况每分钟只记一次，记录保留 7 天。	. One record a minute for each visitor and reason; records are kept for 7 days.
+时间（UTC）	Time (UTC)
+原因	Reason
+访客地址	Visitor address
+访问的路径	Path
+自称是	Says it is
+还没有拦下过什么。	Nothing has been stopped yet.
+探测漏洞的路径	A scanner's path
+一再超过上限，暂时关在门外	Kept going over the limit: shut out for a while
+超过每分钟的请求上限	Over the requests-a-minute limit
+AI 爬虫	AI crawler
+脚本工具	Scripting tool
+在封禁名单里	On the block list
+翻页太快，要求验证	Reading page after page: asked for a check
+其他	Other
+模型连续 {} 次做了同一个操作，像是卡住了，先停在这里。换个说法，或者把要求拆小一点再试。	The model made the same call {} times in a row and seems stuck, so it stopped here. Rephrase, or break the request into smaller parts.
+检查页面 {}	Checking page {}
+查看所有端	Listing surfaces
+建立端 {}	Setting up surface {}
+删除端 {}	Deleting surface {}
+任务清单	Task list
+做完了：	Done: 
+已导入	Imported
+行，都是草稿，发布后才上线。	rows, all drafts: nothing is live until published.
+搜索	Search
+导出 CSV	Export CSV
+要导入的 CSV 文件	CSV file to import
+导入为草稿	Import as drafts

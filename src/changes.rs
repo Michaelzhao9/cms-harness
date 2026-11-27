@@ -19,7 +19,7 @@ pub enum Target {
 }
 
 /// Site options that are drafted and published like everything else.
-pub const SETTINGS: &[(&str, &str)] = &[("site_name", "站点名称"), ("languages", "网站语言"), ("strings", "站点文字翻译"), ("member_login", "会员登录"), ("import_map", "网站的 import map"), ("script_origins", "网站允许的脚本来源"), ("canvas", "网页上的手动调整")];
+pub const SETTINGS: &[(&str, &str)] = &[("site_name", "站点名称"), ("languages", "网站语言"), ("strings", "站点文字翻译"), ("member_login", "会员登录"), ("import_map", "网站的 import map"), ("script_origins", "网站允许的脚本来源"), ("canvas", "网页上的手动调整"), ("ends", "端")];
 
 impl Target {
     pub fn parse(s: &str) -> Result<Target, String> {
@@ -758,7 +758,7 @@ pub fn sync_all_indexes(conn: &Connection) -> Result<(), String> {
 }
 
 /// (name, definition) of every collection that is live: published and not deleted.
-fn live_defs(conn: &Connection) -> Result<Vec<(String, CollectionDef)>, String> {
+pub fn live_defs(conn: &Connection) -> Result<Vec<(String, CollectionDef)>, String> {
     let fail = |e: rusqlite::Error| format!("读取线上的集合失败：{e}");
     let mut stmt = conn.prepare("SELECT name, published FROM collections WHERE deleted = 0 AND published IS NOT NULL ORDER BY name").map_err(fail)?;
     let rows: Vec<(String, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(fail)?.collect::<Result<_, _>>().map_err(fail)?;

@@ -97,6 +97,13 @@ input[type='email'], input[type='password'], input[type='text'], input:not([type
 .bubble .att { display: block; font-size: 12px; color: var(--muted); }
 .reply { line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
 .reply.live::after { content: ''; display: inline-block; width: 7px; height: 14px; margin-left: 2px; vertical-align: -2px; background: var(--ink-3); animation: hcpulse 1s ease-in-out infinite; }
+/* The model's plan for the request: done items step back, the rest wait. */
+.tasks { display: flex; flex-direction: column; gap: 7px; padding: 12px 14px; border-radius: 14px; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 0 1px 2px rgba(16, 16, 24, .04); font-size: 13px; }
+.tasks li { display: flex; align-items: flex-start; gap: 9px; color: var(--ink); line-height: 1.5; }
+.tasks li > :first-child { flex-shrink: 0; margin-top: 3px; }
+.tasks .todo { width: 13px; height: 13px; border-radius: 7px; box-shadow: inset 0 0 0 1.5px var(--ink-3); }
+.tasks .done { color: var(--muted); }
+.tasks .done .icon { color: var(--good); }
 .steps summary { display: inline-flex; align-items: center; gap: 8px; list-style: none; cursor: pointer; font-size: 13px; color: var(--muted); }
 .steps summary::-webkit-details-marker { display: none; }
 .steps summary b { color: var(--ink); font-weight: 600; }
@@ -418,6 +425,30 @@ figcaption code { padding: 0; background: none; font-size: 11px; color: var(--mu
 .went li > .kind { width: 2.6em; }
 .went form { margin: 0; }
 .history { max-width: 720px; display: flex; flex-direction: column; gap: 14px; }
+/* A collection as a spreadsheet: out as CSV, rows in as drafts. */
+.sheet { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 8px 28px 10px; font-size: 13px; }
+.sheet form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; }
+.sheet input[type='file'] { max-width: 16em; font-size: 13px; color: var(--ink-2); }
+/* 防护: the settings, then what was stopped. */
+.shield { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+.shield section { display: flex; flex-direction: column; gap: 8px; padding-top: 18px; }
+.shield h2 { font-size: 16px; font-weight: 600; }
+.guard { display: flex; flex-direction: column; gap: 18px; align-items: flex-start; max-width: 640px; }
+.guard fieldset { width: 100%; margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 10px; }
+.guard legend { padding: 0 0 8px; font-size: 16px; font-weight: 600; }
+.guard .pick { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; color: var(--ink-2); cursor: pointer; }
+.guard .pick input { margin-top: 4px; accent-color: var(--ink); }
+.guard .pick b { display: block; color: var(--ink); font-weight: 600; }
+.guard textarea { height: auto; padding: 10px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.shield .ua { max-width: 18em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+/* The environment at a glance: every 端, then the data they share. */
+.env { display: flex; flex-direction: column; gap: 14px; max-width: 720px; }
+.env section { display: flex; flex-direction: column; gap: 6px; padding-top: 18px; }
+.env h2 { font-size: 16px; font-weight: 600; }
+.env .went li > .kind { width: auto; min-width: 4em; text-align: right; color: var(--muted); }
+.env .went li > .kind.pending { color: var(--mark-ink); font-weight: 600; }
+.env .name { font-weight: 600; }
+.env .grow { display: flex; flex-direction: column; gap: 1px; }
 .release { display: flex; flex-direction: column; gap: 6px; padding-top: 18px; }
 .release h2 { font-size: 16px; font-weight: 600; }
 .confirm { max-width: 520px; display: flex; flex-direction: column; gap: 16px; }

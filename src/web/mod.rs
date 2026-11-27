@@ -8,6 +8,8 @@ pub mod chat;
 pub mod content;
 pub mod session;
 pub mod settings;
+pub mod sheet;
+pub mod shield;
 pub mod site;
 
 use crate::{render, App, Shared};
@@ -31,6 +33,9 @@ pub const LOGO_SVG: &str = include_str!("logo.svg");
 pub fn router(app: Shared) -> Router {
     Router::new()
         .route("/admin", get(chat::home))
+        .route("/admin/env", get(admin::env))
+        .route("/admin/shield", get(shield::page).post(shield::save))
+        .route("/_hc/shield.js", get(shield::script))
         .route("/admin/prefs", post(admin::prefs))
         .route("/admin/canvas/style", post(canvas::style))
         .route("/admin/canvas/text", post(canvas::text))
@@ -45,6 +50,8 @@ pub fn router(app: Shared) -> Router {
         .route("/admin/chat/events", get(chat::events))
         .route("/admin/c/{name}", get(content::collection_list))
         .route("/admin/c/{name}/new", post(content::create).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
+        .route("/admin/c/{name}/export.csv", get(sheet::export))
+        .route("/admin/c/{name}/import", post(sheet::import).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
         .route("/admin/v/{name}", get(content::view_list))
         .route("/admin/members", get(content::members_list))
         .route("/admin/members/{id}/status", post(content::member_status))
@@ -95,13 +102,54 @@ pub fn router(app: Shared) -> Router {
         .with_state(app)
 }
 
-/// Every browser POST must come from our own origin when it says where it comes from.
+/// Every browser request that writes (anything but GET, HEAD, OPTIONS) must come from our own origin when it says
+/// where it comes from.
 /// Every `/admin` path except the login page and static files needs a session; the user lands in the request extensions.
 /// Mounted in `api::router` around everything, so routes merged by later tasks are covered too.
 pub async fn guard(State(app): State<Shared>, req: Request, next: Next) -> Response {
+    if let Some((stopped, record)) = shielded(&app, &req) {
+        if let Some((client, kind, path, ua)) = record {
+            let a = app.clone();
+            let _ = tokio::task::spawn_blocking(move || crate::shield::log(&a.conn(), &client, kind, &path, &ua)).await;
+        }
+        return stopped;
+    }
     let browser = crate::i18n::for_visitor(req.headers(), req.uri().query());
     let (lang, resp) = guarded(app, req, next, browser).await;
     plain_in(lang, resp).await
+}
+
+/// 防护, before anything else looks at the request: `None` lets it through, else the answer it gets and, when it
+/// is worth writing down for the admin, the record: (client, kind, path, user agent).
+#[allow(clippy::type_complexity)]
+fn shielded(app: &Shared, req: &Request) -> Option<(Response, Option<(String, &'static str, String, String)>)> {
+    use crate::shield::{self, Verdict};
+    let peer = req.extensions().get::<axum::extract::ConnectInfo<SocketAddr>>().map(|c| c.0);
+    let trust = std::env::var("HC_TRUST_PROXY").is_ok_and(|v| v == "1");
+    let client = client_key(req.headers(), peer, trust);
+    let ua = req.headers().get(header::USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
+    let path = req.uri().path().to_string();
+    let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let passed = session::cookie_value(req.headers(), shield::COOKIE).is_some_and(|p| app.shield.passes(&p, &client, &ua, unix));
+    let now = std::time::Instant::now();
+    let verdict = app.shield.check(&client, req.method().as_str(), &path, &ua, passed, now);
+    let (kind, resp) = match verdict {
+        Verdict::Pass => return None,
+        Verdict::Limited => ("limited", (StatusCode::TOO_MANY_REQUESTS, [(header::RETRY_AFTER, "60")], "请求太频繁，请过一分钟再试。\nToo many requests. Try again in a minute.").into_response()),
+        // Shut out for a while: said once when it began, not on every request after.
+        Verdict::Blocked("out") => return Some(((StatusCode::FORBIDDEN, "已拒绝访问。\nAccess refused.").into_response(), None)),
+        Verdict::Blocked(why) => (why, (StatusCode::FORBIDDEN, "已拒绝访问。\nAccess refused.").into_response()),
+        Verdict::Challenge => {
+            let headers = [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (header::CACHE_CONTROL, "no-store"),
+                (header::CONTENT_SECURITY_POLICY, "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'"),
+            ];
+            ("challenge", (StatusCode::FORBIDDEN, headers, shield::challenge_page(&app.shield.issue(&client, &ua, unix))).into_response())
+        }
+    };
+    let record = app.shield.may_log(&client, kind, now).then_some((client, kind, path, ua));
+    Some((resp, record))
 }
 
 /// A plain-text error a handler sent, in `lang`. HTML pages translate themselves; successful replies (a site's own
@@ -120,10 +168,11 @@ async fn plain_in(lang: crate::i18n::Lang, resp: Response) -> Response {
 
 async fn guarded(app: Shared, mut req: Request, next: Next, browser: crate::i18n::Lang) -> (crate::i18n::Lang, Response) {
     let path = req.uri().path();
-    // Every browser POST (admin, member forms, site submissions) must come from the address it was sent to when the
+    // Every browser write (admin, member forms, site submissions, a member's change or removal) must come from the
+    // address it was sent to when the
     // browser says where it comes from. Only the bearer-key API is exempt: keys, not cookies, authorise it.
     let keyed = ["/api/v1/tools", "/api/v1/site", "/api/v1/media"].iter().any(|p| path == *p || path.starts_with(&format!("{p}/"))) || path == "/mcp";
-    if req.method() == Method::POST && !keyed {
+    if !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS) && !keyed {
         let here = req.extensions().get::<Address>().map_or(app.origin.as_str(), |a| a.here.as_str());
         if let Some(origin) = req.headers().get(header::ORIGIN) {
             let same_site_fetch = req.headers().get("sec-fetch-site").is_some_and(|v| v == "same-origin");

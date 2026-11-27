@@ -81,6 +81,34 @@ There are two ways to override or recover from a bad setting:
 - `HC_ADMIN_ORIGIN=<origin|off>` overrides the saved choice.
 - `cms-harness admin-origin off` switches back to one address. It takes effect on a running server at once.
 
+## Protection (后台 → 防护)
+
+Every request passes one door before any handler sees it, so whatever is built in the environment is behind it
+without doing anything. Its settings apply at once and are not drafts. Only a builder changes them, in the admin:
+no tool, API key or site file can.
+
+- **Rate limit.** A client gets 240 requests a minute (5 times that on the bearer-key API). Going over answers 429;
+  going over in three separate minutes shuts the client out for 10 minutes.
+- **Scanners.** A request for a path only a vulnerability scanner asks for (`/wp-login.php`, `/.env`, `/.git/…`)
+  shuts the client out for an hour.
+- **Crawlers that say who they are.** Search engines always pass. AI crawlers (GPTBot, ClaudeBot, Bytespider and
+  others, also listed in `robots.txt`) and scripting tools (python-requests, Scrapy, curl, headless browsers) get no
+  pages. The API is not affected.
+- **Challenge.** A client that opens more than 40 pages in a minute, or every visitor in strict mode, first solves
+  a proof of work in the browser (about a second, once every 12 hours). The pass is signed, bound to the client's
+  address and browser, and checked without server state. No outside service is involved.
+- **Block list.** Listed addresses get nothing, except the admin, so an admin cannot lock themselves out.
+- **Record.** What was stopped (time, reason, address, path, user agent) is kept for 7 days and shown in the admin:
+  one record a minute per client and reason, at most 60 a minute in all.
+
+The admin, the preview frames and uploaded files are outside these counts: sessions, the login limit and preview
+tokens guard them.
+
+What this does not do. A flood from thousands of addresses has to be stopped before it reaches this program, by the
+host or a CDN. A crawler that drives real browsers through many addresses gets through, slower and at a cost. A
+crawler can claim to be a search engine: it then passes the crawler rules but not the rate limit. Behind a reverse
+proxy on another machine, set `HC_TRUST_PROXY=1`, or every visitor looks like the proxy.
+
 ## Draft preview
 
 The live site always serves published content to everyone, whatever cookies or headers a request carries.

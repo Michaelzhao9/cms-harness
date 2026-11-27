@@ -89,7 +89,7 @@ cargo build --release
 - 📝 **什么都是草稿。** 内容、集合、页面、后台界面、设置，发布前都是草稿。线上网站永远只显示已发布的版本，不管谁来访问。草稿和线上可以并排对比。
 - 🗂️ **后台跟着网站走。** 网站加了表单、会员、订单，助手在同一轮里就建好管理它们的界面。后台导航按网站自己的栏目分组。网站上没用到的集合会标成「网站上还没用到」，旁边一个按钮就能让对话把它做到网站上。
 - 🧠 **什么模型都能用。** Claude、OpenAI、Gemini、DeepSeek、通义千问、Kimi、智谱 GLM、豆包、硅基流动、Mistral、xAI、Groq、OpenRouter，本机的 Ollama、LM Studio，或任何兼容 OpenAI 的接口。填好密钥就能列出可用的型号。
-- 🔌 **你的 agent 也能接。** 内置 MCP 服务和 REST 接口，37 个工具，密钥分权限（`read`、`write`、`structure`、`publish`）。
+- 🔌 **你的 agent 也能接。** 内置 MCP 服务和 REST 接口，41 个工具，密钥分权限（`read`、`write`、`structure`、`publish`）。
 - 🌍 **对话联网搜索（默认关闭）。** `web_search` 和 `fetch_page` 走自己部署的 SearXNG、Brave 或 Tavily，任何模型都能用。网页内容只当资料，不当指令；内网和本机地址每一次跳转都会检查，读不了。
 - 📚 **技能。** 从 GitHub 或 zip 安装技能文件夹（带 `SKILL.md`），对话遇到相关的事会自己去读。
 
@@ -112,6 +112,9 @@ cargo build --release
 - 🧩 **技术栈随你，不用打包。** HTML 加 `{{ }}` 模板，还能写 CSS、JavaScript、JSX、TypeScript（访问时自动转换）。React、Vue、Three.js 通过 import map 加载；用 Vite 打包好的网站也能整个上传。
 - 🖼️ **图片自动给合适的尺寸。** `{{ item.cover|thumb(640) }}` 给出缩小的版本，只生成一次，之后一直用。
 - 👥 **会员和访问规则。** 访客可以注册登录，和后台管理员是两套账号。每个集合可以设定谁能看（所有人、登录会员、只看自己的、不公开）、谁能从网站提交。
+- 🧩 **一个环境，多个端。** 网站本身是第一个端；学生和老师、顾客和店员要用不同的界面时，助手给每一种人建一个端（`/teacher/`、`/student/`），各有自己的页面和进入规则，数据是整个环境共用的。只让会员进的端由系统把门，页面不用自己检查。后台左边列出所有端，「环境」页一眼看到每个端和它们共用的数据。
+- 🛡️ **自带防护。** 环境里建出来的每个页面和接口天生在同一道门后面：限速、拦下漏洞探测、不给 AI 爬虫和脚本工具看页面（搜索引擎照常放行）、翻页太快的访客要先在浏览器里通过一次验证，全程不依赖外部服务。拦下了什么在后台「防护」里看得到；被攻击时切到“强化”档，马上生效。只有搭建者能改这些设置，对话和密钥都改不了。
+- 🗂️ **直接管任何数据。** 每个集合的列表都能搜索（记录里任何地方的文字，草稿也搜得到）、导出成 CSV、把 CSV 里的行导入成草稿。导入前每一行都先检查，有一行不对就一行都不进；导出的表格里，会被表格软件当成公式执行的内容已经处理过。
 - 🔎 **全文搜索。** 页面里用 `search("关键词")`，接口 `GET /api/v1/search`，还有 `search` 工具。中文不用词库也能搜，访客只会搜到自己能看的内容。
 
 ### 怎么运行都行
@@ -229,6 +232,7 @@ cargo build --release
 每个集合可以设定：
 - 谁能看（`read`）：`public` 所有人、`members` 登录会员、`owner` 每个会员只看自己的、`private` 只有后台和接口密钥（默认）；
 - 谁能从网站提交（`create`）：`none`（默认）、`members`、`public`。提交的内容直接上线并记下提交人，后台显示“N 条新”。网站表单提交到 `POST /<集合>/new`，接口用 `POST /api/v1/content/<集合>`。
+- 谁能从网站修改（`update`）和删除（`delete`）已有的记录：`none`（默认）、`owner`（提交它的会员）、`members`，或一句条件，比如 `record.owner == member.id and data.status == record.status`。条件里能用 `record.字段`、`record.id`、`record.owner`、`member`（已登录）、`member.id`、`member.email`、`member.name`、`data.字段`（改完之后的样子），以及 `== != < <= > >=`、`and or not` 和括号。修改和删除直接生效，历史里留着原来的内容。接口用 `PATCH` 和 `DELETE /api/v1/content/<集合>/<编号>`。
 
 集合还可以放进一个 `group`（网站的栏目）并设 `position`：后台导航按这个顺序排列，每个分组可以折叠。
 </details>
@@ -270,11 +274,13 @@ cargo build --release
 | `restore_version` `discard_draft` | write | 把历史版本放回草稿、丢弃草稿 |
 | `list_views` / `set_view` `delete_view` | read / structure | 后台界面 |
 | `get_site_notes` / `set_site_notes` | read / structure | 给助手看的站点说明 |
+| `check_page` | read | 检查草稿里的一个页面：渲染报错、死链、缺的文件、该补的东西 |
 | `list_site_files` `get_site_file` | read | 读网站文件（连同上面的手动调整） |
 | `write_site_file` `delete_site_file` `upload_site_bundle` | structure | 写网站文件、上传打包好的网站 |
 | `get_site_settings` / `set_site_settings` | read / structure | 站点名称、语言、模板文字翻译、import map、脚本来源 |
 | `translation_status` / `set_translation` | read / write | 缺翻译和过期的内容；写翻译 |
 | `set_member_login` | structure | 打开或关闭会员账号 |
+| `list_ends` / `set_end` `delete_end` | read / structure | 列出端；新建、修改（标题、谁能进）、删除一个端（连同它的文件） |
 | `list_members` / `set_member_status` | read / write | 列出会员、停用或恢复 |
 | `upload_media` | write | 上传图片或 PDF |
 

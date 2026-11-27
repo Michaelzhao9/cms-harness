@@ -36,6 +36,10 @@ pub struct Query {
     pub offset: i64,
     /// Only records this member owns (access rule `owner`).
     pub owner: Option<i64>,
+    /// Only records with this text somewhere in them, whatever the field.
+    // ponytail: a scan of the collection's documents (field names match too); the full-text index covers
+    // published records only. Index drafts as well if lists of many thousands get slow.
+    pub search: Option<String>,
 }
 
 pub struct Row {
@@ -167,6 +171,10 @@ fn build(def: &CollectionDef, q: &Query, live: bool) -> Result<(&'static str, St
         wh.push_str(" AND owner = ?");
         params.push(Sql::Integer(owner));
     }
+    if let Some(text) = q.search.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        wh.push_str(&format!(" AND {col} LIKE ? ESCAPE '\\'"));
+        params.push(Sql::Text(format!("%{}%", text.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"))));
+    }
     if !q.status.is_empty() {
         wh.push_str(&format!(" AND ({})", q.status.iter().map(|s| s.sql()).collect::<Vec<_>>().join(" OR ")));
     }
@@ -242,7 +250,7 @@ fn check_page(q: &Query) -> Result<(), String> {
 /// Query-string parameters to a checked `Query` plus the `expand` field names.
 /// `field=v` is equality, `field__ne|gt|gte|lt|lte|contains=v` the other operators; values are read by field type.
 pub fn parse_params(def: &CollectionDef, params: &[(String, String)]) -> Result<(Query, Vec<String>), String> {
-    let mut q = Query { filters: vec![], status: vec![], sort: None, limit: 20, offset: 0, owner: None };
+    let mut q = Query { filters: vec![], status: vec![], sort: None, limit: 20, offset: 0, owner: None, search: None };
     let mut expand = vec![];
     let int = |name: &str, v: &str| v.parse::<i64>().map_err(|_| format!("参数“{name}”必须是整数，收到“{v}”：请改成数字。"));
     for (name, v) in params {

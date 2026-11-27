@@ -20,6 +20,12 @@
 {%- for t in chat.turns %}
 <div class="turn">
 {% if t.text or t.images %}<div class="bubble">{{ t.text }}{% if t.images %}<span class="att">{{ "附了"|t }} {{ t.images }} {{ "张图"|t }}</span>{% endif %}</div>{% endif %}
+{% if loop.last and chat.tasks -%}
+<ul class="tasks" aria-label="{{ '任务清单'|t }}">
+{% for k in chat.tasks %}<li{% if k.done %} class="done"{% endif %}>{% if k.done %}{{ i.icon("check", 13) }}<span class="sr">{{ "做完了："|t }}</span>{% else %}<span class="todo" aria-hidden="true"></span>{% endif %}<span>{{ k.text }}</span></li>
+{% endfor -%}
+</ul>
+{% endif -%}
 {% if t.steps -%}
 <details class="steps" data-k="{{ t.k }}"{% if t.running %} open{% endif %}>
 <summary>{{ i.icon("caret-right", 11) }}<b>{{ "过程"|t }}</b><span>{{ t.steps|length }} {{ "步"|t }}</span></summary>

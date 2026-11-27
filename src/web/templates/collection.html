@@ -28,9 +28,10 @@
 {% for t in tabs %}<a href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.label|t }}</a>
 {% endfor -%}
 </nav>
-{% if filters -%}
+{% if imported is not none %}<p class="note good" role="status">{{ "已导入"|t }} {{ imported }} {{ "行，都是草稿，发布后才上线。"|t }}</p>{% endif %}
 <form class="filters" method="get">
 {% if tab %}<input type="hidden" name="status" value="{{ tab }}">{% endif %}
+<div class="fd"><label class="lb" for="q-search">{{ "搜索"|t }}</label><input class="in" id="q-search" type="search" name="q" value="{{ q }}"></div>
 {% for f in filters -%}
 <div class="fd"><label class="lb" for="q-{{ f.name }}">{{ f.title }}</label>
 {%- if f.options %}<select class="in" id="q-{{ f.name }}" name="{{ f.name }}">{% for o in f.options %}<option value="{{ o.value }}"{% if o.value == f.value %} selected{% endif %}>{{ o.label|t }}</option>{% endfor %}</select>
@@ -38,6 +39,17 @@
 {% endfor -%}
 <button type="submit" class="btn2">{{ i.icon("funnel", 16) }}{{ "筛选"|t }}</button>
 </form>
+{% if sheet -%}
+<div class="sheet">
+<a class="btn2" href="/admin/c/{{ collection }}/export.csv">{{ i.icon("download", 16) }}{{ "导出 CSV"|t }}</a>
+{% if can_create -%}
+<form method="post" action="/admin/c/{{ collection }}/import" enctype="multipart/form-data">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<label class="sr" for="sheet-file">{{ "要导入的 CSV 文件"|t }}</label><input id="sheet-file" type="file" name="file" accept=".csv,text/csv" required>
+<button type="submit" class="btn2">{{ i.icon("plus", 16) }}{{ "导入为草稿"|t }}</button>
+</form>
+{%- endif %}
+</div>
 {% endif -%}
 {% if list_error %}<p class="note bad" role="alert">{{ list_error|t }}</p>{% endif %}
 {% for sec in sections -%}
