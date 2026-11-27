@@ -88,8 +88,9 @@ cargo build --release
 - 🤖 **AI 动手，人来发布。** 对话助手不能发布。记录、网页、上传文件里的文字，它只当数据，不当指令。
 - 📝 **什么都是草稿。** 内容、集合、页面、后台界面、设置，发布前都是草稿。线上网站永远只显示已发布的版本，不管谁来访问。草稿和线上可以并排对比。
 - 🗂️ **后台跟着网站走。** 网站加了表单、会员、订单，助手在同一轮里就建好管理它们的界面。后台导航按网站自己的栏目分组。网站上没用到的集合会标成「网站上还没用到」，旁边一个按钮就能让对话把它做到网站上。
+- ⚙️ **后端也是它写的。** 页面脚本和规则做不了的事（下单同时扣库存、算总分、要查几张表才能决定的权限），助手写成服务器端的函数：`_fn/order.js` 就是网址 `/_fn/order`。函数跑在沙箱里，没有网络、文件和定时器，时间和内存都有上限；一次运行是一个事务，出错就什么都不留。它和别的站点文件一样是草稿，发布后才生效，写完可以先试运行。
 - 🧠 **什么模型都能用。** Claude、OpenAI、Gemini、DeepSeek、通义千问、Kimi、智谱 GLM、豆包、硅基流动、Mistral、xAI、Groq、OpenRouter，本机的 Ollama、LM Studio，或任何兼容 OpenAI 的接口。填好密钥就能列出可用的型号。
-- 🔌 **你的 agent 也能接。** 内置 MCP 服务和 REST 接口，41 个工具，密钥分权限（`read`、`write`、`structure`、`publish`）。
+- 🔌 **你的 agent 也能接。** 内置 MCP 服务和 REST 接口，46 个工具，密钥分权限（`read`、`write`、`structure`、`publish`）。
 - 🌍 **对话联网搜索（默认关闭）。** `web_search` 和 `fetch_page` 走自己部署的 SearXNG、Brave 或 Tavily，任何模型都能用。网页内容只当资料，不当指令；内网和本机地址每一次跳转都会检查，读不了。
 - 📚 **技能。** 从 GitHub 或 zip 安装技能文件夹（带 `SKILL.md`），对话遇到相关的事会自己去读。
 
@@ -110,10 +111,11 @@ cargo build --release
 - 🌏 **任意多种语言。** 一条内容、多种语言：文字分语言翻译，图片、日期、价格共用。每种语言有自己的网址（`/en/…` 或单独的域名）、回退顺序、hreflang，日期和金额按语言格式显示。过期的译文会标出来，对话还能把所有语言自动同步成草稿。
 - ⚡ **动态网站，静态网站的速度。** 线上页面会缓存，一次发布只重算它影响到的页面。`cms-harness export` 能把整个网站导出成静态文件，放到任何 CDN 上。
 - 🧩 **技术栈随你，不用打包。** HTML 加 `{{ }}` 模板，还能写 CSS、JavaScript、JSX、TypeScript（访问时自动转换）。React、Vue、Three.js 通过 import map 加载；用 Vite 打包好的网站也能整个上传。
-- 🖼️ **图片自动给合适的尺寸。** `{{ item.cover|thumb(640) }}` 给出缩小的版本，只生成一次，之后一直用。
+- 🖼️ **照片不用自己处理。** 上传的照片自动扶正、去掉拍摄地点和时间这些信息、最长边缩到 2560 以内并压缩（一张 7 MB 的照片存下来约 0.5 MB）；存成 PNG 的照片会变成 JPEG，透明图和小图原样保留。页面里 `{{ img(item.cover, alt=item.title) }}` 写出整个图片标签：各种宽度的缩小版、宽高、延迟加载；只要网址时用 `{{ item.cover|thumb(640) }}`。对话里附的图，模型看到的是缩小的一份。
 - 👥 **会员和访问规则。** 访客可以注册登录，和后台管理员是两套账号。每个集合可以设定谁能看（所有人、登录会员、只看自己的、不公开）、谁能从网站提交。
 - 🧩 **一个环境，多个端。** 网站本身是第一个端；学生和老师、顾客和店员要用不同的界面时，助手给每一种人建一个端（`/teacher/`、`/student/`），各有自己的页面和进入规则，数据是整个环境共用的。只让会员进的端由系统把门，页面不用自己检查。后台左边列出所有端，「环境」页一眼看到每个端和它们共用的数据。
-- 🛡️ **自带防护。** 环境里建出来的每个页面和接口天生在同一道门后面：限速、拦下漏洞探测、不给 AI 爬虫和脚本工具看页面（搜索引擎照常放行）、翻页太快的访客要先在浏览器里通过一次验证，全程不依赖外部服务。拦下了什么在后台「防护」里看得到；被攻击时切到“强化”档，马上生效。只有搭建者能改这些设置，对话和密钥都改不了。
+- 🛡️ **自带防护，不用设置。** 环境里建出来的每个页面和接口天生在同一道门后面：限速、拦下漏洞探测、不给 AI 爬虫和脚本工具看页面（搜索引擎照常放行）、翻页太快的访客要先在浏览器里通过一次验证，全程不依赖外部服务。后台里没有它的页面，也没有开关：它一直开着，级别写在代码里（`src/shield.rs`），对话、密钥和后台账号都改不了。
+- 🔔 **有事发到群里。** 在 **设置 → 通知** 贴上飞书或企业微信群机器人的 Webhook 地址（也可以填你自己的地址），有人提交了内容、发布了修改、有新会员注册时就发一条消息；函数里用 `notify("…")` 发自己的消息。发到哪里只有搭建者能定，对话和密钥都加不了去处。
 - 🗂️ **直接管任何数据。** 每个集合的列表都能搜索（记录里任何地方的文字，草稿也搜得到）、导出成 CSV、把 CSV 里的行导入成草稿。导入前每一行都先检查，有一行不对就一行都不进；导出的表格里，会被表格软件当成公式执行的内容已经处理过。
 - 🔎 **全文搜索。** 页面里用 `search("关键词")`，接口 `GET /api/v1/search`，还有 `search` 工具。中文不用词库也能搜，访客只会搜到自己能看的内容。
 
@@ -225,16 +227,58 @@ cargo build --release
 </details>
 
 <details>
+<summary><b>服务器端函数</b></summary>
+
+`_fn` 文件夹下的站点文件（`.js` 或 `.ts`）是服务器端的函数，网址是去掉扩展名的路径：`_fn/order.js` 是 `/_fn/order`，`teacher/_fn/grade.js` 是 `/teacher/_fn/grade`。放在某个端的文件夹里就归那个端，只让会员进的端，它的函数也只让会员调。源码永远不会被当成文件发出去。
+
+```js
+export default function (req) {
+  // req.method, req.path, req.query, req.body, req.member（没登录是 null）
+  const mine = db.query("orders", { owner: req.member.id, limit: 100 });
+  if (mine.total >= 3) return reply(409, { error: "每人最多 3 单" });
+  const id = db.create("orders", { item: req.body.item });
+  return { id };
+}
+```
+
+- 数据：`db.query(集合, {filter, sort, limit, offset, search, owner})`、`db.get(集合, 编号)`、`db.create(集合, 数据)`、`db.update(集合, 编号, 数据)`、`db.delete(集合, 编号)`。读写的是线上的数据，写入立即生效，和别的写入一样要通过字段校验，历史里记在 `fn:<文件>` 名下。函数不受集合访问规则的限制：谁能做什么，由函数自己判断。
+- 汇总：`db.aggregate(集合, {filter, group_by, sum, avg, min, max})`。
+- 通知：`notify("库存不足：" + item)` 发到 **设置 → 通知** 里接好的群，一次运行最多 5 条；运行不算数（出错、试运行）就不发。
+- 回答：返回值就是 JSON；要别的状态码用 `reply(状态码, 内容)`。
+- 一次运行是一个事务：抛出异常、被中止，或者回答 400 及以上，它写的都不保留。
+- 限制：最多运行 500 毫秒、32 MB 内存、200 次数据读写，请求内容最大 64 KB。没有网络、文件、进程和定时器。
+- 出错时访客只看到“这个功能出错了”，原因在 `function_log` 里。
+- `run_function` 试运行草稿里的函数，什么都不会真的写入。后台预览里页面调用函数（GET）也是试运行。
+- 导出成静态网站时，函数不会被导出，也不能工作。
+</details>
+
+<details>
 <summary><b>会员和访问规则</b></summary>
 
 `set_member_login` 打开访客账号后，网站就有 `/account/signup`、`/account/login`、`/account/logout` 页面和 `/api/v1/members/*` 接口，后台左边出现「用户管理」。会员不能登录后台。
 
 每个集合可以设定：
-- 谁能看（`read`）：`public` 所有人、`members` 登录会员、`owner` 每个会员只看自己的、`private` 只有后台和接口密钥（默认）；
-- 谁能从网站提交（`create`）：`none`（默认）、`members`、`public`。提交的内容直接上线并记下提交人，后台显示“N 条新”。网站表单提交到 `POST /<集合>/new`，接口用 `POST /api/v1/content/<集合>`。
+- 谁能看（`read`）：`public` 所有人、`members` 登录会员、`owner` 每个会员只看自己的、`private` 只有后台和接口密钥（默认），或一句条件，比如 `record.open == true or record.owner == member.id`。条件同时是列表的过滤器：每个人的列表、总数、搜索里只有自己能看的那些。
+- 谁能从网站提交（`create`）：`none`（默认）、`members`、`public`，或一句条件，比如 `member.kind == 'student' and data.class == member.class`。提交的内容直接上线并记下提交人，后台显示“N 条新”。网站表单提交到 `POST /<集合>/new`，接口用 `POST /api/v1/content/<集合>`。
 - 谁能从网站修改（`update`）和删除（`delete`）已有的记录：`none`（默认）、`owner`（提交它的会员）、`members`，或一句条件，比如 `record.owner == member.id and data.status == record.status`。条件里能用 `record.字段`、`record.id`、`record.owner`、`member`（已登录）、`member.id`、`member.email`、`member.name`、`data.字段`（改完之后的样子），以及 `== != < <= > >=`、`and or not` 和括号。修改和删除直接生效，历史里留着原来的内容。接口用 `PATCH` 和 `DELETE /api/v1/content/<集合>/<编号>`。
 
+会员可以带属性（`kind: teacher`、`class: 3`），由搭建者在「用户管理」里或用 `set_member_data` 设置，会员自己改不了。系统不给属性任何含义：规则里写 `member.kind`，端的进入条件写 `member.kind == 'teacher'`，页面和函数里也读得到。
+
+小程序、手机和桌面应用没有 cookie：登录或注册时带上 `"session": "token"`，回答里就有一个令牌，之后的请求放在 `Authorization: Bearer <令牌>` 里。
+
 集合还可以放进一个 `group`（网站的栏目）并设 `position`：后台导航按这个顺序排列，每个分组可以折叠。
+</details>
+
+<details>
+<summary><b>通知（Webhook）</b></summary>
+
+**设置 → 通知**（只有搭建者看得到）里贴一个 Webhook 地址，勾上什么时候发：有人提交了内容、发布了修改、有新会员注册、函数里的 `notify()`。它是哪一种，从地址上认：
+
+- 飞书（`open.feishu.cn`、`open.larksuite.com`）：发一条文字消息；机器人开了“签名校验”就把密钥也填上。
+- 企业微信（`qyapi.weixin.qq.com`）：发一条文字消息。
+- 其他地址：`POST` 一个 JSON `{"event", "text", "data", "site", "at"}`，请求头有 `X-Harness-Event` 和 `X-Harness-Timestamp`；填了签名密钥，`X-Harness-Signature` 是 `sha256=` 加上 `HMAC-SHA256(密钥, "<时间戳>.<正文>")` 的十六进制。
+
+消息先和它说的那件事一起写进数据库，再每 3 秒发一轮，每个去处一轮一条；发不出去隔 1 分钟、5 分钟各再试一次。地址存下来之后不再显示，只显示主机名。「发送测试」马上发一条并告诉你结果。
 </details>
 
 <details>
@@ -275,6 +319,7 @@ cargo build --release
 | `list_views` / `set_view` `delete_view` | read / structure | 后台界面 |
 | `get_site_notes` / `set_site_notes` | read / structure | 给助手看的站点说明 |
 | `check_page` | read | 检查草稿里的一个页面：渲染报错、死链、缺的文件、该补的东西 |
+| `run_function` / `function_log` | read | 试运行草稿里的服务器端函数（不写入）；线上函数出错或写了日志的运行 |
 | `list_site_files` `get_site_file` | read | 读网站文件（连同上面的手动调整） |
 | `write_site_file` `delete_site_file` `upload_site_bundle` | structure | 写网站文件、上传打包好的网站 |
 | `get_site_settings` / `set_site_settings` | read / structure | 站点名称、语言、模板文字翻译、import map、脚本来源 |

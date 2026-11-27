@@ -81,11 +81,12 @@ There are two ways to override or recover from a bad setting:
 - `HC_ADMIN_ORIGIN=<origin|off>` overrides the saved choice.
 - `cms-harness admin-origin off` switches back to one address. It takes effect on a running server at once.
 
-## Protection (后台 → 防护)
+## Protection
 
 Every request passes one door before any handler sees it, so whatever is built in the environment is behind it
-without doing anything. Its settings apply at once and are not drafts. Only a builder changes them, in the admin:
-no tool, API key or site file can.
+without doing anything. It is always on. It has no page and no setting in the admin, and no tool, API key, site
+file or admin account can change it: its level is set in the code (`Config::default` in `src/shield.rs`), and
+changing it means building and deploying again. Nothing saved in the database is read for it.
 
 - **Rate limit.** A client gets 240 requests a minute (5 times that on the bearer-key API). Going over answers 429;
   going over in three separate minutes shuts the client out for 10 minutes.
@@ -97,9 +98,10 @@ no tool, API key or site file can.
 - **Challenge.** A client that opens more than 40 pages in a minute, or every visitor in strict mode, first solves
   a proof of work in the browser (about a second, once every 12 hours). The pass is signed, bound to the client's
   address and browser, and checked without server state. No outside service is involved.
-- **Block list.** Listed addresses get nothing, except the admin, so an admin cannot lock themselves out.
-- **Record.** What was stopped (time, reason, address, path, user agent) is kept for 7 days and shown in the admin:
-  one record a minute per client and reason, at most 60 a minute in all.
+- **Block list.** Addresses listed in the code get nothing, except the admin, so an admin cannot be locked out.
+- **Record.** What was stopped (time, reason, address, path, user agent) is kept for 7 days in the database
+  (`shield_events`): one record a minute per client and reason, at most 60 a minute in all. The admin does not
+  show it.
 
 The admin, the preview frames and uploaded files are outside these counts: sessions, the login limit and preview
 tokens guard them.
@@ -108,6 +110,59 @@ What this does not do. A flood from thousands of addresses has to be stopped bef
 host or a CDN. A crawler that drives real browsers through many addresses gets through, slower and at a cost. A
 crawler can claim to be a search engine: it then passes the crawler rules but not the rate limit. Behind a reverse
 proxy on another machine, set `HC_TRUST_PROXY=1`, or every visitor looks like the proxy.
+
+## Server functions
+
+A site file under `_fn/` is code the server runs. What keeps it in its box:
+
+- **It gets in the same way as everything else.** A function is a draft until a person publishes it, shows in the
+  publish review, and can be restored. The chat cannot publish.
+- **The engine.** QuickJS, on a thread of its own, with no file, network, process or timer API. The only thing a
+  script can do to the outside is ask the server, by message, to read or write records.
+- **Limits.** 500 ms of wall time (an interrupt stops loops and runaway regular expressions), 32 MB of memory,
+  a 512 KB stack, 200 data calls, a 64 KB request body, a 1 MB answer.
+- **One run is one transaction.** An exception, a cut-off, or an answer of 400 and up rolls back everything the run
+  wrote. A trial run (`run_function`, or a page in the admin's preview) always rolls back.
+- **Its writes are ordinary writes.** Field checks, unique values, relations and cleaned rich text apply, and each
+  write is in history under `fn:<file>`.
+- **Its source is never served**, on the live site or in the preview, and a static export leaves it out.
+- **A visitor never sees its errors.** They get a generic message; the script's own words go to the log.
+- Requests to a function pass the protection above and the origin check like any other write. A function inside a
+  members-only surface is behind that surface's door.
+
+What a function is trusted with: all of the environment's data. It is not bound by a collection's access rules,
+because it is where access logic too involved for a rule is written. Read a function before publishing it as you
+would read any code that can change your data. While a function runs it holds the database, so other requests
+wait for it: at most the 500 ms above.
+
+## Notifications (webhooks)
+
+A builder can have the server send a message to a Feishu or WeCom group robot, or to an address of their own, when
+something happens. What keeps that from being turned against the server or the group:
+
+- **Only a builder adds a destination**, in the admin's settings. There is no tool for it: the chat and API keys
+  cannot point messages anywhere. A function's `notify()` only reaches the destinations a builder set.
+- **Never into the private network.** Before each send the name is resolved, every address it has must be public,
+  and the connection goes to the address that was checked. Redirects are not followed. `HC_FETCH_ALLOW_PRIVATE=1`
+  lifts this for a deployment that must reach its own network.
+- **The address is a secret** (whoever has it can write into the group). Once saved it is never shown again, only
+  its host, and an error never repeats it. Editors do not see destinations at all. It is in the database, and so in
+  a backup, like the chat model's key.
+- **A visitor cannot mention the whole group.** `<` is taken out of every message's text, so a form field cannot
+  carry a robot's mention markup. An address of your own gets the untouched values in `data`.
+- **Signed.** With a secret, Feishu's own signature check is used; an address of your own gets
+  `HMAC-SHA256(secret, "<timestamp>.<body>")` and the timestamp, so an old request does not pass for a new one.
+- **Bounded.** One message a round (3 seconds) for each destination, at most 100 waiting for one; more are not
+  written down. A flood of form posts is a trickle in the group.
+- **Tied to what it tells of.** A message is written in the same transaction as the event: a submission that was
+  refused, a publish that failed, or a function run that was rolled back tells nobody.
+
+## Uploaded pictures
+
+A JPEG, PNG or WebP that carries EXIF (a phone's photo: where and when it was taken, the device) is stored without
+it, upright, so a published photo does not give away a location. The copy a chat attachment sends to the model
+provider is made the same way, at 1568 pixels at most. A PNG that is kept byte for byte (small, or see-through) keeps
+its text chunks. Files uploaded before this was added are as they were.
 
 ## Draft preview
 

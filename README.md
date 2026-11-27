@@ -87,8 +87,9 @@ The chat model can come from the environment instead of Settings: `LLM_PROVIDER`
 - 🤖 **AI that builds, people who publish.** The assistant cannot publish. It treats text in records, pages and uploads as data, never as instructions.
 - 📝 **Drafts everywhere.** Content, collections, pages, admin screens and settings are drafts until published. The live site always shows the published version, whoever visits. Compare draft and live side by side.
 - 🗂️ **Admin screens that follow the site.** When the site gains a form, members or orders, the assistant builds the screen to manage them in the same turn. The admin nav groups collections by the site's own sections. A collection no page uses is marked *Not on the site yet*, with one button that asks the chat to put it there.
+- ⚙️ **It writes the back end too.** What page scripts and rules cannot do (taking stock as an order is placed, totals, permissions that need several tables), the assistant writes as a server function: `_fn/order.js` answers at `/_fn/order`. A function runs in a sandbox with no network, files or timers and with caps on time and memory. One run is one transaction: if it fails, nothing it wrote is kept. Like every site file it is a draft until published, and it can be tried first.
 - 🧠 **Any model.** Claude, OpenAI, Gemini, DeepSeek, Qwen, Kimi, GLM, Doubao, SiliconFlow, Mistral, xAI, Groq, OpenRouter, a local Ollama or LM Studio, or any OpenAI-compatible API. Paste a key and it lists the models you can use.
-- 🔌 **Your agent, too.** A built-in MCP server and a REST API with 41 tools and scoped keys (`read`, `write`, `structure`, `publish`).
+- 🔌 **Your agent, too.** A built-in MCP server and a REST API with 46 tools and scoped keys (`read`, `write`, `structure`, `publish`).
 - 🌍 **Web search for the chat (off by default).** `web_search` and `fetch_page` through a self-hosted SearXNG, Brave or Tavily, with any model. Pages come back as material, never instructions, and private or local addresses are refused at every redirect.
 - 📚 **Skills.** Install a skill folder (with a `SKILL.md`) from GitHub or a zip. The chat reads it when the task needs it.
 
@@ -109,10 +110,11 @@ Hand edits are drafts too, like everything else.
 - 🌏 **Any number of languages.** One record, many languages: text is translated; images, dates and prices are shared. Each language gets its own addresses (`/en/…` or its own domain), fallbacks, hreflang, and localized dates and money. Out-of-date translations are flagged, and the chat can keep every language in sync as drafts.
 - ⚡ **Dynamic, at static speed.** Live pages are cached, and a publish recomputes exactly the pages it touched. `cms-harness export` writes the whole site as static files for any CDN.
 - 🧩 **Your stack, no build step.** HTML with `{{ }}` templates, plus CSS, JavaScript, JSX and TypeScript transpiled on the fly. React, Vue or Three.js load through an import map. You can also upload a site built with Vite.
-- 🖼️ **Images in the right size.** `{{ item.cover|thumb(640) }}` serves a smaller copy, made once and kept.
+- 🖼️ **Photos need no preparing.** An uploaded photo is stored upright, without where and when it was taken, with its long edge at 2560 at most, and compressed (a 7 MB photo is kept at about 0.5 MB). A photo saved as a PNG becomes a JPEG; pictures you can see through and small ones are kept as they are. In a page, `{{ img(item.cover, alt=item.title) }}` writes the whole tag: smaller copies at every width, its size, lazy loading. `{{ item.cover|thumb(640) }}` gives just an address. A picture attached in the chat reaches the model as a small copy.
 - 👥 **Members and access rules.** Sign-up and login for visitors, kept apart from admin accounts. Each collection says who can read it (public, members, each member their own, private) and who can submit to it.
 - 🧩 **One environment, many surfaces.** The site is the first surface. When students and teachers, or customers and staff, need different screens, the assistant builds a surface for each (`/teacher/`, `/student/`), with its own pages and its own rule for who may enter, over data the whole environment shares. A members-only surface is guarded by the system, so its pages never check for themselves. The admin lists every surface, and **Environment** shows them all with the data they share.
-- 🛡️ **Protection built in.** Every page and endpoint built in the environment is behind one door: rate limits, vulnerability scanners shut out, no pages for AI crawlers and scripting tools (search engines still pass), and an in-browser check for clients that read page after page, with no outside service. **Protection** in the admin shows what was stopped; under attack, switch to strict and it applies at once. Only a builder changes these settings: neither the chat nor an API key can.
+- 🛡️ **Protection built in, nothing to set.** Every page and endpoint built in the environment is behind one door: rate limits, vulnerability scanners shut out, no pages for AI crawlers and scripting tools (search engines still pass), and an in-browser check for clients that read page after page, with no outside service. It has no page and no switch in the admin: it is always on, at the level the code sets (`src/shield.rs`), and neither the chat, an API key nor an admin account can change it.
+- 🔔 **Word reaches your group.** In **Settings → Notifications**, paste the webhook address of a Feishu (Lark) or WeCom group robot, or an address of your own. A message goes out when someone submits something, changes are published or a member signs up, and a function sends its own with `notify("…")`. Only a builder says where messages go: neither the chat nor an API key can add a destination.
 - 🗂️ **Manage any data directly.** Every collection's list can be searched (text anywhere in a record, drafts too), exported as CSV, and filled from a CSV whose rows arrive as drafts. Every row is checked before anything comes in: one that does not fit and nothing does. In an export, text a spreadsheet would run as a formula is defused.
 - 🔎 **Full-text search.** `search("query")` in a page, `GET /api/v1/search` and a `search` tool. Chinese works without a dictionary, and visitors only ever find what they may open.
 
@@ -224,16 +226,58 @@ Properties and values come from fixed lists, typed text is escaped so it can nev
 </details>
 
 <details>
+<summary><b>Server functions</b></summary>
+
+A site file under a `_fn` folder (`.js` or `.ts`) is a server function. Its address is its path without the extension: `_fn/order.js` is `/_fn/order`, `teacher/_fn/grade.js` is `/teacher/_fn/grade`. Inside a surface's folder it belongs to that surface: a members-only surface only lets members call its functions. The source is never sent as a file.
+
+```js
+export default function (req) {
+  // req.method, req.path, req.query, req.body, req.member (null for a visitor)
+  const mine = db.query("orders", { owner: req.member.id, limit: 100 });
+  if (mine.total >= 3) return reply(409, { error: "three orders at most" });
+  const id = db.create("orders", { item: req.body.item });
+  return { id };
+}
+```
+
+- Data: `db.query(collection, {filter, sort, limit, offset, search, owner})`, `db.get(collection, id)`, `db.create(collection, data)`, `db.update(collection, id, data)`, `db.delete(collection, id)`. They read and write live data. A write is live at once, passes the same field checks as any other, and is recorded in history under `fn:<file>`. A function is not bound by a collection's access rules: it decides who may do what.
+- Totals: `db.aggregate(collection, {filter, group_by, sum, avg, min, max})`.
+- Notifications: `notify("low stock: " + item)` goes to the groups set in **Settings → Notifications**, five a run at most. A run that does not count (it failed, or it was a trial) sends nothing.
+- Answer: the return value, as JSON. For another status, `reply(status, body)`.
+- One run is one transaction: an exception, a cut-off, or an answer of 400 and up, and nothing it wrote is kept.
+- Limits: 500 ms, 32 MB of memory, 200 data calls, a 64 KB request body. No network, files, processes or timers.
+- When it fails a visitor sees only that it failed; the reason is in `function_log`.
+- `run_function` tries a draft function without writing anything. A page in the admin's preview calling a function (GET) is a trial too.
+- A static export does not include functions, and they do not work there.
+</details>
+
+<details>
 <summary><b>Members and access rules</b></summary>
 
 `set_member_login` turns visitor accounts on. The site then has `/account/signup`, `/account/login` and `/account/logout`, and the `/api/v1/members/*` endpoints. **Members** appears in the admin. Members cannot sign in to the admin.
 
 Each collection sets:
-- who can read it (`read`): `public`, `members`, `owner` (each member sees their own), or `private` (default: admin and keys only);
-- who can submit to it from the site (`create`): `none` (default), `members` or `public`. Submissions go live at once, record who sent them, and show as "N new" in the admin. Forms post to `POST /<collection>/new`; the API takes `POST /api/v1/content/<collection>`.
+- who can read it (`read`): `public`, `members`, `owner` (each member sees their own), `private` (default: admin and keys only), or a condition such as `record.open == true or record.owner == member.id`. A condition is also the filter of every list: each reader's lists, totals and search results hold only what they may see.
+- who can submit to it from the site (`create`): `none` (default), `members`, `public`, or a condition such as `member.kind == 'student' and data.class == member.class`. Submissions go live at once, record who sent them, and show as "N new" in the admin. Forms post to `POST /<collection>/new`; the API takes `POST /api/v1/content/<collection>`.
 - who can change (`update`) and remove (`delete`) a record from the site: `none` (default), `owner` (the member who added it), `members`, or a condition such as `record.owner == member.id and data.status == record.status`. A condition can use `record.<field>`, `record.id`, `record.owner`, `member` (logged in), `member.id`, `member.email`, `member.name`, `data.<field>` (what the record would become), `== != < <= > >=`, `and or not` and brackets. Changes and removals are live at once, and history keeps what the record was. The API takes `PATCH` and `DELETE /api/v1/content/<collection>/<id>`.
 
+Members can carry attributes (`kind: teacher`, `class: 3`). A builder sets them, in **Members** or with `set_member_data`; a member cannot. The system gives them no meaning: a rule reads `member.kind`, a surface's door can be `member.kind == 'teacher'`, and pages and functions see them too.
+
+Mini programs, phone and desktop apps have no cookies: send `"session": "token"` when logging in or signing up, and the answer carries a token to put in `Authorization: Bearer <token>` from then on.
+
 A collection can also sit in a `group` (the site's section) with a `position`: the admin nav lists collections in that order, and each group folds.
+</details>
+
+<details>
+<summary><b>Notifications (webhooks)</b></summary>
+
+In **Settings → Notifications** (builders only), paste a webhook address and tick when to send: someone submitted something, changes were published, a member signed up, `notify()` in a function. What kind of destination it is, is read from the address:
+
+- Feishu / Lark (`open.feishu.cn`, `open.larksuite.com`): a text message. If the robot has signature checking on, give the secret too.
+- WeCom (`qyapi.weixin.qq.com`): a text message.
+- Any other address: a `POST` of JSON `{"event", "text", "data", "site", "at"}` with the headers `X-Harness-Event` and `X-Harness-Timestamp`. With a signing secret, `X-Harness-Signature` is `sha256=` followed by the hex of `HMAC-SHA256(secret, "<timestamp>.<body>")`.
+
+A message is first written to the database together with the thing it tells of, then sent in a round every 3 seconds, one message a round for each destination. One that fails is tried again after 1 minute and after 5. Once saved, an address is never shown again, only its host. **Send a test** sends one now and says how it went.
 </details>
 
 <details>
@@ -274,6 +318,7 @@ Only fields declared with `index` or `unique` can filter and sort.
 | `list_views` / `set_view` `delete_view` | read / structure | admin screens |
 | `get_site_notes` / `set_site_notes` | read / structure | notes for the assistant |
 | `check_page` | read | check a draft page: render errors, dead links, missing files, omissions |
+| `run_function` / `function_log` | read | try a draft server function (nothing is written); live runs that failed or logged |
 | `list_site_files` `get_site_file` | read | read site files (with their hand edits) |
 | `write_site_file` `delete_site_file` `upload_site_bundle` | structure | write site files, upload a built site |
 | `get_site_settings` / `set_site_settings` | read / structure | site name, languages, template text, import map, script origins |
