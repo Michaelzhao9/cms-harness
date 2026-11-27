@@ -193,7 +193,7 @@ Or use REST: `GET /api/v1/tools` lists the tools this key can call with their pa
 | `cms-harness restore <file.zip>` | replace the site with a backup (stop the server first) |
 | `cms-harness export <dir>` | write the live site as static files (set `HC_ORIGIN` to where they will be served) |
 
-Builders manage structure, keys, admins, the model and skills. Editors write and publish content.
+Builders manage structure, keys, admins, the model, skills and where notifications go. Editors write and publish content.
 </details>
 
 <details>
@@ -360,7 +360,7 @@ With nginx, add `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` a
 
 ## 🔒 Security
 
-Read [SECURITY.md](SECURITY.md) before you run scripts on the site that you did not write. It explains when to give the admin its own address (**Settings → Address**). What the protection does and does not do, the sandbox server functions run in, and how notifications and uploaded pictures are handled are there too.
+Read [SECURITY.md](SECURITY.md) before you run scripts on the site that you did not write. It explains when to give the admin its own address (**Settings → Admin address**). What the protection does and does not do, the sandbox server functions run in, and how notifications and uploaded pictures are handled are there too.
 
 ## 📄 License
 
@@ -369,5 +369,5 @@ Read [SECURITY.md](SECURITY.md) before you run scripts on the site that you did 
 ---
 
 <p align="center">
-  If CMS Harness is the kind of CMS you wanted, a ⭐ helps other people find it.
+  If CMS Harness is what you were looking for, a ⭐ helps other people find it.
 </p>

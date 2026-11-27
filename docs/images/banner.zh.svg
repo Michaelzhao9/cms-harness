@@ -9,7 +9,7 @@
 <rect width="64" height="64" rx="18" fill="#1d1d1f"/><rect x="12" y="12" width="40" height="40" rx="9" fill="#fff"/><circle cx="12" cy="12" r="9" fill="#f5b700" stroke="#1d1d1f" stroke-width="4"/>
 </g>
 <text x="84" y="252" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', Helvetica, Arial, sans-serif" font-size="64" font-weight="700" letter-spacing="-2" fill="#1d1d1f">CMS Harness</text>
-<text x="86" y="300" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', Helvetica, Arial, sans-serif" font-size="24" fill="#55555b">说出想要的网站，AI 把它做成草稿。</text>
+<text x="86" y="300" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', Helvetica, Arial, sans-serif" font-size="24" fill="#55555b">说出想要的应用，AI 把它建成草稿。</text>
 <text x="86" y="334" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', Helvetica, Arial, sans-serif" font-size="24" fill="#55555b">你看一遍再点发布。一个可执行文件，一个 SQLite。</text>
 <g transform="translate(860 52) rotate(-5)" opacity=".75" filter="url(#soft)">
 <rect width="250" height="300" rx="16" fill="#fff"/><rect x="26" y="34" width="130" height="14" rx="5" fill="#cfcfd5"/>

@@ -56,7 +56,7 @@ within a week.
 - Site files are validated on write (HTML templates parse, scripts transpile) and rendered with an instruction budget so
   a runaway template cannot hang the server. Rich text is cleaned of scripts and event attributes before it goes live.
 
-## Site and admin addresses (设置 → 网址)
+## Site and admin addresses (设置 → 后台的网址)
 
 CMS Harness serves the website and the admin from one program. The owner picks where the admin lives:
 

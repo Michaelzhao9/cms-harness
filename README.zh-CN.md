@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/banner.zh.svg" alt="CMS Harness：说出想要的网站，AI 把它做成草稿，你看一遍再点发布。" width="100%">
+  <img src="docs/images/banner.zh.svg" alt="CMS Harness：说出想要的应用，AI 把它建成草稿，你看一遍再点发布。" width="100%">
 </p>
 
 <h3 align="center">整个应用让 AI 来建，但它一个字也发布不了。</h3>
@@ -194,7 +194,7 @@ cargo build --release
 | `cms-harness restore <文件.zip>` | 用备份替换整站（先停掉正在运行的服务） |
 | `cms-harness export <目录>` | 把线上网站导出成静态文件（`HC_ORIGIN` 设成它要放的网址） |
 
-搭建者（builder）管结构、密钥、管理员、模型和技能；编辑（editor）写内容、发布内容。
+搭建者（builder）管结构、密钥、管理员、模型、技能和通知发到哪里；编辑（editor）写内容、发布内容。
 </details>
 
 <details>
@@ -361,7 +361,7 @@ export default function (req) {
 
 ## 🔒 安全
 
-网站要运行不是你自己写的脚本时，先读 [SECURITY.md](SECURITY.md)：它说明什么时候该给后台单独的网址（**设置 → 网址**）。防护做了什么和没做什么、服务器端函数的沙箱、通知和上传图片的处理，也都写在那里。
+网站要运行不是你自己写的脚本时，先读 [SECURITY.md](SECURITY.md)：它说明什么时候该给后台单独的网址（**设置 → 后台的网址**）。防护做了什么和没做什么、服务器端函数的沙箱、通知和上传图片的处理，也都写在那里。
 
 ## 📄 许可证
 
@@ -370,5 +370,5 @@ export default function (req) {
 ---
 
 <p align="center">
-  如果 CMS Harness 正是你想要的那种 CMS，点个 ⭐ 能让更多人看到它。
+  如果 CMS Harness 正是你想要的，点个 ⭐ 能让更多人看到它。
 </p>
