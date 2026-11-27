@@ -82,7 +82,7 @@ The chat model can come from the environment instead of Settings: `LLM_PROVIDER`
 
 ## ✨ What you get
 
-> 🆕 marks what was added after 0.2.1. It is on the main branch and ships with the next release. To use it now, build from source, or clone the repository and replace the `image:` line in `docker-compose.yml` with `build: .`.
+> 🆕 marks what is new in 0.3.
 
 ### Build with AI, safely
 
@@ -95,7 +95,7 @@ The chat model can come from the environment instead of Settings: `LLM_PROVIDER`
 - 🌍 **Web search for the chat (off by default).** `web_search` and `fetch_page` through a self-hosted SearXNG, Brave or Tavily, with any model. Pages come back as material, never instructions, and private or local addresses are refused at every redirect.
 - 📚 **Skills.** Install a skill folder (with a `SKILL.md`) from GitHub or a zip. The chat reads it when the task needs it.
 
-### More than a website: one environment, many surfaces &nbsp;<sup>🆕</sup>
+### More than a website: one environment, many surfaces &nbsp;<sup>new in 0.3</sup>
 
 - 🧩 **A surface for each kind of user.** The site is the first surface. When students and teachers, or customers and staff, need different screens, the assistant builds a surface for each (`/teacher/`, `/student/`), with its own pages and its own rule for who may enter, over data the whole environment shares. The rule can be "members", or a condition such as `member.kind == 'teacher'`. The system guards the door, so pages never check for themselves. The admin lists every surface, and **Environment** shows them all with the data they share.
 - ⚙️ **It writes the back end too.** What page scripts and rules cannot do (taking stock as an order is placed, totals, permissions that need several tables), the assistant writes as a server function: `_fn/order.js` answers at `/_fn/order`. A function runs in a sandbox with no network, files or timers and with caps on time and memory. One run is one transaction: if it fails, nothing it wrote is kept. Like every site file it is a draft until published, and it can be tried first.
