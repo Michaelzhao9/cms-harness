@@ -2,10 +2,10 @@
   <img src="docs/images/banner.zh.svg" alt="CMS Harness：说出想要的网站，AI 把它做成草稿，你看一遍再点发布。" width="100%">
 </p>
 
-<h3 align="center">整个网站让 AI 来做，但它一个字也发布不了。</h3>
+<h3 align="center">整个应用让 AI 来建，但它一个字也发布不了。</h3>
 
 <p align="center">
-  网站、后台、AI 对话、接口，全在<b>一个 8 MB 的下载包</b>和<b>一个 SQLite 文件</b>里。<br>
+  页面、后端、数据、账号、AI 对话、接口，全在<b>一个不到 10 MB 的下载包</b>和<b>一个 SQLite 文件</b>里。<br>
   不用 Node，不用 Postgres，不用 Redis，不用打包。
 </p>
 
@@ -14,7 +14,7 @@
   <a href="https://github.com/Michaelzhao9/cms-harness/actions/workflows/ci.yml"><img alt="测试" src="https://img.shields.io/github/actions/workflow/status/Michaelzhao9/cms-harness/ci.yml?branch=main&label=tests&labelColor=1d1d1f"></a>
   <a href="https://github.com/Michaelzhao9/cms-harness/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Michaelzhao9/cms-harness?style=flat&color=f5b700&labelColor=1d1d1f"></a>
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-1d1d1f"></a>
-  <img alt="Rust 1.85+" src="https://img.shields.io/badge/rust-1.85%2B-1d1d1f">
+  <img alt="Rust 1.98+" src="https://img.shields.io/badge/rust-1.98%2B-1d1d1f">
   <img alt="内置 MCP" src="https://img.shields.io/badge/MCP-built%20in-f5b700?labelColor=1d1d1f">
 </p>
 
@@ -31,15 +31,15 @@
   <sub>演示（英文界面，后台可以切换成中文）</sub>
 </p>
 
-打开后台直接说“首页做成工作室的主页”“加一个预约表单”“网站加会员注册”，内置的对话助手就去写内容、做页面、建好管理它们的后台界面。它做的一切都是**草稿**：人看过改动、点了**发布**，线上网站才会变。
+部署这一个程序，它就是整个环境，也是管理它的后台。打开后台直接说“首页做成工作室的主页”“加一个预约表单”，或者“给老师和学生各做一个界面，学生交作业，老师打分”，内置的对话助手就去建数据、写页面、写后端的函数，再建好管理它们的界面。它做的一切都是**草稿**：人看过改动、点了**发布**，线上才会变。
 
 哪里不满意？不用再想一句提示词，**直接在页面上拖、拉、改字**。你自己的 agent（Claude Code、Codex 或任何 MCP 客户端）也能通过内置的 MCP 做同样的事。
 
 ## 哪里不一样
 
-| 🛡️ AI 发布不了 | 📦 什么都不用装 | 🌐 真正的网站，不是模板 |
-| --- | --- | --- |
-| 内容、页面、设置、后台界面全是草稿。每一处改动新旧对照给你看，不要的取消勾选。每次发布都有记录，可以恢复。 | 一个可执行文件就提供网站、后台、对话、会员账号和接口。数据是一个 SQLite 文件，整站备份是一个 zip。 | 页面是你自己的 HTML、CSS、JavaScript，支持模板、JSX、TypeScript，React、Vue 用 import map 加载，不用打包。也可以整站导出成静态文件。 |
+| 🛡️ AI 发布不了 | 📦 什么都不用装 | 🧩 不只是网站 | 🌐 页面是你自己的 |
+| --- | --- | --- | --- |
+| 内容、页面、后端的函数、设置、后台界面全是草稿。每一处改动新旧对照给你看，不要的取消勾选。每次发布都有记录，可以恢复。 | 一个可执行文件就提供网站、后台、对话、会员账号和接口。数据是一个 SQLite 文件，整站备份是一个 zip。 | 一个环境里可以有多个端：每种使用者一个界面，各有进门规则，数据共用。后端是沙箱里的函数，小程序和 App 用同一套接口。 | HTML、CSS、JavaScript，支持模板、JSX、TypeScript，React、Vue 用 import map 加载，不用打包。也可以整站导出成静态文件。 |
 
 ## 🚀 快速开始
 
@@ -58,7 +58,7 @@ docker compose exec cms-harness cms-harness admin 你的邮箱          # 打印
 
 <br>
 
-在 [Releases](https://github.com/Michaelzhao9/cms-harness/releases) 下载 Linux（x86_64、arm64）、macOS（Apple 芯片）、Windows 的程序，或者从源码编译（需要 Rust 1.85 或更新版本）：
+在 [Releases](https://github.com/Michaelzhao9/cms-harness/releases) 下载 Linux（x86_64、arm64）、macOS（Apple 芯片）、Windows 的程序，或者从源码编译（需要 Rust 1.98 或更新版本）：
 
 ```sh
 git clone https://github.com/Michaelzhao9/cms-harness.git
@@ -83,16 +83,27 @@ cargo build --release
 
 ## ✨ 有什么
 
+> 标 🆕 的是 0.2.1 之后加入的，现在在 main 分支上，随下一个版本发布。想现在就用：从源码编译，或者克隆仓库后把 `docker-compose.yml` 里的 `image:` 一行换成 `build: .`。
+
 ### 让 AI 动手，而且放心
 
 - 🤖 **AI 动手，人来发布。** 对话助手不能发布。记录、网页、上传文件里的文字，它只当数据，不当指令。
 - 📝 **什么都是草稿。** 内容、集合、页面、后台界面、设置，发布前都是草稿。线上网站永远只显示已发布的版本，不管谁来访问。草稿和线上可以并排对比。
 - 🗂️ **后台跟着网站走。** 网站加了表单、会员、订单，助手在同一轮里就建好管理它们的界面。后台导航按网站自己的栏目分组。网站上没用到的集合会标成「网站上还没用到」，旁边一个按钮就能让对话把它做到网站上。
-- ⚙️ **后端也是它写的。** 页面脚本和规则做不了的事（下单同时扣库存、算总分、要查几张表才能决定的权限），助手写成服务器端的函数：`_fn/order.js` 就是网址 `/_fn/order`。函数跑在沙箱里，没有网络、文件和定时器，时间和内存都有上限；一次运行是一个事务，出错就什么都不留。它和别的站点文件一样是草稿，发布后才生效，写完可以先试运行。
+- 🔍 **写完自己先查一遍。** 🆕 助手用 `check_page` 把草稿页面真的渲染一遍：有没有报错、死链、缺的文件、整张原图直接放上去的图片；函数用 `run_function` 先试运行，什么都不会真的写入。长任务它会列出任务清单，同一步原地打转就停下来。
 - 🧠 **什么模型都能用。** Claude、OpenAI、Gemini、DeepSeek、通义千问、Kimi、智谱 GLM、豆包、硅基流动、Mistral、xAI、Groq、OpenRouter，本机的 Ollama、LM Studio，或任何兼容 OpenAI 的接口。填好密钥就能列出可用的型号。
-- 🔌 **你的 agent 也能接。** 内置 MCP 服务和 REST 接口，46 个工具，密钥分权限（`read`、`write`、`structure`、`publish`）。
+- 🔌 **你的 agent 也能接。** 内置 MCP 服务和 REST 接口，45 个工具，密钥分权限（`read`、`write`、`structure`、`publish`）。
 - 🌍 **对话联网搜索（默认关闭）。** `web_search` 和 `fetch_page` 走自己部署的 SearXNG、Brave 或 Tavily，任何模型都能用。网页内容只当资料，不当指令；内网和本机地址每一次跳转都会检查，读不了。
 - 📚 **技能。** 从 GitHub 或 zip 安装技能文件夹（带 `SKILL.md`），对话遇到相关的事会自己去读。
+
+### 不只是网站：一个环境，多个端 &nbsp;<sup>🆕</sup>
+
+- 🧩 **每种使用者一个端。** 网站本身是第一个端；学生和老师、顾客和店员要用不同的界面时，助手给每一种人建一个端（`/teacher/`、`/student/`），各有自己的页面和进门规则，数据是整个环境共用的。进门规则可以是“登录会员”，也可以是一句条件，比如 `member.kind == 'teacher'`。门由系统把，页面不用自己检查。后台左边列出所有端，「环境」页一眼看到每个端和它们共用的数据。
+- ⚙️ **后端也是它写的。** 页面脚本和规则做不了的事（下单同时扣库存、算总分、要查几张表才能决定的权限），助手写成服务器端的函数：`_fn/order.js` 就是网址 `/_fn/order`。函数跑在沙箱里，没有网络、文件和定时器，时间和内存都有上限；一次运行是一个事务，出错就什么都不留。它和别的站点文件一样是草稿，发布后才生效，写完可以先试运行。
+- 👥 **会员、属性和访问规则。** 访客可以注册登录，和后台管理员是两套账号。会员可以带你自己定的属性（`kind: teacher`、`class: 3`），系统不给它们任何含义。每个集合的读、新增、修改、删除各有规则：一个词（所有人、登录会员、只看自己的、不公开），或一句条件，比如 `record.owner == member.id or member.kind == 'teacher'`。读的规则同时过滤每个人看到的列表、总数和搜索结果。
+- 📱 **小程序和 App 用同一个后端。** 内容接口按同一套规则读、提交、修改、删除；没有 cookie 的客户端用令牌登录；`_fn` 下的函数就是它们自己的接口。
+- 🔔 **有事发到群里。** 在 **设置 → 通知** 贴上飞书或企业微信群机器人的 Webhook 地址（也可以填你自己的地址），有人提交了内容、发布了修改、有新会员注册时就发一条消息；函数里用 `notify("…")` 发自己的消息。发到哪里只有搭建者能定，对话和密钥都加不了去处。
+- 🛡️ **自带防护，不用设置。** 环境里建出来的每个页面和接口天生在同一道门后面：限速、拦下漏洞探测、不给 AI 爬虫和脚本工具看页面（搜索引擎照常放行）、翻页太快的访客要先在浏览器里通过一次验证，全程不依赖外部服务。后台里没有它的页面，也没有开关：它一直开着，级别写在代码里（`src/shield.rs`），对话、密钥和后台账号都改不了。
 
 ### 直接在页面上动手改 &nbsp;<sup>0.2 新增</sup>
 
@@ -111,16 +122,12 @@ cargo build --release
 - 🌏 **任意多种语言。** 一条内容、多种语言：文字分语言翻译，图片、日期、价格共用。每种语言有自己的网址（`/en/…` 或单独的域名）、回退顺序、hreflang，日期和金额按语言格式显示。过期的译文会标出来，对话还能把所有语言自动同步成草稿。
 - ⚡ **动态网站，静态网站的速度。** 线上页面会缓存，一次发布只重算它影响到的页面。`cms-harness export` 能把整个网站导出成静态文件，放到任何 CDN 上。
 - 🧩 **技术栈随你，不用打包。** HTML 加 `{{ }}` 模板，还能写 CSS、JavaScript、JSX、TypeScript（访问时自动转换）。React、Vue、Three.js 通过 import map 加载；用 Vite 打包好的网站也能整个上传。
-- 🖼️ **照片不用自己处理。** 上传的照片自动扶正、去掉拍摄地点和时间这些信息、最长边缩到 2560 以内并压缩（一张 7 MB 的照片存下来约 0.5 MB）；存成 PNG 的照片会变成 JPEG，透明图和小图原样保留。页面里 `{{ img(item.cover, alt=item.title) }}` 写出整个图片标签：各种宽度的缩小版、宽高、延迟加载；只要网址时用 `{{ item.cover|thumb(640) }}`。对话里附的图，模型看到的是缩小的一份。
-- 👥 **会员和访问规则。** 访客可以注册登录，和后台管理员是两套账号。每个集合可以设定谁能看（所有人、登录会员、只看自己的、不公开）、谁能从网站提交。
-- 🧩 **一个环境，多个端。** 网站本身是第一个端；学生和老师、顾客和店员要用不同的界面时，助手给每一种人建一个端（`/teacher/`、`/student/`），各有自己的页面和进入规则，数据是整个环境共用的。只让会员进的端由系统把门，页面不用自己检查。后台左边列出所有端，「环境」页一眼看到每个端和它们共用的数据。
-- 🛡️ **自带防护，不用设置。** 环境里建出来的每个页面和接口天生在同一道门后面：限速、拦下漏洞探测、不给 AI 爬虫和脚本工具看页面（搜索引擎照常放行）、翻页太快的访客要先在浏览器里通过一次验证，全程不依赖外部服务。后台里没有它的页面，也没有开关：它一直开着，级别写在代码里（`src/shield.rs`），对话、密钥和后台账号都改不了。
-- 🔔 **有事发到群里。** 在 **设置 → 通知** 贴上飞书或企业微信群机器人的 Webhook 地址（也可以填你自己的地址），有人提交了内容、发布了修改、有新会员注册时就发一条消息；函数里用 `notify("…")` 发自己的消息。发到哪里只有搭建者能定，对话和密钥都加不了去处。
-- 🗂️ **直接管任何数据。** 每个集合的列表都能搜索（记录里任何地方的文字，草稿也搜得到）、导出成 CSV、把 CSV 里的行导入成草稿。导入前每一行都先检查，有一行不对就一行都不进；导出的表格里，会被表格软件当成公式执行的内容已经处理过。
+- 🖼️ **照片不用自己处理。** 🆕 上传的照片自动扶正、去掉拍摄地点和时间这些信息、最长边缩到 2560 以内并压缩（一张 7 MB 的照片存下来约 0.5 MB）；存成 PNG 的照片会变成 JPEG，透明图和小图原样保留。页面里 `{{ img(item.cover, alt=item.title) }}` 写出整个图片标签：各种宽度的缩小版、宽高、延迟加载；只要网址时用 `{{ item.cover|thumb(640) }}`。对话里附的图，模型看到的是缩小的一份。
 - 🔎 **全文搜索。** 页面里用 `search("关键词")`，接口 `GET /api/v1/search`，还有 `search` 工具。中文不用词库也能搜，访客只会搜到自己能看的内容。
 
-### 怎么运行都行
+### 管理和运行
 
+- 🗂️ **直接管任何数据。** 🆕 每个集合的列表都能搜索（记录里任何地方的文字，草稿也搜得到）、导出成 CSV、把 CSV 里的行导入成草稿。导入前每一行都先检查，有一行不对就一行都不进；导出的表格里，会被表格软件当成公式执行的内容已经处理过。
 - ⏰ **定时发布。** 在「发布前看一遍」里选一个时间，到时间按普通发布的检查和记录上线。
 - 💾 **备份和恢复。** 整站（数据库和上传的文件）打成一个 zip，在 **设置 → 备份** 下载，或运行 `cms-harness backup`。恢复前会先检查备份，并把现在的整站另存一份。
 - 🗺️ **SEO 基础，自动做好。** `sitemap.xml` 和 `robots.txt` 跟着每次发布更新，每种语言都有。
@@ -167,8 +174,8 @@ cargo build --release
 
 ## 🔧 底层
 
-- 大约 16,000 行 Rust：[axum](https://github.com/tokio-rs/axum)、SQLite（内置，带全文搜索）、模板用 [minijinja](https://github.com/mitsuhiko/minijinja)，JSX 和 TypeScript 用 [oxc](https://oxc.rs) 转换。
-- 360 个测试，每次推送到 main 都连同 clippy 一起跑。
+- 大约 19,000 行 Rust：[axum](https://github.com/tokio-rs/axum)、SQLite（内置，带全文搜索）、模板用 [minijinja](https://github.com/mitsuhiko/minijinja)，JSX 和 TypeScript 用 [oxc](https://oxc.rs) 转换，服务器端函数跑在 [QuickJS](https://bellard.org/quickjs/) 里（[rquickjs](https://github.com/DelSkayn/rquickjs)）。
+- 450 多个测试，每次推送到 main 都连同 clippy 一起跑。
 - 后台是服务端渲染的 HTML 加原生 JavaScript，配严格的 Content-Security-Policy，没有前端打包。
 - 密码用 Argon2id 哈希。细节见 [SECURITY.md](SECURITY.md)。
 
@@ -195,7 +202,7 @@ cargo build --release
 
 刚部署好的网站只有一个内置页面：显示站点名和进后台的链接。其他页面都是助手（或你的 agent）写的**网站文件**：
 
-- HTML 模板：`collection("news", limit=10, sort="-date")`、算页码用的 `count("news", filter={...})`（`collection()` 一次最多返回 100 条）、`record("news", 3)`、`search(request.query.q, limit=20)`（每条结果带 `_collection` 和 `_snippet`）、当前登录的会员 `member`、站点名 `site.name`。
+- HTML 模板：`collection("news", limit=10, sort="-date")`、算页码用的 `count("news", filter={...})`（`collection()` 一次最多返回 100 条）、`record("news", 3)`、`search(request.query.q, limit=20)`（每条结果带 `_collection` 和 `_snippet`）、写出整个图片标签的 `img(item.cover, alt=item.title)`、当前登录的会员 `member`（连同它的属性）、站点名 `site.name`。
 - CSS、JavaScript，以及 JSX / TypeScript / TSX（访问时自动转换）。
 - 第三方库通过 import map 从 `https://esm.sh` 加载（`set_site_settings`），不需要打包；别处打包好的网站可以整个上传（`upload_site_bundle`）。
 
@@ -205,7 +212,7 @@ cargo build --release
 
 **多语言。** 在 **设置 → 网站语言** 设网站用哪些语言（或用 `set_site_settings` 的 `languages`），第一种是默认语言。其他语言的网址在 `/语言代码/` 下或用单独的域名，也可以设回退语言。文字和富文本字段会翻译（`translate: false` 的字段各语言共用）；集合设 `untranslated: "hide"` 时，没翻译的记录不出现在其他语言里。翻译用 `set_translation` 或在记录编辑页里写，作为草稿存在记录里，`translation_status` 列出缺翻译和过期的内容。模板里有 `lang`、`dir`、`languages`（这一页的所有语言版本，做语言切换用）和 `suggested_lang`；`{{ "…"|t }}` 读站点文字表；`|date`、`|number`、`|money("EUR")` 按语言格式化。模板里写成 `/about` 的链接，在英文页面上会通向 `/en/about`。hreflang 和多语言 sitemap 自动加好。
 
-**图片。** `/uploads/<文件名>?w=640` 给出一份缩小的图，宽度取五档之一（384、640、828、1200、1920），只生成一次，之后一直用。模板里用 `|thumb(640)`。PNG 还是 PNG，JPEG 和 WebP 变成 JPEG，不会放大。
+**图片。** 上传的 JPEG、PNG、WebP 存下来之前会处理一遍：按 EXIF 扶正并去掉 EXIF（拍摄地点、时间、设备），最长边超过 2560 就缩小，JPEG 重新压缩（能小五分之一以上，或者本来就要重做时才换）；不透明的大 PNG 转成 JPEG 不到原来四成就转。透明的图、小的 PNG、GIF 和 PDF 原样保留。`/uploads/<文件名>?w=640` 给出一份缩小的图，宽度取五档之一（384、640、828、1200、1920），只生成一次，之后一直用；PNG 还是 PNG，JPEG 和 WebP 变成 JPEG，不会放大。模板里 `{{ img(item.cover, alt=item.title, sizes="50vw", class="cover") }}` 写出整个 `<img>`：`srcset` 里是比原图窄的各档，带原图的宽高和 `loading="lazy"`；一屏里最先看到的那张加 `eager=true`。只要网址的地方用 `|thumb(640)`。
 
 **缓存和导出。** 没登录的访客看到的线上页面会缓存，直到它读过的内容再次发布（响应头 `x-cms-cache` 显示 hit 或 miss）。`cms-harness export <目录>` 导出所有公开页面（含记录页面）、网站文件、上传文件、`sitemap.xml`、`robots.txt` 和 `404.html`；把 `HC_ORIGIN` 设成这些文件要放的网址。表单和登录还是要靠服务器，命令会列出用到它们的页面。
 
@@ -300,7 +307,7 @@ export default function (req) {
 <details>
 <summary><b>上传文件</b></summary>
 
-`POST /api/v1/media`，multipart 表单，文件放在名为 `file` 的字段里，需要带 `write` 权限的密钥，最大 20 MB；也可以用工具 `upload_media` 以 base64 传（最大 5 MB）。支持 JPEG、PNG、GIF、WebP、PDF，按内容判断格式。文件按内容命名，存在 `/uploads/<哈希>.<扩展名>`，长期缓存；图片加上 `?w=640` 就是缩小的版本。上传的文件是公开的，不要上传需要保密的文件。
+`POST /api/v1/media`，multipart 表单，文件放在名为 `file` 的字段里，需要带 `write` 权限的密钥，最大 20 MB；也可以用工具 `upload_media` 以 base64 传（最大 5 MB）。支持 JPEG、PNG、GIF、WebP、PDF，按内容判断格式。文件按内容命名，存在 `/uploads/<哈希>.<扩展名>`，长期缓存；图片加上 `?w=640` 就是缩小的版本。图片存下来之前会处理（见“网站页面”里的图片一段），所以回答里除了 `path`，还有存下来的 `width`、`height` 和 `bytes`。上传的文件是公开的，不要上传需要保密的文件。
 </details>
 
 <details>
@@ -310,7 +317,7 @@ export default function (req) {
 | --- | --- | --- |
 | `list_collections` `get_collection` | read | 列出集合、查看定义 |
 | `create_collection` `update_collection` `delete_collection` | structure | 新建、修改（字段、访问规则、网址规则 `url`、导航分组 `group` 和 `position`）、删除集合（记录保留） |
-| `get_record` `query_records` `search` | read | 读记录、全文搜索 |
+| `get_record` `query_records` `aggregate_records` `search` | read | 读记录、汇总（分组、求和、平均、最大最小）、全文搜索 |
 | `create_record` `update_record` `delete_record` | write | 写记录（含网址名 `slug`） |
 | `list_pending` `list_versions` | read | 待发布的改动、发布历史 |
 | `publish` | publish | 发布 |
@@ -326,8 +333,8 @@ export default function (req) {
 | `translation_status` / `set_translation` | read / write | 缺翻译和过期的内容；写翻译 |
 | `set_member_login` | structure | 打开或关闭会员账号 |
 | `list_ends` / `set_end` `delete_end` | read / structure | 列出端；新建、修改（标题、谁能进）、删除一个端（连同它的文件） |
-| `list_members` / `set_member_status` | read / write | 列出会员、停用或恢复 |
-| `upload_media` | write | 上传图片或 PDF |
+| `list_members` / `set_member_status` `set_member_data` | read / write | 列出会员；停用或恢复、设置属性 |
+| `upload_media` | write | 上传图片或 PDF，返回路径和存下来的宽高 |
 
 所有密钥都能读。改结构、界面、网站文件和站点说明需要 `structure`。
 </details>
@@ -346,6 +353,7 @@ export default function (req) {
 | `HC_ADMIN_PASSWORD` | 随机 | `cms-harness admin` 用的密码 |
 | `HC_TRUST_PROXY` | 不设 | 反向代理在别的机器上时设为 `1` |
 | `HC_ADMIN_ORIGIN` | 不设 | 后台单独的网址（`https://admin.example.com`），或 `off` |
+| `HC_FETCH_ALLOW_PRIVATE` | 不设 | 设为 `1` 时，对话读网页和通知可以连内网地址（内网部署用） |
 | `LLM_PROVIDER` `LLM_API_KEY` `LLM_MODEL` `LLM_BASE_URL` | 不设 | 对话用的模型，优先于设置 |
 
 用 nginx 时加上 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` 和 `proxy_set_header Host $host;`，频率限制才能区分访客。Caddy 默认就会加。
@@ -353,7 +361,7 @@ export default function (req) {
 
 ## 🔒 安全
 
-网站要运行不是你自己写的脚本时，先读 [SECURITY.md](SECURITY.md)：它说明什么时候该给后台单独的网址（**设置 → 网址**）。
+网站要运行不是你自己写的脚本时，先读 [SECURITY.md](SECURITY.md)：它说明什么时候该给后台单独的网址（**设置 → 网址**）。防护做了什么和没做什么、服务器端函数的沙箱、通知和上传图片的处理，也都写在那里。
 
 ## 📄 许可证
 

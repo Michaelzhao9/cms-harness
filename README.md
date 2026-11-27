@@ -2,10 +2,10 @@
   <img src="docs/images/banner.svg" alt="CMS Harness: say what you want, the AI builds it as a draft, you publish." width="100%">
 </p>
 
-<h3 align="center">An AI builds your whole website. It can't publish a thing.</h3>
+<h3 align="center">An AI builds your whole app. It can't publish a thing.</h3>
 
 <p align="center">
-  The site, the admin, the AI chat and the API in <b>one 8 MB download</b> and <b>one SQLite file</b>.<br>
+  Pages, back end, data, accounts, the AI chat and the API in <b>one download under 10 MB</b> and <b>one SQLite file</b>.<br>
   No Node, no Postgres, no Redis, no build step.
 </p>
 
@@ -14,7 +14,7 @@
   <a href="https://github.com/Michaelzhao9/cms-harness/actions/workflows/ci.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/Michaelzhao9/cms-harness/ci.yml?branch=main&label=tests&labelColor=1d1d1f"></a>
   <a href="https://github.com/Michaelzhao9/cms-harness/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Michaelzhao9/cms-harness?style=flat&color=f5b700&labelColor=1d1d1f"></a>
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-1d1d1f"></a>
-  <img alt="Rust 1.85+" src="https://img.shields.io/badge/rust-1.85%2B-1d1d1f">
+  <img alt="Rust 1.98+" src="https://img.shields.io/badge/rust-1.98%2B-1d1d1f">
   <img alt="MCP server built in" src="https://img.shields.io/badge/MCP-built%20in-f5b700?labelColor=1d1d1f">
 </p>
 
@@ -30,15 +30,15 @@
   <img src="docs/images/demo.gif" alt="Typing a request in the admin chat, the AI building a studio home page as a draft with the changes marked in the preview, then publishing it and viewing the live site." width="100%">
 </p>
 
-Open the admin and say *"turn the home page into a studio page"*, *"add a booking form"* or *"let visitors sign up"*. The built-in assistant writes the content, the pages and the admin screens to manage them. Everything it does is a **draft**: the live site does not move until a person reviews the changes and presses **Publish**.
+Deploy this one program and it is the whole environment, and the admin that manages it. Open the admin and say *"turn the home page into a studio page"*, *"add a booking form"* or *"give teachers and students a screen each: students hand in homework, teachers grade it"*. The built-in assistant sets up the data, writes the pages and the server functions, and builds the admin screens to manage them. Everything it does is a **draft**: nothing live moves until a person reviews the changes and presses **Publish**.
 
 Not happy with a detail? Don't write a prompt for it. **Drag it, resize it or retype it right on the page.** And your own agent (Claude Code, Codex, any MCP client) can do the same work through the built-in MCP server.
 
 ## Why it's different
 
-| 🛡️ The AI can't publish | 📦 Nothing to set up | 🌐 A real website, not a template |
-| --- | --- | --- |
-| Content, pages, settings and admin screens are all drafts. You see every change, old against new, and uncheck what you don't want. Every release is kept and can be put back. | One executable serves the site, the admin, the chat, member accounts and the API. Data is one SQLite file. Back the whole site up as one zip. | Pages are HTML, CSS and JavaScript you own, with templates, JSX and TypeScript, React or Vue from an import map, and no bundler. Or export everything as static files. |
+| 🛡️ The AI can't publish | 📦 Nothing to set up | 🧩 More than a website | 🌐 Pages you own |
+| --- | --- | --- | --- |
+| Content, pages, server functions, settings and admin screens are all drafts. You see every change, old against new, and uncheck what you don't want. Every release is kept and can be put back. | One executable serves the site, the admin, the chat, member accounts and the API. Data is one SQLite file. Back the whole site up as one zip. | One environment holds many surfaces: a screen for each kind of user, each with its own rule for who may enter, over shared data. The back end is sandboxed functions, and a mini program or an app uses the same API. | HTML, CSS and JavaScript, with templates, JSX and TypeScript, React or Vue from an import map, and no bundler. Or export everything as static files. |
 
 ## 🚀 Quick start
 
@@ -57,7 +57,7 @@ Then open **Settings → Chat model**, pick a service, paste a key and press **D
 
 <br>
 
-Download a binary for Linux (x86_64, arm64), macOS (Apple Silicon) or Windows from [Releases](https://github.com/Michaelzhao9/cms-harness/releases), or build it (Rust 1.85 or newer):
+Download a binary for Linux (x86_64, arm64), macOS (Apple Silicon) or Windows from [Releases](https://github.com/Michaelzhao9/cms-harness/releases), or build it (Rust 1.98 or newer):
 
 ```sh
 git clone https://github.com/Michaelzhao9/cms-harness.git
@@ -82,16 +82,27 @@ The chat model can come from the environment instead of Settings: `LLM_PROVIDER`
 
 ## ✨ What you get
 
+> 🆕 marks what was added after 0.2.1. It is on the main branch and ships with the next release. To use it now, build from source, or clone the repository and replace the `image:` line in `docker-compose.yml` with `build: .`.
+
 ### Build with AI, safely
 
 - 🤖 **AI that builds, people who publish.** The assistant cannot publish. It treats text in records, pages and uploads as data, never as instructions.
 - 📝 **Drafts everywhere.** Content, collections, pages, admin screens and settings are drafts until published. The live site always shows the published version, whoever visits. Compare draft and live side by side.
 - 🗂️ **Admin screens that follow the site.** When the site gains a form, members or orders, the assistant builds the screen to manage them in the same turn. The admin nav groups collections by the site's own sections. A collection no page uses is marked *Not on the site yet*, with one button that asks the chat to put it there.
-- ⚙️ **It writes the back end too.** What page scripts and rules cannot do (taking stock as an order is placed, totals, permissions that need several tables), the assistant writes as a server function: `_fn/order.js` answers at `/_fn/order`. A function runs in a sandbox with no network, files or timers and with caps on time and memory. One run is one transaction: if it fails, nothing it wrote is kept. Like every site file it is a draft until published, and it can be tried first.
+- 🔍 **It checks its own work.** 🆕 The assistant renders a draft page with `check_page` and reads what comes back: render errors, dead links, missing files, photos put on the page whole. It tries a function with `run_function`, which writes nothing. On a long job it keeps a task list, and it stops when it finds itself repeating the same step.
 - 🧠 **Any model.** Claude, OpenAI, Gemini, DeepSeek, Qwen, Kimi, GLM, Doubao, SiliconFlow, Mistral, xAI, Groq, OpenRouter, a local Ollama or LM Studio, or any OpenAI-compatible API. Paste a key and it lists the models you can use.
-- 🔌 **Your agent, too.** A built-in MCP server and a REST API with 46 tools and scoped keys (`read`, `write`, `structure`, `publish`).
+- 🔌 **Your agent, too.** A built-in MCP server and a REST API with 45 tools and scoped keys (`read`, `write`, `structure`, `publish`).
 - 🌍 **Web search for the chat (off by default).** `web_search` and `fetch_page` through a self-hosted SearXNG, Brave or Tavily, with any model. Pages come back as material, never instructions, and private or local addresses are refused at every redirect.
 - 📚 **Skills.** Install a skill folder (with a `SKILL.md`) from GitHub or a zip. The chat reads it when the task needs it.
+
+### More than a website: one environment, many surfaces &nbsp;<sup>🆕</sup>
+
+- 🧩 **A surface for each kind of user.** The site is the first surface. When students and teachers, or customers and staff, need different screens, the assistant builds a surface for each (`/teacher/`, `/student/`), with its own pages and its own rule for who may enter, over data the whole environment shares. The rule can be "members", or a condition such as `member.kind == 'teacher'`. The system guards the door, so pages never check for themselves. The admin lists every surface, and **Environment** shows them all with the data they share.
+- ⚙️ **It writes the back end too.** What page scripts and rules cannot do (taking stock as an order is placed, totals, permissions that need several tables), the assistant writes as a server function: `_fn/order.js` answers at `/_fn/order`. A function runs in a sandbox with no network, files or timers and with caps on time and memory. One run is one transaction: if it fails, nothing it wrote is kept. Like every site file it is a draft until published, and it can be tried first.
+- 👥 **Members, attributes and access rules.** Sign-up and login for visitors, kept apart from admin accounts. A member can carry attributes you define (`kind: teacher`, `class: 3`); the system gives them no meaning. Each collection has a rule for reading, adding, changing and removing: a word (public, members, each member their own, private) or a condition such as `record.owner == member.id or member.kind == 'teacher'`. A read rule also filters the lists, totals and search results each person sees.
+- 📱 **One back end for mini programs and apps.** The content API reads, submits, changes and removes under the same rules. A client without cookies logs in with a token. Functions under `_fn` are its own endpoints.
+- 🔔 **Word reaches your group.** In **Settings → Notifications**, paste the webhook address of a Feishu (Lark) or WeCom group robot, or an address of your own. A message goes out when someone submits something, changes are published or a member signs up, and a function sends its own with `notify("…")`. Only a builder says where messages go: neither the chat nor an API key can add a destination.
+- 🛡️ **Protection built in, nothing to set.** Every page and endpoint built in the environment is behind one door: rate limits, vulnerability scanners shut out, no pages for AI crawlers and scripting tools (search engines still pass), and an in-browser check for clients that read page after page, with no outside service. It has no page and no switch in the admin: it is always on, at the level the code sets (`src/shield.rs`), and neither the chat, an API key nor an admin account can change it.
 
 ### Edit by hand, right on the page &nbsp;<sup>new in 0.2</sup>
 
@@ -110,16 +121,12 @@ Hand edits are drafts too, like everything else.
 - 🌏 **Any number of languages.** One record, many languages: text is translated; images, dates and prices are shared. Each language gets its own addresses (`/en/…` or its own domain), fallbacks, hreflang, and localized dates and money. Out-of-date translations are flagged, and the chat can keep every language in sync as drafts.
 - ⚡ **Dynamic, at static speed.** Live pages are cached, and a publish recomputes exactly the pages it touched. `cms-harness export` writes the whole site as static files for any CDN.
 - 🧩 **Your stack, no build step.** HTML with `{{ }}` templates, plus CSS, JavaScript, JSX and TypeScript transpiled on the fly. React, Vue or Three.js load through an import map. You can also upload a site built with Vite.
-- 🖼️ **Photos need no preparing.** An uploaded photo is stored upright, without where and when it was taken, with its long edge at 2560 at most, and compressed (a 7 MB photo is kept at about 0.5 MB). A photo saved as a PNG becomes a JPEG; pictures you can see through and small ones are kept as they are. In a page, `{{ img(item.cover, alt=item.title) }}` writes the whole tag: smaller copies at every width, its size, lazy loading. `{{ item.cover|thumb(640) }}` gives just an address. A picture attached in the chat reaches the model as a small copy.
-- 👥 **Members and access rules.** Sign-up and login for visitors, kept apart from admin accounts. Each collection says who can read it (public, members, each member their own, private) and who can submit to it.
-- 🧩 **One environment, many surfaces.** The site is the first surface. When students and teachers, or customers and staff, need different screens, the assistant builds a surface for each (`/teacher/`, `/student/`), with its own pages and its own rule for who may enter, over data the whole environment shares. A members-only surface is guarded by the system, so its pages never check for themselves. The admin lists every surface, and **Environment** shows them all with the data they share.
-- 🛡️ **Protection built in, nothing to set.** Every page and endpoint built in the environment is behind one door: rate limits, vulnerability scanners shut out, no pages for AI crawlers and scripting tools (search engines still pass), and an in-browser check for clients that read page after page, with no outside service. It has no page and no switch in the admin: it is always on, at the level the code sets (`src/shield.rs`), and neither the chat, an API key nor an admin account can change it.
-- 🔔 **Word reaches your group.** In **Settings → Notifications**, paste the webhook address of a Feishu (Lark) or WeCom group robot, or an address of your own. A message goes out when someone submits something, changes are published or a member signs up, and a function sends its own with `notify("…")`. Only a builder says where messages go: neither the chat nor an API key can add a destination.
-- 🗂️ **Manage any data directly.** Every collection's list can be searched (text anywhere in a record, drafts too), exported as CSV, and filled from a CSV whose rows arrive as drafts. Every row is checked before anything comes in: one that does not fit and nothing does. In an export, text a spreadsheet would run as a formula is defused.
+- 🖼️ **Photos need no preparing.** 🆕 An uploaded photo is stored upright, without where and when it was taken, with its long edge at 2560 at most, and compressed (a 7 MB photo is kept at about 0.5 MB). A photo saved as a PNG becomes a JPEG; pictures you can see through and small ones are kept as they are. In a page, `{{ img(item.cover, alt=item.title) }}` writes the whole tag: smaller copies at every width, its size, lazy loading. `{{ item.cover|thumb(640) }}` gives just an address. A picture attached in the chat reaches the model as a small copy.
 - 🔎 **Full-text search.** `search("query")` in a page, `GET /api/v1/search` and a `search` tool. Chinese works without a dictionary, and visitors only ever find what they may open.
 
-### Run it your way
+### Manage it and run it
 
+- 🗂️ **Manage any data directly.** 🆕 Every collection's list can be searched (text anywhere in a record, drafts too), exported as CSV, and filled from a CSV whose rows arrive as drafts. Every row is checked before anything comes in: one that does not fit and nothing does. In an export, text a spreadsheet would run as a formula is defused.
 - ⏰ **Scheduled publishing.** Pick a time on the review page. It goes through the same checks and history as a normal publish.
 - 💾 **Backup and restore.** The whole site (database and uploads) as one zip, from **Settings → Backup** or `cms-harness backup`. A restore checks the archive and saves the current site first.
 - 🗺️ **SEO basics, done.** `sitemap.xml` and `robots.txt` follow every publish, in every language.
@@ -166,8 +173,8 @@ Or use REST: `GET /api/v1/tools` lists the tools this key can call with their pa
 
 ## 🔧 Under the hood
 
-- About 16,000 lines of Rust: [axum](https://github.com/tokio-rs/axum), SQLite (bundled, with full-text search), [minijinja](https://github.com/mitsuhiko/minijinja) for templates and [oxc](https://oxc.rs) to transpile JSX and TypeScript.
-- 360 tests, run with clippy on every push to main.
+- About 19,000 lines of Rust: [axum](https://github.com/tokio-rs/axum), SQLite (bundled, with full-text search), [minijinja](https://github.com/mitsuhiko/minijinja) for templates, [oxc](https://oxc.rs) to transpile JSX and TypeScript, and [QuickJS](https://bellard.org/quickjs/) (through [rquickjs](https://github.com/DelSkayn/rquickjs)) to run server functions.
+- More than 450 tests, run with clippy on every push to main.
 - The admin is server-rendered HTML with plain JavaScript and a strict Content-Security-Policy. There is no front-end build.
 - Passwords are hashed with Argon2id. The details are in [SECURITY.md](SECURITY.md).
 
@@ -194,7 +201,7 @@ Builders manage structure, keys, admins, the model and skills. Editors write and
 
 A fresh site has one built-in page: a welcome with the site's name and a link to the admin. Every other page comes from **site files** that the assistant (or your agent) writes:
 
-- HTML with templates: `collection("news", limit=10, sort="-date")`, `count("news", filter={...})` for page numbers (`collection()` returns at most 100 at a time), `record("news", 3)`, `search(request.query.q, limit=20)` (each hit has `_collection` and `_snippet`), the signed-in `member`, `site.name`.
+- HTML with templates: `collection("news", limit=10, sort="-date")`, `count("news", filter={...})` for page numbers (`collection()` returns at most 100 at a time), `record("news", 3)`, `search(request.query.q, limit=20)` (each hit has `_collection` and `_snippet`), `img(item.cover, alt=item.title)` for a whole image tag, the signed-in `member` (with its attributes), `site.name`.
 - CSS, JavaScript, and JSX / TypeScript / TSX, which are transpiled when served.
 - Libraries from `https://esm.sh` through an import map (`set_site_settings`), so no bundler is needed. A site built elsewhere can be uploaded in one piece (`upload_site_bundle`).
 
@@ -204,7 +211,7 @@ The live site always shows the published version, whatever cookies or headers a 
 
 **Languages.** Set the site's languages in **Settings → Site languages** (or `set_site_settings` with `languages`); the first is the default. Other languages live under `/<code>/` or on their own domain, and may fall back to others. Text and rich text fields are translated (`translate: false` keeps one shared); a collection with `untranslated: "hide"` leaves untranslated records out of other languages. Translations are written with `set_translation` or in the record editor, kept in the record as drafts, and `translation_status` lists what is missing or out of date. Templates get `lang`, `dir`, `languages` (this page in every language, for a switcher) and `suggested_lang`; `{{ "…"|t }}` reads the site's string table; `|date`, `|number` and `|money("EUR")` format per language. A link a template writes as `/about` leads to `/en/about` on an English page. hreflang links and a multilingual sitemap are added for you.
 
-**Images.** `/uploads/<name>?w=640` serves a copy no wider than one of five widths (384, 640, 828, 1200, 1920), made once and kept. Templates ask for it with `|thumb(640)`. PNG stays PNG, JPEG and WebP become JPEG, and nothing is enlarged.
+**Images.** An uploaded JPEG, PNG or WebP is worked on before it is stored: turned upright by its EXIF and stored without it (place, time, device), shrunk when its long edge is over 2560, and a JPEG compressed again (when that saves a fifth, or when it has to be re-made anyway). A large PNG with no transparency becomes a JPEG when that is under two fifths of its size. See-through pictures, small PNGs, GIFs and PDFs are kept as they came. `/uploads/<name>?w=640` serves a copy no wider than one of five widths (384, 640, 828, 1200, 1920), made once and kept; PNG stays PNG, JPEG and WebP become JPEG, and nothing is enlarged. In a template, `{{ img(item.cover, alt=item.title, sizes="50vw", class="cover") }}` writes the whole `<img>`: every width below the picture's own in `srcset`, its real size, and `loading="lazy"`; give the first picture a visitor sees `eager=true`. Where only an address is needed, use `|thumb(640)`.
 
 **Cache and export.** Live pages for visitors who are not signed in are cached until something they read is published again (the `x-cms-cache` header says hit or miss). `cms-harness export <dir>` writes every public page, record pages included, plus site files, uploads, `sitemap.xml`, `robots.txt` and `404.html`; set `HC_ORIGIN` to the address the files will be served from. Forms and sign-in still need the server; the command lists the pages that use them.
 
@@ -299,7 +306,7 @@ Only fields declared with `index` or `unique` can filter and sort.
 <details>
 <summary><b>Uploads</b></summary>
 
-`POST /api/v1/media` with a multipart field named `file` and a key with `write`, up to 20 MB, or the `upload_media` tool (base64, up to 5 MB). JPEG, PNG, GIF, WebP and PDF are accepted, judged by content rather than extension. Files are stored by content hash at `/uploads/<hash>.<ext>` and cached for a long time; add `?w=640` for a smaller copy of an image. Uploads are public, so do not upload private files.
+`POST /api/v1/media` with a multipart field named `file` and a key with `write`, up to 20 MB, or the `upload_media` tool (base64, up to 5 MB). JPEG, PNG, GIF, WebP and PDF are accepted, judged by content rather than extension. Files are stored by content hash at `/uploads/<hash>.<ext>` and cached for a long time; add `?w=640` for a smaller copy of an image. A picture is worked on before it is stored (see Images under Website pages), so the answer carries the stored `width`, `height` and `bytes` beside the `path`. Uploads are public, so do not upload private files.
 </details>
 
 <details>
@@ -309,7 +316,7 @@ Only fields declared with `index` or `unique` can filter and sort.
 | --- | --- | --- |
 | `list_collections` `get_collection` | read | list collections, read one |
 | `create_collection` `update_collection` `delete_collection` | structure | create, change (fields, access, `url` pattern, nav `group` and `position`), delete (records are kept) |
-| `get_record` `query_records` `search` | read | read records, full-text search |
+| `get_record` `query_records` `aggregate_records` `search` | read | read records, totals (group, sum, average, min, max), full-text search |
 | `create_record` `update_record` `delete_record` | write | write records (and their `slug`) |
 | `list_pending` `list_versions` | read | pending changes, release history |
 | `publish` | publish | publish |
@@ -325,8 +332,8 @@ Only fields declared with `index` or `unique` can filter and sort.
 | `translation_status` / `set_translation` | read / write | what is missing or out of date; write a translation |
 | `set_member_login` | structure | turn member accounts on or off |
 | `list_ends` / `set_end` `delete_end` | read / structure | list surfaces; create, change (title, who may enter), delete a surface with its files |
-| `list_members` / `set_member_status` | read / write | list members, disable or enable one |
-| `upload_media` | write | upload an image or PDF |
+| `list_members` / `set_member_status` `set_member_data` | read / write | list members; disable or enable one, set its attributes |
+| `upload_media` | write | upload an image or PDF; returns the path and the stored size |
 
 Every key can read. Changing structure, screens, site files and notes needs `structure`.
 </details>
@@ -345,6 +352,7 @@ Every key can read. Changing structure, screens, site files and notes needs `str
 | `HC_ADMIN_PASSWORD` | random | password for `cms-harness admin` |
 | `HC_TRUST_PROXY` | unset | `1` when the reverse proxy runs on another machine |
 | `HC_ADMIN_ORIGIN` | unset | a separate admin address (`https://admin.example.com`), or `off` |
+| `HC_FETCH_ALLOW_PRIVATE` | unset | `1` lets the chat's page reading and notifications reach private addresses (for a deployment inside its own network) |
 | `LLM_PROVIDER` `LLM_API_KEY` `LLM_MODEL` `LLM_BASE_URL` | unset | the chat model; overrides Settings |
 
 With nginx, add `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` and `proxy_set_header Host $host;` so rate limits tell visitors apart. Caddy does this by default.
@@ -352,7 +360,7 @@ With nginx, add `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` a
 
 ## 🔒 Security
 
-Read [SECURITY.md](SECURITY.md) before you run scripts on the site that you did not write. It explains when to give the admin its own address (**Settings → Address**).
+Read [SECURITY.md](SECURITY.md) before you run scripts on the site that you did not write. It explains when to give the admin its own address (**Settings → Address**). What the protection does and does not do, the sandbox server functions run in, and how notifications and uploaded pictures are handled are there too.
 
 ## 📄 License
 
