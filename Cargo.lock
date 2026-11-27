@@ -235,7 +235,7 @@ dependencies = [
 
 [[package]]
 name = "cms-harness"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ammonia",
  "anyhow",
