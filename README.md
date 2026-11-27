@@ -5,7 +5,7 @@
 <h3 align="center">An AI builds your whole app. It can't publish a thing.</h3>
 
 <p align="center">
-  Pages, back end, data, accounts, the AI chat and the API in <b>one download under 10 MB</b> and <b>one SQLite file</b>.<br>
+  Pages, back end, data, accounts, the AI chat and the API in <b>one download of about 10 MB</b> and <b>one SQLite file</b>.<br>
   No Node, no Postgres, no Redis, no build step.
 </p>
 

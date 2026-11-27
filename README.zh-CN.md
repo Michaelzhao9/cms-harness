@@ -5,7 +5,7 @@
 <h3 align="center">整个应用让 AI 来建，但它一个字也发布不了。</h3>
 
 <p align="center">
-  页面、后端、数据、账号、AI 对话、接口，全在<b>一个不到 10 MB 的下载包</b>和<b>一个 SQLite 文件</b>里。<br>
+  页面、后端、数据、账号、AI 对话、接口，全在<b>一个 10 MB 左右的下载包</b>和<b>一个 SQLite 文件</b>里。<br>
   不用 Node，不用 Postgres，不用 Redis，不用打包。
 </p>
 
