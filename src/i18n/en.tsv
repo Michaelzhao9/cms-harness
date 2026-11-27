@@ -1072,3 +1072,61 @@ AI 爬虫	AI crawler
 导出 CSV	Export CSV
 要导入的 CSV 文件	CSV file to import
 导入为草稿	Import as drafts
+试运行函数 {}	Trying function {}
+查看函数的运行记录	Reading the function log
+属性	Attributes
+你的账号不能进入这里。	Your account cannot enter here.
+给会员 #{} 设属性	Setting attributes of member #{}
+汇总 {} 的记录	Totalling the records of {}
+还没配置	Not set up yet
+选一家服务，填密钥，点「检测」挑型号。	Pick a service, enter its key, press Detect and choose a model.
+让对话能上网查资料、读网页。	Lets the chat search the web and read pages.
+没有	None
+写给对话的做事方法，比如品牌语气。对话遇到相关的事会自己去读。	Ways of working written for the chat, such as a brand voice. The chat reads one when a task calls for it.
+给对话的说明	Notes for the chat
+没写	Empty
+已填写	Written
+这个站是做什么的、有什么规矩，写在这里，对话每次都会先看。发布后生效。	What this site is for and its house rules. The chat reads this first, every time. In effect once published.
+第一种是默认语言，其他语言的网址前面加语言代码（比如 /en/）。发布后生效。	The first language is the default; the others get their code in front of the address (such as /en/). In effect once published.
+连接	Connections
+接入你自己的 AI	Connect your own AI
+把地址和一把密钥交给你的 agent，它就能像左边的对话一样读写这个站。	Give your agent the address and a key, and it reads and writes this site as the chat on the left does.
+人	people
+把密钥	keys
+整站打成一个 zip：数据库和上传的文件。	The whole site as one zip: the database and the uploaded files.
+和网站同一个网址	Same address as the site
+通知	Notifications
+个去处	destinations
+加好了。点「发送测试」，看看群里收不收得到。	Added. Press “Send a test” and see whether it reaches the group.
+测试消息发出去了，去群里看一眼。	The test message was sent. Have a look in the group.
+有人提交了内容、发布了修改时，往群里发一条消息。把飞书或企业微信群机器人的 Webhook 地址贴进来就行，也可以填你自己的地址。	Sends a message to a group when someone submits something or changes are published. Paste the webhook address of a Feishu (Lark) or WeCom group robot, or use an address of your own.
+飞书	Feishu
+企业微信	WeCom
+自定义	Custom
+有人提交了内容	Someone submitted something
+发布了修改	Changes were published
+有新会员注册	A new member signed up
+函数里的 notify()	notify() in a function
+上一条没发出去：	The last message was not delivered: 
+上一条已送达	The last message was delivered
+发送测试	Send a test
+Webhook 地址	Webhook address
+签名密钥	Signing secret
+机器人开了签名校验才填	only if the robot has signature checking on
+什么时候发	When to send
+地址从哪里来？	Where does the address come from?
+飞书：群设置 → 群机器人 → 添加机器人 → 自定义机器人，复制 Webhook 地址。	Feishu: group settings → Bots → Add bot → Custom bot, then copy the webhook address.
+企业微信：群聊右上角 → 添加群机器人，复制 Webhook 地址。	WeCom: top right of the group chat → Add group robot, then copy the webhook address.
+自己的地址：会收到一个 JSON（event、text、data、site、at）。填了签名密钥，请求头 X-Harness-Signature 是 sha256= 加上 HMAC-SHA256(密钥, 时间戳.正文)。	Your own address: it receives JSON (event, text, data, site, at). With a signing secret, the X-Harness-Signature header is sha256= followed by HMAC-SHA256(secret, timestamp.body).
+这不是一个网址：把机器人的 Webhook 地址整个粘贴进来，以 https:// 开头。	That is not an address: paste the robot's whole webhook address, starting with https://.
+Webhook 地址要以 https:// 开头。	A webhook address starts with https://.
+地址或签名密钥太长了。	The address or the signing secret is too long.
+请至少勾一样：什么时候发消息。	Tick at least one: when to send a message.
+不认识的事件“{}”：可选 {}。	Unknown event “{}”: choose from {}.
+最多 {} 个去处：先删掉不用的。	At most {} destinations: delete one you no longer use first.
+测试消息没发出去：{}	The test message was not delivered: {}
+没有这个去处，可能已经删掉了。	No such destination; it may have been deleted.
+“{}”是内网或本机地址：消息不会发到那里。	“{}” is a private or local address: messages are not sent there.
+连不上“{}”：{}	Could not connect to “{}”: {}
+对方返回 {}：{}	The other side answered {}: {}
+{}没有收下：{}	{} did not accept it: {}

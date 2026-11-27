@@ -1,6 +1,7 @@
 //! 防护: the kernel guards everything the environment serves, whoever built it and however. A page the AI wrote
-//! a minute ago is behind the same door as the rest, and nothing a site file or a tool call says can open it:
-//! only a builder changes these settings, by hand, in the admin.
+//! a minute ago is behind the same door as the rest, and nothing a site file, a tool call or a setting can open
+//! it. It has no page in the admin and nothing to switch: the level is `Config::default()` below, and changing
+//! it means changing this file.
 //!
 //! Four things, cheapest first, all decided in memory before a request reaches a handler:
 //! - the block list, and clients shut out for a while (a scanner's path, or going over the limit again and again);
@@ -12,7 +13,7 @@
 //! What it cannot do: a flood from thousands of addresses has to be stopped upstream (the host, a CDN), and a
 //! crawler driving real browsers through many addresses gets through, slower and at a cost.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -25,10 +26,6 @@ CREATE TABLE IF NOT EXISTS shield_events(id INTEGER PRIMARY KEY, at TEXT NOT NUL
   kind TEXT NOT NULL, path TEXT NOT NULL, ua TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS shield_events_at ON shield_events(at);
 ";
-
-/// The key of the saved settings in `site_settings`: they apply at once and are never a draft, so turning the
-/// protection up during an attack does not wait for a publish.
-const KEY: &str = "shield";
 
 /// Leading zero bits a challenge's hash needs: about 65,000 hashes, a fraction of a second in a browser.
 pub const BITS: u32 = 16;
@@ -74,6 +71,7 @@ pub struct Config {
 }
 
 impl Default for Config {
+    /// The level every deployment runs at. This is the one place to change it.
     fn default() -> Self {
         Config { mode: Mode::Standard, per_minute: 240, pages_per_minute: 40, block_ai: true, block_tools: true, blocked: vec![] }
     }
@@ -163,7 +161,7 @@ fn class(method: &str, path: &str) -> Class {
         Class::Free
     } else if under("/api/v1/tools") || under("/api/v1/site") || under("/api/v1/media") || path == "/mcp" {
         Class::Keyed
-    } else if under("/api") {
+    } else if under("/api") || path.split('/').any(|seg| seg == crate::func::DIR) {
         Class::Other
     } else if method == "GET" && path.rsplit('/').next().is_none_or(|last| !last.contains('.') || last.ends_with(".html")) {
         Class::Page
@@ -307,22 +305,6 @@ pub fn leading_zero_bits(hash: &[u8]) -> u32 {
         }
     }
     bits
-}
-
-/// The saved settings; the defaults when nothing was saved.
-pub fn load(conn: &Connection) -> Config {
-    conn.query_row("SELECT value FROM site_settings WHERE key = ?1", [KEY], |r| r.get::<_, String>(0))
-        .optional()
-        .ok()
-        .flatten()
-        .and_then(|v| serde_json::from_str(&v).ok())
-        .unwrap_or_default()
-}
-
-pub fn save(conn: &Connection, config: &Config) -> Result<(), String> {
-    conn.execute("INSERT INTO site_settings(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", params![KEY, json!(config).to_string()])
-        .map(|_| ())
-        .map_err(|e| format!("保存防护设置失败：{e}"))
 }
 
 /// Records one stopped request; a week of them is kept.

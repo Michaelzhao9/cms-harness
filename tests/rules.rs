@@ -23,7 +23,7 @@ struct Site {
 fn member(app: &Shared, email: &str) -> Member {
     let conn = app.conn();
     conn.execute("INSERT INTO members(email, password_hash, name) VALUES (?1, 'x', ?1)", [email]).unwrap();
-    Member { id: conn.last_insert_rowid(), email: email.into(), name: email.into() }
+    Member { id: conn.last_insert_rowid(), email: email.into(), name: email.into(), data: json!({}) }
 }
 
 fn site() -> Site {
@@ -97,7 +97,7 @@ fn text_in_a_rule_is_only_ever_text() {
     let s = site();
     assert!(!s.allows("record.text == \"x' OR 1=1 --\"", None, s.mine));
     assert!(!s.allows("record.text == 'x\" OR 1=1 --'", None, s.mine));
-    let sly = Member { id: s.b.id, email: "' OR 1=1 --".into(), name: String::new() };
+    let sly = Member { id: s.b.id, email: "' OR 1=1 --".into(), name: String::new(), data: json!({"kind": "' OR 1=1 --"}) };
     assert!(!s.allows("record.text == member.email", Some(&sly), s.mine));
 }
 

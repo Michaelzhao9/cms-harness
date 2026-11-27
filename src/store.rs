@@ -64,6 +64,10 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     if !conn.prepare("SELECT 1 FROM pragma_table_info('records') WHERE name = 'slug'")?.exists([])? {
         conn.execute_batch("ALTER TABLE records ADD COLUMN slug TEXT; ALTER TABLE records ADD COLUMN draft_slug TEXT;")?;
     }
+    // Members carry attributes a builder defines.
+    if !conn.prepare("SELECT 1 FROM pragma_table_info('members') WHERE name = 'data'")?.exists([])? {
+        conn.execute_batch("ALTER TABLE members ADD COLUMN data TEXT NOT NULL DEFAULT '{}'")?;
+    }
     conn.execute_batch(crate::routes::SCHEMA)?;
     // Full-text search: the functions its triggers call, then the index, filled for records published before it.
     crate::search::register(&conn)?;
@@ -73,6 +77,8 @@ pub fn open(path: &str) -> anyhow::Result<Connection> {
     conn.execute_batch(crate::websearch::SCHEMA)?;
     conn.execute_batch(crate::cache::SCHEMA)?;
     conn.execute_batch(crate::shield::SCHEMA)?;
+    conn.execute_batch(crate::func::SCHEMA)?;
+    conn.execute_batch(crate::hooks::SCHEMA)?;
     crate::routes::backfill(&conn).map_err(|e| anyhow::anyhow!(e))?;
     Ok(conn)
 }

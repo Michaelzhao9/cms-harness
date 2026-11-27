@@ -1021,3 +1021,9 @@ for (const t of document.querySelectorAll('time[data-utc]')) {
   const d = new Date(t.getAttribute('datetime'));
   if (!Number.isNaN(d.getTime())) t.textContent = d.toLocaleString(document.documentElement.lang === 'en' ? 'en' : 'zh-CN', { dateStyle: 'medium', timeStyle: 'short' });
 }
+
+// Settings: a link to one setting (/admin/settings#s-model) opens its row.
+{
+  const row = location.hash.length > 1 && document.getElementById(location.hash.slice(1));
+  if (row && row.tagName === 'DETAILS') row.open = true;
+}

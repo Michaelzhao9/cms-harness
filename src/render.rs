@@ -29,7 +29,6 @@ static ADMIN: LazyLock<Environment<'static>> = LazyLock::new(|| {
         ("publish.html", include_str!("web/templates/publish.html")),
         ("releases.html", include_str!("web/templates/releases.html")),
         ("env.html", include_str!("web/templates/env.html")),
-        ("shield.html", include_str!("web/templates/shield.html")),
         ("settings.html", include_str!("web/templates/settings.html")),
         ("members.html", include_str!("web/templates/members.html")),
     ] {

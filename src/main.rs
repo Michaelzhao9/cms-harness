@@ -268,6 +268,8 @@ fn serve(conn: rusqlite::Connection, data: PathBuf, port: String) -> ExitCode {
                 }
             }
         });
+        // 通知: what waits to be sent goes out every few seconds.
+        tokio::spawn(cms_harness::hooks::run(app.clone()));
         // Loopback by default, behind a reverse proxy; HC_HOST=0.0.0.0 in a container.
         let addr = format!("{}:{port}", env("HC_HOST", "127.0.0.1"));
         let listener = match tokio::net::TcpListener::bind(&addr).await {

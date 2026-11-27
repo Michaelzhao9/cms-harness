@@ -8,22 +8,15 @@
 use crate::auth::Actor;
 use crate::changes::{self, Target};
 use rusqlite::Connection;
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 /// The drafted option holding the list.
 pub const KEY: &str = "ends";
 
-/// Who may open the pages of an 端.
-#[derive(Serialize, Deserialize, JsonSchema, Clone, Copy, Default, PartialEq, Eq, Debug)]
-#[serde(rename_all = "lowercase")]
-pub enum Enter {
-    /// Anyone.
-    #[default]
-    Public,
-    /// Logged-in members; a visitor is sent to log in.
-    Members,
+/// Who may open an 端 when nothing else is said: anyone.
+fn open_door() -> String {
+    "public".into()
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -31,8 +24,20 @@ pub struct End {
     /// Its folder of site files and its address: `teacher` holds `teacher/…` and answers at `/teacher/`.
     pub name: String,
     pub title: String,
-    #[serde(default)]
-    pub enter: Enter,
+    /// Who may open its pages and call its functions: `public`, `members` (anyone logged in), or a condition on
+    /// the member such as `member.kind == 'teacher'` (see `rules`).
+    #[serde(default = "open_door")]
+    pub enter: String,
+}
+
+/// What an 端 answers someone at its door.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Door {
+    Open,
+    /// A visitor: log in first.
+    Login,
+    /// A member the door's condition does not let in.
+    Refused,
 }
 
 /// Top-level paths the server or the site's own pages already answer on.
@@ -51,9 +56,20 @@ pub fn of<'a>(ends: &'a [End], rel: &str) -> Option<&'a End> {
     ends.iter().find(|e| e.name == first)
 }
 
-/// Whether a live path is behind a door: inside an 端 only members may enter.
+/// Whether a live path is inside an 端 that is not open to everyone.
 pub fn closed(ends: &[End], rel: &str) -> bool {
-    of(ends, rel).is_some_and(|e| e.enter == Enter::Members)
+    of(ends, rel).is_some_and(|e| e.enter != "public")
+}
+
+/// What `member` (as `members::member_json` gives them; none: a visitor) meets at a live path. A condition that
+/// cannot be judged keeps the door shut.
+pub fn door(conn: &Connection, ends: &[End], rel: &str, member: Option<&Value>) -> Door {
+    let Some(end) = of(ends, rel).filter(|e| e.enter != "public") else { return Door::Open };
+    match (crate::rules::member_allows(conn, &end.enter, member), member) {
+        (Ok(true), _) => Door::Open,
+        (_, None) => Door::Login,
+        (_, Some(_)) => Door::Refused,
+    }
 }
 
 fn check_name(conn: &Connection, name: &str) -> Result<(), String> {
@@ -117,7 +133,7 @@ pub fn list(conn: &Connection, site_name: &str) -> Result<Value, String> {
 }
 
 /// Makes an 端 or changes one: a draft.
-pub fn set(conn: &Connection, actor: &Actor, name: &str, title: Option<String>, enter: Option<Enter>, note: &str) -> Result<Value, String> {
+pub fn set(conn: &Connection, actor: &Actor, name: &str, title: Option<String>, enter: Option<String>, note: &str) -> Result<Value, String> {
     check_name(conn, name)?;
     let mut ends = load(conn, true);
     let title = title.map(|t| t.trim().to_string());
@@ -128,7 +144,7 @@ pub fn set(conn: &Connection, actor: &Actor, name: &str, title: Option<String>, 
         Some(i) => i,
         None => {
             let title = title.clone().ok_or_else(|| format!("新建端“{name}”要给它一个标题（title），比如“老师端”。"))?;
-            ends.push(End { name: name.into(), title, enter: Enter::default() });
+            ends.push(End { name: name.into(), title, enter: open_door() });
             ends.len() - 1
         }
     };
@@ -136,10 +152,12 @@ pub fn set(conn: &Connection, actor: &Actor, name: &str, title: Option<String>, 
         ends[at].title = t;
     }
     if let Some(e) = enter {
+        let e = e.trim().to_string();
+        crate::rules::check_member(&e).map_err(|why| format!("端的进门条件（enter）“{e}”写得不对：{why}"))?;
         ends[at].enter = e;
     }
-    if ends[at].enter == Enter::Members && !crate::members::login_enabled(conn, true) {
-        return Err("只让会员进的端要先有会员账号：先用 set_member_login 打开会员注册和登录。".into());
+    if ends[at].enter != "public" && !crate::members::login_enabled(conn, true) {
+        return Err("不是所有人都能进的端要先有会员账号：先用 set_member_login 打开会员注册和登录。".into());
     }
     save(conn, actor, &ends, note)?;
     let all = list(conn, "")?;

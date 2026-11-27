@@ -337,7 +337,7 @@ async fn image_attachments_are_uploaded_and_other_files_refused() {
     let seen = m.seen.lock().unwrap();
     let first = &seen[0].1[0].content;
     assert!(matches!(&first[0], Block::Image { media_type, .. } if media_type == "image/png"));
-    assert!(matches!(&first[1], Block::Text(t) if t.contains("/uploads/")));
+    assert!(matches!(&first[1], Block::Text(t) if t.contains("/uploads/") && t.contains("2×2")), "where it is kept, and how large it is");
 }
 
 #[tokio::test(flavor = "multi_thread")]

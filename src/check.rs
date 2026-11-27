@@ -94,6 +94,12 @@ pub fn page(app: &App, conn: &Connection, path: &str) -> Result<Value, String> {
     let headings: Vec<String> = all.iter().filter(|t| matches!(t.name.as_str(), "h1" | "h2" | "h3")).map(|t| format!("{} {}", t.name, text(inner(&html, t), 80))).collect();
     let h1 = named("h1").count();
     let images_without_alt = named("img").filter(|t| attr(t, "alt").is_none()).count();
+    // An upload wider than a card, put on the page whole: every visitor downloads all of it.
+    let images_sent_whole = named("img")
+        .filter(|t| attr(t, "srcset").is_none())
+        .filter_map(|t| attr(t, "src"))
+        .filter(|src| src.strip_prefix("/uploads/").and_then(|name| crate::media::info(app, name)).is_some_and(|(w, _, _)| w > 828))
+        .count();
 
     let (mut links, mut files): (Vec<String>, Vec<String>) = (vec![], vec![]);
     for t in &all {
@@ -134,6 +140,9 @@ pub fn page(app: &App, conn: &Connection, path: &str) -> Result<Value, String> {
     }
     if images_without_alt > 0 {
         warnings.push(format!("{images_without_alt} 张图片没有 alt：有内容的图写上说明，纯装饰的写 alt=\"\"。"));
+    }
+    if images_sent_whole > 0 {
+        warnings.push(format!("{images_sent_whole} 张上传的图片是整张原图直接放上去的：改用 {{{{ img(图片, alt=…) }}}}，或者只要网址时用 {{{{ 图片|thumb(640) }}}}，访客才不用下载整张大图。"));
     }
     Ok(json!({
         "path": path, "status": status, "ok": broken.is_empty() && missing.is_empty(),

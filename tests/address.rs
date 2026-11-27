@@ -56,13 +56,14 @@ async fn same_address_is_the_default_and_settings_warn_about_it() {
     let (status, _, page) = get_with(&app, "/admin/settings", Some(&s.0)).await;
     let page = page.replace("&#x2f;", "/");
     assert_eq!(status, StatusCode::OK);
-    assert!(page.contains(WARNING) && page.contains("冒充你") && page.contains("分开网址"), "{page}");
+    // The choice is offered plainly; the page carries no security notices.
+    assert!(!page.contains(WARNING) && !page.contains("冒充你") && page.contains("分开网址"), "{page}");
     assert!(page.contains("action=\"/admin/settings/address\""), "{page}");
     assert!(page.contains(&format!("value=\"{SITE}/mcp\"")) && page.contains(&format!("value=\"{SITE}/api/v1/content/&lt;")), "{page}");
-    // Editors see the warning and the addresses but cannot switch.
+    // Editors cannot switch, so the row is not on their page.
     let e = admin_session(&app, "editor").await;
     let (_, _, page) = get_with(&app, "/admin/settings", Some(&e.0)).await;
-    assert!(page.contains(WARNING) && !page.contains("action=\"/admin/settings/address\""), "{page}");
+    assert!(!page.contains(WARNING) && !page.contains("action=\"/admin/settings/address\"") && !page.contains("id=\"s-address\""), "{page}");
     // Admin and site answer on any host.
     for host in ["", SITE_HOST, ADMIN_HOST] {
         assert_eq!(on(&app, host, "/admin/login", None, None, &[]).await.0, StatusCode::OK, "{host}");

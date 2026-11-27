@@ -61,7 +61,7 @@ async fn search(State(app): State<Shared>, Query(p): Params, h: HeaderMap) -> Re
     let (q, only) = (get("q").unwrap_or_default(), get("collection"));
     let limit = get("limit").and_then(|l| l.parse::<usize>().ok()).unwrap_or(20).clamp(1, 50);
     let key = bearer(&h);
-    let token = crate::web::session::cookie_value(&h, crate::members::COOKIE);
+    let token = crate::web::members::session_token(&h);
     let done = tokio::task::spawn_blocking(move || {
         let conn = app.conn();
         let viewer = crate::access::viewer(&conn, key.as_deref(), token.as_deref());
@@ -104,7 +104,7 @@ async fn submit(State(app): State<Shared>, Path(c): Path<String>, peer: Option<a
     };
     let trust = std::env::var("HC_TRUST_PROXY").is_ok_and(|v| v == "1");
     let client = crate::web::client_key(&h, peer.map(|axum::Extension(axum::extract::ConnectInfo(a))| a), trust);
-    let token = crate::web::session::cookie_value(&h, crate::members::COOKIE);
+    let token = crate::web::members::session_token(&h);
     let done = tokio::task::spawn_blocking(move || {
         let conn = app.conn();
         let who = match crate::access::viewer(&conn, None, token.as_deref()) {
@@ -151,7 +151,7 @@ async fn written(
     let id: i64 = id.parse().unwrap_or(-1);
     let trust = std::env::var("HC_TRUST_PROXY").is_ok_and(|v| v == "1");
     let client = crate::web::client_key(&h, peer.map(|axum::Extension(axum::extract::ConnectInfo(a))| a), trust);
-    let token = crate::web::session::cookie_value(&h, crate::members::COOKIE);
+    let token = crate::web::members::session_token(&h);
     let done = tokio::task::spawn_blocking(move || {
         let conn = app.conn();
         let who = match crate::access::viewer(&conn, None, token.as_deref()) {
@@ -187,7 +187,7 @@ async fn one(State(app): State<Shared>, Path((c, id)): Path<(String, String)>, Q
 
 async fn read(app: Shared, collection: String, id: Option<i64>, params: Vec<(String, String)>, h: &HeaderMap) -> Response {
     let key = bearer(h);
-    let token = crate::web::session::cookie_value(h, crate::members::COOKIE);
+    let token = crate::web::members::session_token(h);
     let done = tokio::task::spawn_blocking(move || {
         let conn = app.conn();
         let viewer = crate::access::viewer(&conn, key.as_deref(), token.as_deref());
@@ -215,16 +215,20 @@ fn read_blocking(conn: &Connection, name: &str, id: Option<i64>, params: &[(Stri
         Err(e) => return (false, Err((StatusCode::NOT_FOUND, e))),
     };
     let public = def.access.is_public();
-    let Some(owner) = crate::access::read_filter(&def.access, viewer) else {
+    let scope = match crate::access::read_scope(conn, &def, viewer) {
+        Ok(s) => s,
+        Err(e) => return (false, Err((StatusCode::INTERNAL_SERVER_ERROR, e))),
+    };
+    let Some(scope) = scope else {
         let why = match def.access.read {
             crate::schema::Read::Members | crate::schema::Read::Owner => "只有登录的会员能看",
             _ => "不是公开的",
         };
         return (false, Err((StatusCode::UNAUTHORIZED, format!("集合“{name}”{why}：请登录，或在 Authorization 头里带上有效的 Bearer 密钥。"))));
     };
-    let run = || -> Result<Value, Fail> {
+    let run = move || -> Result<Value, Fail> {
         let (mut q, expand) = query::parse_params(&def, params).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
-        q.owner = owner;
+        scope.apply(&mut q);
         if let Some(id) = id {
             q.filters.push(("id".into(), query::Op::Eq, json!(id)));
         } else if def.single {
@@ -336,8 +340,8 @@ async fn upload(State(app): State<Shared>, headers: HeaderMap, mut form: Multipa
     let Some((name, bytes)) = file else {
         return error_response(StatusCode::BAD_REQUEST, "没有收到文件：请用 multipart 表单，把文件放在名为 file 的字段里。".into());
     };
-    match tokio::task::spawn_blocking(move || media::store_upload(&app, &name, &bytes)).await {
-        Ok(Ok(path)) => Json(json!({ "ok": true, "result": { "path": path } })).into_response(),
+    match tokio::task::spawn_blocking(move || media::store_upload(&app, &name, &bytes).map(|path| media::stored(&app, path))).await {
+        Ok(Ok(kept)) => Json(json!({ "ok": true, "result": kept })).into_response(),
         Ok(Err(e)) => error_response(StatusCode::BAD_REQUEST, e),
         Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("保存文件失败：{e}")),
     }

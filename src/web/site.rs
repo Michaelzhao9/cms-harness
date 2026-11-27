@@ -30,6 +30,10 @@ pub async fn preview_css() -> Response {
 /// The site: always the published version, whoever asks and whatever cookies or headers come along. Drafts are
 /// only ever rendered under the admin's preview entry (`preview`).
 pub async fn serve(State(app): State<Shared>, req: Request) -> Response {
+    // A server function's address: the script is run, never sent.
+    if crate::func::is_fn_path(req.uri().path().trim_start_matches('/')) {
+        return super::func::live(app, req).await;
+    }
     if !matches!(*req.method(), Method::GET | Method::HEAD) {
         return (StatusCode::METHOD_NOT_ALLOWED, "网站页面只接受 GET 请求。").into_response();
     }
@@ -87,6 +91,14 @@ pub async fn preview(State(app): State<Shared>, req: Request) -> Response {
         }
         // A ?lang= link wins, then the admin's own language, then the browser's.
         let lang = picked.or_else(|| session::preview_lang(&conn, &token)).unwrap_or(lang);
+        // A function called from the preview frame: the draft script, as a trial that keeps nothing.
+        if crate::func::is_fn_path(path.trim_start_matches('/')) {
+            let call = crate::func::Call { method: "GET".into(), path: path.clone(), query: query.clone(), body: serde_json::Value::Null, member: None };
+            let mut resp = super::func::respond(&conn, Mode::Preview, call);
+            // The frame is sandboxed (an opaque origin): its fetch() is a cross-origin request.
+            resp.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+            return resp;
+        }
         let base = format!("/_hc/preview/{token}");
         let v = Visit { app: &a, conn: &conn, mode: Mode::Preview, base: &base, path: &path, query: &query, if_none_match: None, framers: "'self'".into(), member: None, lang, admin_url: "/admin".into(),
             host: String::new(), accept_language: String::new(), site: Default::default() };
@@ -226,11 +238,21 @@ impl Visit<'_> {
     }
 
     fn route(&self, rel: &str) -> Result<Response, String> {
-        // An 端 only members may enter: a visitor goes to log in and comes back. Before the page cache, so closing
-        // an 端 also closes the pages visitors already saw. The admin's preview has its own permission.
-        if self.mode == Mode::Live && self.member.is_none() && crate::ends::closed(&crate::ends::load(self.conn, false), rel) {
-            let next: String = self.path.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
-            return Ok(self.finish((StatusCode::SEE_OTHER, [(header::LOCATION, format!("/account/login?next={next}"))]).into_response(), None));
+        // The door of an 端: a visitor goes to log in and comes back, a member it does not let in is told so.
+        // Before the page cache, so closing an 端 also closes the pages visitors already saw. The admin's preview
+        // has its own permission.
+        if self.mode == Mode::Live {
+            match crate::ends::door(self.conn, &crate::ends::load(self.conn, false), rel, self.member.as_ref()) {
+                crate::ends::Door::Open => {}
+                crate::ends::Door::Login => {
+                    let next: String = self.path.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+                    return Ok(self.finish((StatusCode::SEE_OTHER, [(header::LOCATION, format!("/account/login?next={next}"))]).into_response(), None));
+                }
+                crate::ends::Door::Refused => {
+                    let text = crate::i18n::tr(self.lang, "你的账号不能进入这里。").into_owned();
+                    return Ok(self.finish((StatusCode::FORBIDDEN, [(header::CONTENT_TYPE, "text/plain; charset=utf-8")], text).into_response(), None));
+                }
+            }
         }
         if let Some(hit) = self.cache_key().and_then(|k| self.app.cache.get(self.conn, &k)) {
             let mut resp = (StatusCode::from_u16(hit.status).unwrap_or(StatusCode::OK), hit.body).into_response();
@@ -243,8 +265,8 @@ impl Visit<'_> {
             return Ok(resp);
         }
         for name in candidates(rel) {
-            // Detail templates are pages for records, not pages of their own.
-            if site::check_path(&name).is_err() || name == "_item.html" || name.ends_with("/_item.html") {
+            // Detail templates are pages for records, not pages of their own; a function's source is never sent.
+            if site::check_path(&name).is_err() || name == "_item.html" || name.ends_with("/_item.html") || crate::func::is_fn_path(&name) {
                 continue;
             }
             if let Some(content) = site::file(self.conn, self.mode, &name)? {
@@ -415,7 +437,7 @@ impl Visit<'_> {
         if let (Some(c), Value::Object(extra)) = (ctx.as_object_mut(), extra) {
             c.extend(extra);
         }
-        let rendered = match site::render(self.conn, self.mode, template, ctx) {
+        let rendered = match site::render(self.conn, &self.app.data_dir.join("uploads"), self.mode, template, ctx) {
             Ok(r) => r,
             Err(e) => return self.failed(&format!("{template}：{e}")),
         };

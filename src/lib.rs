@@ -21,6 +21,8 @@ pub mod cache;
 pub mod ends;
 pub mod canvas;
 pub mod export;
+pub mod func;
+pub mod hooks;
 pub mod i18n;
 pub mod langs;
 pub mod routes;
@@ -69,10 +71,8 @@ impl App {
     }
 
     pub fn new(conn: Connection, data_dir: PathBuf, origin: String, site_name: String) -> Shared {
-        let shield = shield::Shield::default();
-        shield.set_config(shield::load(&conn));
         Arc::new(App {
-            shield,
+            shield: shield::Shield::default(),
             data_dir,
             secure_cookies: origin.starts_with("https://"),
             origin,

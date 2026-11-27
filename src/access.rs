@@ -26,6 +26,39 @@ pub fn read_filter(access: &Access, viewer: Viewer) -> Option<Option<i64>> {
     }
 }
 
+/// What a reader may see of a collection's live records.
+pub enum Scope {
+    All,
+    /// The records this member added.
+    Owner(i64),
+    /// The records a read rule lets them see.
+    Rule(crate::rules::Compiled),
+}
+
+impl Scope {
+    /// Narrows a query to what the reader may see.
+    pub fn apply(self, q: &mut crate::query::Query) {
+        match self {
+            Scope::All => {}
+            Scope::Owner(id) => q.owner = Some(id),
+            Scope::Rule(rule) => q.rule = Some(rule),
+        }
+    }
+}
+
+/// What `viewer` may read of `def`: `None` when nothing. A read rule never says "nothing" up front: it is
+/// asked of every record, a visitor included (a rule may open some records to everyone).
+pub fn read_scope(conn: &Connection, def: &CollectionDef, viewer: Viewer) -> Result<Option<Scope>, String> {
+    if let (Some(rule), false) = (&def.access.read_rule, viewer == Viewer::Key) {
+        let member = match viewer {
+            Viewer::Member(id) => crate::members::by_id(conn, id).map(|m| crate::members::member_json(&m)),
+            _ => None,
+        };
+        return crate::rules::compile(Some(def), rule, member.as_ref(), None).map(|rule| Some(Scope::Rule(rule)));
+    }
+    Ok(read_filter(&def.access, viewer).map(|owner| owner.map_or(Scope::All, Scope::Owner)))
+}
+
 /// The caller of a content request: a valid key wins, then a member session (only while member login is live).
 pub fn viewer(conn: &Connection, key: Option<&str>, member_token: Option<&str>) -> Viewer {
     if key.is_some_and(|k| crate::auth::actor_from_key(conn, k).is_some()) {
@@ -57,10 +90,12 @@ fn db(e: rusqlite::Error) -> String {
 /// version row with actor `member:<id>` or `public:<client>` and note 访客提交. Returns the new record's id.
 pub fn submit(conn: &Connection, collection: &str, data: &Value, who: &Submitter) -> Result<i64, String> {
     let def = changes::live_def(conn, collection).map_err(|_| format!("没有可以提交的“{collection}”。"))?;
-    let allowed = match (def.access.create, who) {
-        (Create::Public, _) | (Create::Members, Submitter::Member(_)) => true,
-        (Create::Members, Submitter::Public(_)) => return Err("请先登录再提交。".into()),
-        (Create::None, _) => false,
+    let allowed = match (&def.access.create_rule, def.access.create, who) {
+        // A condition: asked once the values are known, below.
+        (Some(_), _, _) => true,
+        (None, Create::Public, _) | (None, Create::Members, Submitter::Member(_)) => true,
+        (None, Create::Members, Submitter::Public(_)) => return Err("请先登录再提交。".into()),
+        (None, Create::None, _) => false,
     };
     if !allowed || def.single {
         return Err(format!("“{}”不接受提交。", def.title));
@@ -74,6 +109,15 @@ pub fn submit(conn: &Connection, collection: &str, data: &Value, who: &Submitter
         Submitter::Public(_) => None,
     };
     let doc = clean(&def, fill_defaults(&def, normalize(&def, &json!({}), data)?)?);
+    if let Some(rule) = &def.access.create_rule {
+        let member = match who {
+            Submitter::Member(id) => crate::members::by_id(conn, *id).map(|m| crate::members::member_json(&m)),
+            Submitter::Public(_) => None,
+        };
+        if !crate::rules::create_allows(conn, &def, rule, member.as_ref(), &doc)? {
+            return Err(if member.is_some() { format!("“{}”不接受提交。", def.title) } else { "请先登录再提交。".into() });
+        }
+    }
     unique(conn, &def, None, &doc)?;
     check_live_relations(conn, &def, &doc)?;
     conn.execute("INSERT INTO member_attempts(key) VALUES (?1)", [&key]).map_err(db)?;
@@ -86,6 +130,7 @@ pub fn submit(conn: &Connection, collection: &str, data: &Value, who: &Submitter
     let id = tx.last_insert_rowid();
     crate::routes::assign(&tx, &def, id, &doc)?;
     history(&tx, &actor, id, Some(&doc.to_string()), None, "访客提交")?;
+    crate::hooks::fire(&tx, "submit", &crate::hooks::summary(&def, &doc), json!({ "collection": collection, "id": id, "record": doc }));
     tx.commit().map_err(db)?;
     Ok(id)
 }
@@ -106,7 +151,7 @@ fn throttle(conn: &Connection, who: &Submitter) -> Result<(String, String), Stri
 }
 
 /// Rich text from the site is cleaned, and keeps no images.
-fn clean(def: &CollectionDef, mut doc: Value) -> Value {
+pub(crate) fn clean(def: &CollectionDef, mut doc: Value) -> Value {
     for f in def.fields.iter().filter(|f| f.kind == FieldType::Richtext) {
         if let Some(html) = doc.get(&f.name).and_then(Value::as_str) {
             let clean = ammonia::Builder::default().rm_tags(["img"]).clean(html).to_string();
@@ -118,7 +163,7 @@ fn clean(def: &CollectionDef, mut doc: Value) -> Value {
 
 /// `check_unique` with a generic message: the real one names the other record's id and value, which a visitor
 /// must not learn.
-fn unique(conn: &Connection, def: &CollectionDef, id: Option<i64>, doc: &Value) -> Result<(), String> {
+pub(crate) fn unique(conn: &Connection, def: &CollectionDef, id: Option<i64>, doc: &Value) -> Result<(), String> {
     changes::check_unique(conn, def, id, doc, true).map_err(|e| {
         let field = def.fields.iter().find(|f| e.contains(&format!("“{}”", f.name))).map_or("填写的内容", |f| f.title.as_str());
         format!("“{field}”这个值已经有人用过了。")
@@ -126,7 +171,7 @@ fn unique(conn: &Connection, def: &CollectionDef, id: Option<i64>, doc: &Value) 
 }
 
 /// One line of history for a record a visitor or member wrote: what it is now (none: removed) and what it was.
-fn history(conn: &Connection, actor: &str, id: i64, doc: Option<&str>, prev: Option<&str>, note: &str) -> Result<(), String> {
+pub(crate) fn history(conn: &Connection, actor: &str, id: i64, doc: Option<&str>, prev: Option<&str>, note: &str) -> Result<(), String> {
     conn.execute("INSERT INTO releases(actor, note) VALUES (?1, ?2)", params![actor, note]).map_err(db)?;
     let release = conn.last_insert_rowid();
     conn.execute(
@@ -171,10 +216,7 @@ fn permitted(
     let Some(rule) = rule(&def.access).map(str::to_string) else { return Err(refuse(&def.title)) };
     let (key, actor) = throttle(conn, who).map_err(|e| (Refusal::Busy, e))?;
     let member = match who {
-        Submitter::Member(id) => conn
-            .query_row("SELECT id, email, name FROM members WHERE id = ?1 AND status = 'active'", [id], |r| Ok(Member { id: r.get(0)?, email: r.get(1)?, name: r.get(2)? }))
-            .optional()
-            .map_err(|e| broken(db(e)))?,
+        Submitter::Member(id) => crate::members::by_id(conn, *id),
         Submitter::Public(_) => None,
     };
     let no = || match member {
@@ -258,7 +300,7 @@ pub fn delete(conn: &Connection, collection: &str, id: i64, who: &Submitter) -> 
 
 /// Whether a live record of any collection has a relation to record `id` of `collection`. Publishing checks
 /// every live relation, so a removal that left one dangling would block all later publishes.
-fn pointed_at(conn: &Connection, collection: &str, id: i64) -> Result<bool, String> {
+pub(crate) fn pointed_at(conn: &Connection, collection: &str, id: i64) -> Result<bool, String> {
     for (name, def) in changes::live_defs(conn)? {
         for f in def.fields.iter().filter(|f| f.kind == FieldType::Relation && f.target.as_deref() == Some(collection) && crate::schema::valid_name(&f.name)) {
             let sql = format!(
@@ -274,7 +316,7 @@ fn pointed_at(conn: &Connection, collection: &str, id: i64) -> Result<bool, Stri
 }
 
 /// Relation values must point at live records of the target collection.
-fn check_live_relations(conn: &Connection, def: &CollectionDef, doc: &Value) -> Result<(), String> {
+pub(crate) fn check_live_relations(conn: &Connection, def: &CollectionDef, doc: &Value) -> Result<(), String> {
     for f in def.fields.iter().filter(|f| f.kind == FieldType::Relation) {
         let ids = match doc.get(&f.name) {
             Some(Value::Array(a)) => a.clone(),

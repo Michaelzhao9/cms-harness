@@ -19,7 +19,7 @@ use serde_json::Value;
 
 pub const MAX_LEN: usize = 500;
 
-const PATHS: &str = "record.字段、record.id、record.owner、data.字段、member、member.id、member.email、member.name";
+const PATHS: &str = "record.字段、record.id、record.owner、data.字段、member、member.id、member.email、member.name、member.属性";
 
 #[derive(Debug, Clone, PartialEq)]
 enum Tok {
@@ -102,18 +102,23 @@ enum Expr {
     Null,
 }
 
-/// A rule as SQL over a row of `records`, with its bound values.
+/// A rule as SQL over a row of `records`, with its bound values (`?1`, `?2`, … in order).
+#[derive(Clone, Debug)]
 pub struct Compiled {
     pub sql: String,
     pub params: Vec<Sql>,
 }
 
 struct Compiler<'a> {
-    def: &'a CollectionDef,
+    /// The collection the rule is on; none for the door of an 端, which is about the member alone.
+    def: Option<&'a CollectionDef>,
     toks: Vec<Tok>,
     at: usize,
     params: Vec<Sql>,
-    member: Option<&'a Member>,
+    /// The member as JSON text (`members::member_json`): who they are and their attributes.
+    member: Option<String>,
+    /// There is a stored record to look at. Not so for `create`: the record is what the request brings (`data`).
+    row: bool,
     /// What the request would write, as JSON text.
     data: Option<String>,
 }
@@ -247,41 +252,59 @@ impl Compiler<'_> {
         } else {
             None
         };
-        let declared = |def: &CollectionDef, f: &str| def.field(f).is_some() && crate::schema::valid_name(f);
+        let who = |c: &mut Self, f: &str| {
+            let m = c.member.clone().map_or(Sql::Null, Sql::Text);
+            let p = c.bind(m);
+            Expr::Value(format!("json_extract({p},'$.{f}')"))
+        };
+        let Some(def) = self.def else {
+            // The door of an 端: there is no record to look at.
+            return match (w, field.as_deref()) {
+                ("true", None) => Ok(Expr::Value("1".into())),
+                ("false", None) => Ok(Expr::Value("0".into())),
+                ("null", None) => Ok(Expr::Null),
+                ("member", None) => Ok(who(self, "id")),
+                ("member", Some(f)) if matches!(f, "id" | "email" | "name") || crate::members::attribute_name(f) => Ok(who(self, f)),
+                ("member", Some(f)) => Err(format!("member 没有“{f}”：能用的是 member.id、member.email、member.name 和你给会员设的属性。")),
+                _ => Err(format!("端的进门条件里不能用“{w}”：这里只看来的人是谁，能用的是 member、member.id、member.email、member.name 和 member.属性。")),
+            };
+        };
+        let declared = |f: &str| def.field(f).is_some() && crate::schema::valid_name(f);
         match (w, field.as_deref()) {
             ("true", None) => Ok(Expr::Value("1".into())),
             ("false", None) => Ok(Expr::Value("0".into())),
             ("null", None) => Ok(Expr::Null),
-            ("member", None | Some("id")) => {
-                let id = self.member.map_or(Sql::Null, |m| Sql::Integer(m.id));
-                Ok(Expr::Value(self.bind(id)))
-            }
-            ("member", Some(f @ ("email" | "name"))) => {
-                let v = self.member.map_or(Sql::Null, |m| Sql::Text(if f == "email" { m.email.clone() } else { m.name.clone() }));
-                Ok(Expr::Value(self.bind(v)))
-            }
-            ("member", Some(f)) => Err(format!("member 没有“{f}”：能用的是 member.id、member.email、member.name。")),
+            ("member", None) => Ok(who(self, "id")),
+            ("member", Some(f)) if matches!(f, "id" | "email" | "name") || crate::members::attribute_name(f) => Ok(who(self, f)),
+            ("member", Some(f)) => Err(format!("member 没有“{f}”：能用的是 member.id、member.email、member.name 和你给会员设的属性。")),
+            ("record", _) if !self.row => Err("新增的规则里还没有记录可看：要看的是这次提交的内容，写 data.字段。".into()),
             ("record", Some("id")) => Ok(Expr::Value("id".into())),
-            ("record", Some("owner")) if self.def.field("owner").is_none() => Ok(Expr::Value("owner".into())),
+            ("record", Some("owner")) if def.field("owner").is_none() => Ok(Expr::Value("owner".into())),
             ("record", Some("owner")) => Err(format!(
                 "集合“{}”有一个叫 owner 的字段，而规则里的 record.owner 指的是提交这条记录的会员，两者分不清：请给字段换个名字。",
-                self.def.name
+                def.name
             )),
-            ("record", Some(f)) if declared(self.def, f) => Ok(Expr::Value(format!("json_extract(published,'$.{f}')"))),
-            ("data", Some(f)) if declared(self.def, f) => {
+            ("record", Some(f)) if declared(f) => Ok(Expr::Value(format!("json_extract(published,'$.{f}')"))),
+            ("data", Some(f)) if declared(f) => {
                 let data = self.data.clone().map_or(Sql::Null, Sql::Text);
                 let p = self.bind(data);
                 Ok(Expr::Value(format!("json_extract({p},'$.{f}')")))
             }
-            ("record" | "data", Some(f)) => Err(format!("规则里的 {w}.{f}：集合“{}”没有字段“{f}”。", self.def.name)),
-            ("record" | "data", None) => Err(format!("“{w}”后面要跟字段名，比如 {w}.{}。", self.def.fields.first().map_or("title", |f| f.name.as_str()))),
+            ("record" | "data", Some(f)) => Err(format!("规则里的 {w}.{f}：集合“{}”没有字段“{f}”。", def.name)),
+            ("record" | "data", None) => Err(format!("“{w}”后面要跟字段名，比如 {w}.{}。", def.fields.first().map_or("title", |f| f.name.as_str()))),
             _ => Err(format!("规则里不认识“{}”：能用的是 {PATHS}。", field.map_or(w.to_string(), |f| format!("{w}.{f}")))),
         }
     }
 }
 
-/// `rule` as SQL for `member` and the document the request would write.
-pub fn compile(def: &CollectionDef, rule: &str, member: Option<&Member>, data: Option<&Value>) -> Result<Compiled, String> {
+/// `rule` as SQL for `member` (as `members::member_json` gives them) and the document the request would write.
+/// `def`: the collection the rule is on, or none for a rule about the member alone.
+pub fn compile(def: Option<&CollectionDef>, rule: &str, member: Option<&Value>, data: Option<&Value>) -> Result<Compiled, String> {
+    compile_for(def, rule, member, data, true)
+}
+
+/// `compile`, saying whether there is a stored record (`row`): a `create` rule has none.
+fn compile_for(def: Option<&CollectionDef>, rule: &str, member: Option<&Value>, data: Option<&Value>, row: bool) -> Result<Compiled, String> {
     let rule = rule.trim();
     if rule.is_empty() {
         return Err("规则是空的：写 public、members、owner、none，或一个条件，比如 record.owner == member.id。".into());
@@ -289,17 +312,18 @@ pub fn compile(def: &CollectionDef, rule: &str, member: Option<&Member>, data: O
     if rule.chars().count() > MAX_LEN {
         return Err(format!("规则太长了：最多 {MAX_LEN} 个字符。"));
     }
-    let id = member.map_or(Sql::Null, |m| Sql::Integer(m.id));
+    let id = member.and_then(|m| m["id"].as_i64()).map_or(Sql::Null, Sql::Integer);
     let word = |sql: &str, params: Vec<Sql>| Ok(Compiled { sql: sql.into(), params });
     match rule {
         "public" => return word("1", vec![]),
         "none" => return word("0", vec![]),
         "members" => return word("(?1 IS NOT NULL)", vec![id]),
         // The column, not `record.owner`: a collection may have a field of that name.
-        "owner" => return word("(owner = ?1)", vec![id]),
+        "owner" if def.is_some() && row => return word("(owner = ?1)", vec![id]),
+        "owner" => return Err("这里不能用 owner：owner 说的是一条已有的记录是谁提交的，这里还没有记录。".into()),
         _ => {}
     }
-    let mut c = Compiler { def, toks: tokens(rule)?, at: 0, params: vec![], member, data: data.map(Value::to_string) };
+    let mut c = Compiler { def, toks: tokens(rule)?, at: 0, params: vec![], member: member.map(Value::to_string), data: data.map(Value::to_string), row };
     let sql = Compiler::truth(c.or()?);
     if let Some(extra) = c.peek() {
         return Err(match extra {
@@ -312,13 +336,36 @@ pub fn compile(def: &CollectionDef, rule: &str, member: Option<&Member>, data: O
 
 /// Whether `rule` can be kept on `def`: it parses and names only what exists.
 pub fn check(def: &CollectionDef, rule: &str) -> Result<(), String> {
-    compile(def, rule, None, None).map(|_| ())
+    compile(Some(def), rule, None, None).map(|_| ())
+}
+
+/// Whether `rule` can be a collection's `create` rule: it parses and looks only at the member and what is sent.
+pub fn check_create(def: &CollectionDef, rule: &str) -> Result<(), String> {
+    compile_for(Some(def), rule, None, None, false).map(|_| ())
+}
+
+/// Whether a `create` rule lets `member` (none: a visitor) add a record holding `data`.
+pub fn create_allows(conn: &Connection, def: &CollectionDef, rule: &str, member: Option<&Value>, data: &Value) -> Result<bool, String> {
+    let Compiled { sql, params } = compile_for(Some(def), rule, member, Some(data), false)?;
+    conn.query_row(&format!("SELECT ({sql}) IS TRUE"), params_from_iter(params), |r| r.get(0)).map_err(|e| format!("检查规则失败：{e}"))
+}
+
+/// Whether `rule` can be the door of an 端: it parses and is about the member alone.
+pub fn check_member(rule: &str) -> Result<(), String> {
+    compile(None, rule, None, None).map(|_| ())
+}
+
+/// Whether a rule about the member alone lets `member` (none: a visitor) through.
+pub fn member_allows(conn: &Connection, rule: &str, member: Option<&Value>) -> Result<bool, String> {
+    let Compiled { sql, params } = compile(None, rule, member, None)?;
+    conn.query_row(&format!("SELECT ({sql}) IS TRUE"), params_from_iter(params), |r| r.get(0)).map_err(|e| format!("检查规则失败：{e}"))
 }
 
 /// Whether `rule` lets `member` (none: a visitor) act on live record `id` of `def`, when the request would
 /// leave the record as `data`. A record that is not there or not live allows nothing.
 pub fn allows(conn: &Connection, def: &CollectionDef, rule: &str, member: Option<&Member>, id: i64, data: Option<&Value>) -> Result<bool, String> {
-    let Compiled { sql, mut params } = compile(def, rule, member, data)?;
+    let who = member.map(crate::members::member_json);
+    let Compiled { sql, mut params } = compile(Some(def), rule, who.as_ref(), data)?;
     params.push(Sql::Integer(id));
     let at = params.len();
     params.push(Sql::Text(def.name.clone()));

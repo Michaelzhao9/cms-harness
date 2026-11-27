@@ -425,22 +425,13 @@ figcaption code { padding: 0; background: none; font-size: 11px; color: var(--mu
 .went li > .kind { width: 2.6em; }
 .went form { margin: 0; }
 .history { max-width: 720px; display: flex; flex-direction: column; gap: 14px; }
+/* A member's attributes, typed as `kind=teacher, class=3`. */
+.attrs { display: flex; align-items: center; gap: 8px; margin: 0; }
+.attrs .in { height: 32px; min-width: 14em; padding: 0 10px; border: 1px solid var(--rule); border-radius: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 /* A collection as a spreadsheet: out as CSV, rows in as drafts. */
 .sheet { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 8px 28px 10px; font-size: 13px; }
 .sheet form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; }
 .sheet input[type='file'] { max-width: 16em; font-size: 13px; color: var(--ink-2); }
-/* 防护: the settings, then what was stopped. */
-.shield { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
-.shield section { display: flex; flex-direction: column; gap: 8px; padding-top: 18px; }
-.shield h2 { font-size: 16px; font-weight: 600; }
-.guard { display: flex; flex-direction: column; gap: 18px; align-items: flex-start; max-width: 640px; }
-.guard fieldset { width: 100%; margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 10px; }
-.guard legend { padding: 0 0 8px; font-size: 16px; font-weight: 600; }
-.guard .pick { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; color: var(--ink-2); cursor: pointer; }
-.guard .pick input { margin-top: 4px; accent-color: var(--ink); }
-.guard .pick b { display: block; color: var(--ink); font-weight: 600; }
-.guard textarea { height: auto; padding: 10px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
-.shield .ua { max-width: 18em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
 /* The environment at a glance: every 端, then the data they share. */
 .env { display: flex; flex-direction: column; gap: 14px; max-width: 720px; }
 .env section { display: flex; flex-direction: column; gap: 6px; padding-top: 18px; }
@@ -453,10 +444,25 @@ figcaption code { padding: 0; background: none; font-size: 11px; color: var(--mu
 .release h2 { font-size: 16px; font-weight: 600; }
 .confirm { max-width: 520px; display: flex; flex-direction: column; gap: 16px; }
 
+/* Settings: one row per setting, its name and what it is now. A row opens to its form. */
 .settings { max-width: 720px; display: flex; flex-direction: column; }
-.settings > section { display: flex; flex-direction: column; gap: 14px; padding: 22px 0; border-bottom: 1px solid var(--hair); }
-.settings > section:last-child { border-bottom: 0; }
-.settings h2 { font-size: 16px; font-weight: 600; }
+.set-g { margin: 28px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.set-g:first-of-type { margin-top: 12px; }
+.set { border-top: 1px solid var(--hair); }
+.set > summary { display: flex; align-items: center; gap: 12px; min-height: 52px; cursor: pointer; list-style: none; }
+.set > summary::-webkit-details-marker { display: none; }
+.set-t { flex-shrink: 0; font-size: 15px; font-weight: 500; color: var(--ink); }
+.set-now { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; color: var(--muted); }
+.set-now.todo { color: var(--mark-ink); font-weight: 600; }
+.set > summary > .icon { color: var(--ink-3); transition: transform .2s var(--ease); }
+.set[open] > summary > .icon { transform: rotate(180deg); }
+.set[open] > summary .set-t { font-weight: 600; }
+.set > summary:hover .set-t { color: #000; }
+.set-body { display: flex; flex-direction: column; gap: 14px; padding: 2px 0 26px; }
+.set-more { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--hair); font-size: 13px; }
+.set-more a { color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
+.set-more a:hover { color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .set > summary > .icon { transition: none; } }
 .settings .note p + p { margin-top: 4px; }
 .in.mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 13px; }
 code.secret { font-size: 13px; color: var(--ink); background: #fff; user-select: all; }

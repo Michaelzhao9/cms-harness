@@ -205,7 +205,7 @@ fn pages_render_with_their_layout_and_escape_values() {
     write(&app, "index.html", "{% extends \"layout.html\" %}{% block body %}{{ request.path }} {{ request.query.q }}{% endblock %}");
     publish_all(&app);
     let ctx = json!({ "request": { "path": "/", "query": { "q": "<b>" } } });
-    let out = cms_harness::site::render(&app.conn(), cms_harness::site::Mode::Live, "index.html", ctx).unwrap();
+    let out = cms_harness::site::render(&app.conn(), &app.data_dir.join("uploads"), cms_harness::site::Mode::Live, "index.html", ctx).unwrap();
     assert_eq!(out.html, "<main>LAYOUT &#x2f; &lt;b&gt;</main>");
 }
 

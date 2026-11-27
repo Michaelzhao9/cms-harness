@@ -123,14 +123,21 @@ async fn logout_form(app: Shared, addr: Address, headers: HeaderMap) -> Response
     ([(header::SET_COOKIE, clear_cookie(addr.secure()))], Redirect::to("/")).into_response()
 }
 
-/// `POST /api/v1/members/{signup|login|logout}` with a JSON body; `GET /api/v1/members/me`.
+/// A member's session as a request carries it: the cookie a browser holds, or the token a client without
+/// cookies (a mini-program, an app) sends as `Authorization: Bearer`. API keys (`hc_…`) are not sessions.
+pub fn session_token(headers: &HeaderMap) -> Option<String> {
+    session::cookie_value(headers, COOKIE).or_else(|| crate::api::bearer(headers).filter(|t| !t.starts_with("hc_")))
+}
+
+/// `POST /api/v1/members/{signup|login|logout}` with a JSON body; `GET /api/v1/members/me`. With
+/// `"session": "token"` a sign-in answers with the session token instead of setting a cookie.
 pub async fn api(
     State(app): State<Shared>,
     Path(which): Path<String>,
     Extension(addr): Extension<Address>,
     peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
-    body: Option<Json<Value>>,
+    body: axum::body::Bytes,
 ) -> Response {
     let a = app.clone();
     let on = tokio::task::spawn_blocking(move || members::login_enabled(&a.conn(), false)).await.unwrap_or(false);
@@ -139,13 +146,14 @@ pub async fn api(
     }
     match which.as_str() {
         "logout" => {
-            if let Some(t) = session::cookie_value(&headers, COOKIE) {
+            if let Some(t) = session_token(&headers) {
                 let _ = tokio::task::spawn_blocking(move || members::logout(&app.conn(), &t)).await;
             }
             ([(header::SET_COOKIE, clear_cookie(addr.secure()))], Json(json!({ "ok": true }))).into_response()
         }
         "signup" | "login" => {
-            let v = body.map(|Json(v)| v).unwrap_or_default();
+            // Signing out sends no body; one that is not JSON is an empty form, refused for what it lacks.
+            let v: Value = serde_json::from_slice(&body).unwrap_or_default();
             let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();
             let f = AccountForm { email: s("email"), password: s("password"), name: s("name"), next: String::new() };
             match enter(&app, &which, &f, client(&headers, peer)).await {
@@ -154,6 +162,8 @@ pub async fn api(
                     let a = app.clone();
                     let me = tokio::task::spawn_blocking(move || members::from_token(&a.conn(), &token).map(|m| (members::member_json(&m), token))).await.ok().flatten();
                     match me {
+                        // A page's script never needs the token: only a client that asks for it gets it, and no cookie.
+                        Some((m, token)) if v["session"] == "token" => ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "ok": true, "member": m, "token": token }))).into_response(),
                         Some((m, token)) => ([(header::SET_COOKIE, cookie(&token, addr.secure()))], Json(json!({ "ok": true, "member": m }))).into_response(),
                         None => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "ok": false, "error": "登录后没找到这个会员。" }))).into_response(),
                     }
@@ -166,7 +176,7 @@ pub async fn api(
 }
 
 pub async fn me(State(app): State<Shared>, headers: HeaderMap) -> Response {
-    let token = session::cookie_value(&headers, COOKIE);
+    let token = session_token(&headers);
     let found = tokio::task::spawn_blocking(move || {
         let conn = app.conn();
         if !members::login_enabled(&conn, false) {

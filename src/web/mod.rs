@@ -6,6 +6,7 @@ pub mod admin;
 pub mod canvas;
 pub mod chat;
 pub mod content;
+pub mod func;
 pub mod session;
 pub mod settings;
 pub mod sheet;
@@ -34,7 +35,6 @@ pub fn router(app: Shared) -> Router {
     Router::new()
         .route("/admin", get(chat::home))
         .route("/admin/env", get(admin::env))
-        .route("/admin/shield", get(shield::page).post(shield::save))
         .route("/_hc/shield.js", get(shield::script))
         .route("/admin/prefs", post(admin::prefs))
         .route("/admin/canvas/style", post(canvas::style))
@@ -55,6 +55,7 @@ pub fn router(app: Shared) -> Router {
         .route("/admin/v/{name}", get(content::view_list))
         .route("/admin/members", get(content::members_list))
         .route("/admin/members/{id}/status", post(content::member_status))
+        .route("/admin/members/{id}/data", post(content::member_data))
         .route("/admin/r/{id}", get(content::record).post(content::save).layer(DefaultBodyLimit::max(crate::media::UPLOAD_BODY_LIMIT)))
         .route("/admin/r/{id}/delete", post(content::delete))
         .route("/admin/r/{id}/discard", post(content::discard))
@@ -84,6 +85,9 @@ pub fn router(app: Shared) -> Router {
         .route("/admin/settings/skills/install", post(settings::install_skill).layer(DefaultBodyLimit::max(settings::SKILL_BODY_LIMIT)))
         .route("/admin/settings/skills/{name}/{action}", post(settings::skill_action))
         .route("/admin/settings/address", post(address::switch))
+        .route("/admin/settings/hooks", post(settings::add_hook))
+        .route("/admin/settings/hooks/{id}/test", post(settings::test_hook))
+        .route("/admin/settings/hooks/{id}/delete", post(settings::remove_hook))
         .route("/admin/login", get(login_page).post(login))
         .route("/admin/logout", post(logout))
         .route("/admin/static/admin.css", get(css))

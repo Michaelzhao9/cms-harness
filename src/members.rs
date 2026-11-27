@@ -24,6 +24,18 @@ pub struct Member {
     pub id: i64,
     pub email: String,
     pub name: String,
+    /// Attributes a builder gave this member (`{"kind": "teacher"}`): the kernel gives them no meaning; rules,
+    /// the door of an 端, pages and functions read them.
+    pub data: Value,
+}
+
+/// Attribute names a member cannot carry: what the member already is, and what must never be readable.
+const NOT_ATTRIBUTES: [&str; 6] = ["id", "email", "name", "password", "password_hash", "status"];
+const MAX_ATTRIBUTES: usize = 30;
+
+/// Whether `key` may name an attribute.
+pub fn attribute_name(key: &str) -> bool {
+    crate::schema::valid_name(key) && !NOT_ATTRIBUTES.contains(&key)
 }
 
 fn db(e: rusqlite::Error) -> String {
@@ -140,7 +152,11 @@ pub fn signup_begin(conn: &Connection, email: &str, password: &str, client: &str
 pub fn signup_finish(conn: &Connection, email: &str, password_hash: &str, name: &str) -> Result<String, String> {
     let name: String = name.trim().chars().take(80).collect();
     match conn.execute("INSERT INTO members(email, password_hash, name) VALUES (?1, ?2, ?3)", params![email, password_hash, name]) {
-        Ok(_) => open_session(conn, conn.last_insert_rowid()),
+        Ok(_) => {
+            let id = conn.last_insert_rowid();
+            crate::hooks::fire(conn, "member", &format!("新会员注册：{email}"), json!({ "id": id, "email": email, "name": name }));
+            open_session(conn, id)
+        }
         // Two sign-ups for one email raced past `signup_begin`.
         Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == rusqlite::ErrorCode::ConstraintViolation => Err("这个邮箱已经注册过了，请直接登录。".into()),
         Err(e) => Err(db(e)),
@@ -210,18 +226,62 @@ pub fn logout(conn: &Connection, token: &str) {
 /// The member behind a session token, if the session is live and the member active.
 pub fn from_token(conn: &Connection, token: &str) -> Option<Member> {
     conn.query_row(
-        "SELECT m.id, m.email, m.name FROM member_sessions s JOIN members m ON m.id = s.member_id
+        "SELECT m.id, m.email, m.name, m.data FROM member_sessions s JOIN members m ON m.id = s.member_id
          WHERE s.token_hash = ?1 AND s.expires_at > datetime('now') AND m.status = 'active'",
         [sha256_hex(token)],
-        |r| Ok(Member { id: r.get(0)?, email: r.get(1)?, name: r.get(2)? }),
+        row_member,
     )
     .optional()
     .ok()
     .flatten()
 }
 
+fn row_member(r: &rusqlite::Row<'_>) -> rusqlite::Result<Member> {
+    let data: String = r.get(3)?;
+    Ok(Member { id: r.get(0)?, email: r.get(1)?, name: r.get(2)?, data: serde_json::from_str(&data).unwrap_or_else(|_| json!({})) })
+}
+
+/// An active member by id.
+pub fn by_id(conn: &Connection, id: i64) -> Option<Member> {
+    conn.query_row("SELECT id, email, name, data FROM members WHERE id = ?1 AND status = 'active'", [id], row_member).optional().ok().flatten()
+}
+
+/// A member as pages, functions and rules see them: their attributes, then who they are on top.
 pub fn member_json(m: &Member) -> Value {
-    json!({ "id": m.id, "email": m.email, "name": m.name })
+    let mut out = if m.data.is_object() { m.data.clone() } else { json!({}) };
+    out["id"] = json!(m.id);
+    out["email"] = json!(m.email);
+    out["name"] = json!(m.name);
+    out
+}
+
+/// Sets attributes on a member: the given keys change, a null removes one, the rest stay. At once, like
+/// disabling a member: accounts are not drafts.
+pub fn set_data(conn: &Connection, id: i64, patch: &Value) -> Result<Value, String> {
+    let patch = patch.as_object().ok_or("属性要是一个对象，比如 {\"kind\": \"teacher\"}；值写 null 是去掉这个属性。")?;
+    let stored: Option<String> = conn.query_row("SELECT data FROM members WHERE id = ?1", [id], |r| r.get(0)).optional().map_err(db)?;
+    let mut data: serde_json::Map<String, Value> = serde_json::from_str(&stored.ok_or_else(|| format!("没有编号为 {id} 的用户。"))?).unwrap_or_default();
+    for (key, value) in patch {
+        if !attribute_name(key) {
+            return Err(format!("属性名“{key}”不能用：属性名用小写字母开头，后接小写字母、数字或下划线，并且不能是 {}。", NOT_ATTRIBUTES.join("、")));
+        }
+        match value {
+            Value::Null => {
+                data.remove(key);
+            }
+            Value::String(s) if s.chars().count() > 200 => return Err(format!("属性“{key}”的值太长：最多 200 个字符。")),
+            Value::String(_) | Value::Number(_) | Value::Bool(_) => {
+                data.insert(key.clone(), value.clone());
+            }
+            _ => return Err(format!("属性“{key}”的值要是文字、数字或是否，不能是列表或对象。")),
+        }
+    }
+    if data.len() > MAX_ATTRIBUTES {
+        return Err(format!("一个用户的属性最多 {MAX_ATTRIBUTES} 个。"));
+    }
+    let data = Value::Object(data);
+    conn.execute("UPDATE members SET data = ?2 WHERE id = ?1", params![id, data.to_string()]).map_err(db)?;
+    Ok(json!({ "id": id, "data": data }))
 }
 
 /// Members for the admin and the `list_members` tool. Never includes password hashes.
@@ -237,12 +297,13 @@ pub fn list(conn: &Connection, status: Option<&str>, query: Option<&str>, limit:
     let filter = "(?1 IS NULL OR status = ?1) AND (?2 IS NULL OR email LIKE ?2 OR name LIKE ?2)";
     let total: i64 = conn.query_row(&format!("SELECT count(*) FROM members WHERE {filter}"), params![status, like], |r| r.get(0)).map_err(db)?;
     let mut st = conn
-        .prepare(&format!("SELECT id, email, name, status, created_at, last_login FROM members WHERE {filter} ORDER BY id DESC LIMIT ?3 OFFSET ?4"))
+        .prepare(&format!("SELECT id, email, name, status, created_at, last_login, data FROM members WHERE {filter} ORDER BY id DESC LIMIT ?3 OFFSET ?4"))
         .map_err(db)?;
     let rows = st
         .query_map(params![status, like, limit, offset.max(0)], |r| {
             Ok(json!({ "id": r.get::<_, i64>(0)?, "email": r.get::<_, String>(1)?, "name": r.get::<_, String>(2)?, "status": r.get::<_, String>(3)?,
-                "created_at": r.get::<_, String>(4)?, "last_login": r.get::<_, Option<String>>(5)? }))
+                "created_at": r.get::<_, String>(4)?, "last_login": r.get::<_, Option<String>>(5)?,
+                "data": serde_json::from_str::<Value>(&r.get::<_, String>(6)?).unwrap_or_else(|_| json!({})) }))
         })
         .map_err(db)?;
     let items: Vec<Value> = rows.collect::<Result<_, _>>().map_err(db)?;

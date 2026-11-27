@@ -40,6 +40,8 @@ pub struct Query {
     // ponytail: a scan of the collection's documents (field names match too); the full-text index covers
     // published records only. Index drafts as well if lists of many thousands get slow.
     pub search: Option<String>,
+    /// A read rule: only the records it lets this reader see (the live view only).
+    pub rule: Option<crate::rules::Compiled>,
 }
 
 pub struct Row {
@@ -178,6 +180,25 @@ fn build(def: &CollectionDef, q: &Query, live: bool) -> Result<(&'static str, St
     if !q.status.is_empty() {
         wh.push_str(&format!(" AND ({})", q.status.iter().map(|s| s.sql()).collect::<Vec<_>>().join(" OR ")));
     }
+    // Last: the rule's own `?1…?n` become the numbers after everything bound so far, and what is bound after
+    // this (limit, offset) follows on from them.
+    if let Some(rule) = &q.rule {
+        let base = params.len();
+        let (mut sql, mut chars) = (String::new(), rule.sql.chars().peekable());
+        while let Some(c) = chars.next() {
+            sql.push(c);
+            if c == '?' {
+                let mut n = String::new();
+                while let Some(d) = chars.peek().filter(|d| d.is_ascii_digit()) {
+                    n.push(*d);
+                    chars.next();
+                }
+                sql.push_str(&(base + n.parse::<usize>().unwrap_or(0)).to_string());
+            }
+        }
+        wh.push_str(&format!(" AND (({sql}) IS TRUE)"));
+        params.extend(rule.params.iter().cloned());
+    }
     Ok((col, wh, params))
 }
 
@@ -237,6 +258,85 @@ pub fn run(conn: &Connection, def: &CollectionDef, q: &Query, live: bool) -> Res
     Ok((out, total))
 }
 
+/// What to add up over the records a query matches.
+#[derive(Default)]
+pub struct Totals {
+    /// One line per value of this field instead of one line in all.
+    pub group_by: Option<String>,
+    pub sum: Vec<String>,
+    pub avg: Vec<String>,
+    pub min: Vec<String>,
+    pub max: Vec<String>,
+}
+
+/// Groups one answer lists; the rest are in `count` only.
+const MAX_GROUPS: usize = 100;
+
+/// How many records `q` matches and the sums, averages, smallest and largest of the number fields asked for,
+/// in all or by group: `{count, sum: {field: n}, …}` or `{count, groups: [{value, count, sum: {…}}, …]}`.
+/// `q`'s sort, limit and offset play no part.
+pub fn totals(conn: &Connection, def: &CollectionDef, q: &Query, live: bool, t: &Totals) -> Result<Value, String> {
+    let (col, wh, params) = build(def, q, live)?;
+    let number = |name: &String, what: &str| match def.field(name).map(|f| (f.kind, f.multiple)) {
+        Some((FieldType::Number, false)) => expr(name, col),
+        Some(_) => Err(format!("字段“{name}”不是数字，不能{what}：只有 number 类型的字段可以。")),
+        None => Err(format!("集合“{}”没有字段“{name}”：请检查字段名。", def.name)),
+    };
+    // (the JSON key it goes under, the field, the SQL)
+    let mut wanted: Vec<(&str, &String, String)> = vec![];
+    for (key, func, what, names) in [("sum", "total", "求和", &t.sum), ("avg", "avg", "求平均", &t.avg), ("min", "min", "取最小值", &t.min), ("max", "max", "取最大值", &t.max)] {
+        for name in names {
+            wanted.push((key, name, format!("{func}({})", number(name, what)?)));
+        }
+    }
+    let group = match &t.group_by {
+        Some(name) if def.field(name).is_some_and(|f| !f.multiple) => Some(expr(name, col)?),
+        Some(name) if def.field(name).is_some() => return Err(format!("字段“{name}”一条记录里有多个值，不能用来分组。")),
+        Some(name) => return Err(format!("集合“{}”没有字段“{name}”：请检查字段名。", def.name)),
+        None => None,
+    };
+    let err = |e: rusqlite::Error| format!("汇总集合“{}”失败：{e}", def.name);
+    let picks: String = wanted.iter().map(|(_, _, sql)| format!(", {sql}")).collect();
+    let line = |r: &rusqlite::Row<'_>, at: usize| -> rusqlite::Result<Value> {
+        let mut out = serde_json::Map::new();
+        for (i, (key, name, _)) in wanted.iter().enumerate() {
+            let v: Option<f64> = r.get(at + i)?;
+            out.entry(key.to_string()).or_insert_with(|| serde_json::json!({}))[name.as_str()] = serde_json::json!(v);
+        }
+        Ok(Value::Object(out))
+    };
+    let Some(group) = group else {
+        let sql = format!("SELECT count(*){picks} FROM records WHERE {wh}");
+        return conn
+            .query_row(&sql, params_from_iter(&params), |r| {
+                let mut out = line(r, 1)?;
+                out["count"] = serde_json::json!(r.get::<_, i64>(0)?);
+                Ok(out)
+            })
+            .map_err(err);
+    };
+    let count: i64 = conn.query_row(&format!("SELECT count(*) FROM records WHERE {wh}"), params_from_iter(&params), |r| r.get(0)).map_err(err)?;
+    let sql = format!("SELECT {group}, count(*){picks} FROM records WHERE {wh} GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT {MAX_GROUPS}");
+    let mut st = conn.prepare(&sql).map_err(err)?;
+    let groups = st
+        .query_map(params_from_iter(&params), |r| {
+            let mut out = line(r, 2)?;
+            out["value"] = match r.get_ref(0)? {
+                rusqlite::types::ValueRef::Null => Value::Null,
+                rusqlite::types::ValueRef::Integer(n) => serde_json::json!(n),
+                rusqlite::types::ValueRef::Real(n) => serde_json::json!(n),
+                rusqlite::types::ValueRef::Text(t) => serde_json::json!(String::from_utf8_lossy(t)),
+                rusqlite::types::ValueRef::Blob(_) => Value::Null,
+            };
+            out["count"] = serde_json::json!(r.get::<_, i64>(1)?);
+            Ok(out)
+        })
+        .map_err(err)?
+        .collect::<Result<Vec<Value>, _>>()
+        .map_err(err)?;
+    Ok(serde_json::json!({ "count": count, "groups": groups }))
+}
+
 fn check_page(q: &Query) -> Result<(), String> {
     if !(1..=100).contains(&q.limit) {
         return Err(format!("limit 必须在 1 到 100 之间，收到 {}：请调整后重试。", q.limit));
@@ -250,7 +350,7 @@ fn check_page(q: &Query) -> Result<(), String> {
 /// Query-string parameters to a checked `Query` plus the `expand` field names.
 /// `field=v` is equality, `field__ne|gt|gte|lt|lte|contains=v` the other operators; values are read by field type.
 pub fn parse_params(def: &CollectionDef, params: &[(String, String)]) -> Result<(Query, Vec<String>), String> {
-    let mut q = Query { filters: vec![], status: vec![], sort: None, limit: 20, offset: 0, owner: None, search: None };
+    let mut q = Query { filters: vec![], status: vec![], sort: None, limit: 20, offset: 0, owner: None, search: None, rule: None };
     let mut expand = vec![];
     let int = |name: &str, v: &str| v.parse::<i64>().map_err(|_| format!("参数“{name}”必须是整数，收到“{v}”：请改成数字。"));
     for (name, v) in params {

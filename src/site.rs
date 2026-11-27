@@ -100,6 +100,9 @@ pub fn check_path(path: &str) -> Result<(), String> {
 /// A binary file's content is its bytes in standard base64.
 pub fn check_file(path: &str, content: &str) -> Result<(), String> {
     check_path(path)?;
+    if crate::func::is_fn_path(path) && !matches!(ext(path), "js" | "mjs" | "ts") {
+        return Err(format!("站点文件“{path}”不能放在 _fn 文件夹里：那里只放服务器端的函数（.js 或 .ts），页面和样式放在别处。"));
+    }
     if is_binary(path) {
         let bytes = decode_binary(content).ok_or_else(|| format!("站点文件“{path}”是二进制文件，内容必须是标准 base64 编码。"))?;
         if bytes.is_empty() {
@@ -375,6 +378,15 @@ pub fn visible_def(conn: &Connection, mode: Mode, name: &str, viewer: crate::acc
     Ok(any_def(conn, mode, name)?.and_then(|d| crate::access::read_filter(&d.access, viewer).map(|owner| (d, owner))))
 }
 
+/// `visible_def` for the pages' own lists, where a read rule applies record by record: the definition with what
+/// `viewer` may see of it.
+pub fn visible_scope(conn: &Connection, mode: Mode, name: &str, viewer: crate::access::Viewer) -> Result<Option<(CollectionDef, crate::access::Scope)>, String> {
+    match any_def(conn, mode, name)? {
+        Some(d) => Ok(crate::access::read_scope(conn, &d, viewer)?.map(|scope| (d, scope))),
+        None => Ok(None),
+    }
+}
+
 /// A collection's definition as `mode` sees it, whoever may read it.
 pub fn any_def(conn: &Connection, mode: Mode, name: &str) -> Result<Option<CollectionDef>, String> {
     if !crate::schema::valid_name(name) {
@@ -393,12 +405,15 @@ enum Ask {
     Records { collection: String, filter: Value, sort: Option<String>, limit: i64, offset: i64, id: Option<i64> },
     Search { q: String, collection: Option<String>, limit: usize },
     Count { collection: String, filter: Value },
+    /// The size of an uploaded picture, by its name under `/uploads/`.
+    Image(String),
 }
 
 enum Answer {
     File(Option<String>),
     Records(Vec<Rec>),
     Count(i64),
+    Size(Option<(u32, u32)>),
 }
 
 /// One record for a template: (field, value, is rich text, change mark).
@@ -410,6 +425,8 @@ type Line = (Ask, mpsc::Sender<Result<Answer, String>>);
 /// knows which pending change each object belongs to.
 struct Server<'c> {
     conn: &'c Connection,
+    /// Where uploaded files are: `img()` reads a picture's size there.
+    uploads: &'c std::path::Path,
     mode: Mode,
     page: String,
     /// Pending target → its 1-based position in `list_pending`; loaded on first need.
@@ -448,6 +465,8 @@ impl Server<'_> {
             Ask::File(path) => self.deps.insert(format!("f:{path}")),
             Ask::Records { collection, .. } | Ask::Count { collection, .. } => self.deps.insert(format!("c:{collection}")),
             Ask::Search { .. } => self.deps.insert("records".into()),
+            // An upload is named by its content: it never changes under a cached page.
+            Ask::Image(_) => false,
         };
         match ask {
             Ask::File(path) => {
@@ -468,6 +487,7 @@ impl Server<'_> {
             }
             Ask::Records { collection, filter, sort, limit, offset, id } => self.records(&collection, &filter, sort, limit, offset, id).map(Answer::Records),
             Ask::Count { collection, filter } => self.count(&collection, &filter).map(Answer::Count),
+            Ask::Image(name) => Ok(Answer::Size(crate::media::size_in(self.uploads, &name).map(|(w, h, _)| (w, h)))),
             Ask::Search { q, collection, limit } => {
                 let hits = crate::search::search_in(self.conn, &q, collection.as_deref(), self.viewer, limit, self.lang.as_ref())?;
                 let mut out = vec![];
@@ -488,17 +508,18 @@ impl Server<'_> {
     /// language (a collection set to hide untranslated ones) are still counted.
     fn count(&mut self, name: &str, filter: &Value) -> Result<i64, String> {
         use crate::query::{Query, Status};
-        let Some((def, owner)) = visible_def(self.conn, self.mode, name, self.viewer)? else { return Ok(0) };
+        let Some((def, scope)) = visible_scope(self.conn, self.mode, name, self.viewer)? else { return Ok(0) };
         let filters = if filter.is_null() { vec![] } else { crate::query::parse_filter(&def, filter)? };
         let live = self.mode == Mode::Live;
         let status = if live { vec![] } else { vec![Status::Draft, Status::Changed, Status::Published] };
-        let q = Query { filters, status, sort: None, limit: 1, offset: 0, owner, search: None };
+        let mut q = Query { filters, status, sort: None, limit: 1, offset: 0, owner: None, search: None, rule: None };
+        scope.apply(&mut q);
         Ok(crate::query::run(self.conn, &def, &q, live)?.1)
     }
 
     fn records(&mut self, name: &str, filter: &Value, sort: Option<String>, limit: i64, offset: i64, id: Option<i64>) -> Result<Vec<Rec>, String> {
         use crate::query::{Op, Query, Status};
-        let Some((def, owner)) = visible_def(self.conn, self.mode, name, self.viewer)? else {
+        let Some((def, scope)) = visible_scope(self.conn, self.mode, name, self.viewer)? else {
             // Members-only content for a visitor who is not logged in: nothing, rather than a broken page.
             return match any_def(self.conn, self.mode, name)? {
                 Some(d) if matches!(d.access.read, crate::schema::Read::Members | crate::schema::Read::Owner) => Ok(vec![]),
@@ -516,7 +537,8 @@ impl Server<'_> {
         let live = self.mode == Mode::Live;
         // Preview: drafts over live copies, without records waiting to be deleted.
         let status = if live { vec![] } else { vec![Status::Draft, Status::Changed, Status::Published] };
-        let q = Query { filters, status, sort, limit, offset, owner, search: None };
+        let mut q = Query { filters, status, sort, limit, offset, owner: None, search: None, rule: None };
+        scope.apply(&mut q);
         let (rows, _) = crate::query::run(self.conn, &def, &q, live)?;
         let mut out = vec![];
         let lang = self.lang.clone().filter(|l| !l.is_default());
@@ -654,7 +676,7 @@ impl Asker {
     fn records(&self, ask: Ask) -> Result<Vec<Rec>, minijinja::Error> {
         match self.ask(ask)? {
             Answer::Records(r) => Ok(r),
-            Answer::File(_) | Answer::Count(_) => Ok(vec![]),
+            Answer::File(_) | Answer::Count(_) | Answer::Size(_) => Ok(vec![]),
         }
     }
 }
@@ -688,6 +710,57 @@ fn render_thread(asker: Asker, mode: Mode, page: &str, ctx: Value) -> Result<Str
         });
         if raster && !s.contains('?') { format!("{s}?w={}", crate::media::snap_width(w)) } else { s }
     });
+    // An uploaded picture as a whole tag: `{{ img(p.cover, alt=p.title, sizes="50vw", class="cover") }}`. Every width
+    // below the picture's own in `srcset`, its real size so the page does not jump while it loads, loaded when it
+    // comes into view (`eager=true` for the first one a visitor sees). No picture, no tag.
+    let a = asker.clone();
+    env.add_function("img", move |src: minijinja::Value, kwargs: Kwargs| -> Result<minijinja::Value, minijinja::Error> {
+        let alt = kwargs.get::<Option<String>>("alt")?.unwrap_or_default();
+        let sizes = kwargs.get::<Option<String>>("sizes")?.unwrap_or_else(|| "100vw".into());
+        let class = kwargs.get::<Option<String>>("class")?;
+        let eager = kwargs.get::<Option<bool>>("eager")?.unwrap_or(false);
+        kwargs.assert_all_used()?;
+        let src = src.as_str().unwrap_or_default().trim().to_string();
+        if src.is_empty() {
+            return Ok(minijinja::Value::from_safe_string(String::new()));
+        }
+        let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+        let size = match src.strip_prefix("/uploads/").filter(|name| !name.contains(['?', '#'])) {
+            Some(name) => match a.ask(Ask::Image(name.to_string()))? {
+                Answer::Size(s) => s,
+                _ => None,
+            },
+            None => None,
+        };
+        let mut tag = String::from("<img");
+        let mut put = |name: &str, value: &str| tag.push_str(&format!(" {name}=\"{}\"", esc(value)));
+        match size {
+            Some((w, h)) => {
+                // Smaller copies exist for JPEG, PNG and WebP (see `media::thumb`).
+                let resizable = [".jpg", ".png", ".webp"].iter().any(|e| src.ends_with(e));
+                let below: Vec<u32> = crate::media::WIDTHS.iter().copied().filter(|x| resizable && *x < w).collect();
+                match below.iter().copied().find(|x| *x >= 828) {
+                    Some(x) => put("src", &format!("{src}?w={x}")),
+                    None => put("src", &src),
+                }
+                if !below.is_empty() {
+                    let mut set: Vec<String> = below.iter().map(|x| format!("{src}?w={x} {x}w")).collect();
+                    set.push(format!("{src} {w}w"));
+                    put("srcset", &set.join(", "));
+                    put("sizes", &sizes);
+                }
+                put("width", &w.to_string());
+                put("height", &h.to_string());
+            }
+            None => put("src", &src),
+        }
+        put("alt", &alt);
+        if let Some(class) = class.filter(|c| !c.is_empty()) {
+            put("class", &class);
+        }
+        tag.push_str(if eager { " fetchpriority=\"high\" decoding=\"async\">" } else { " loading=\"lazy\" decoding=\"async\">" });
+        Ok(minijinja::Value::from_safe_string(tag))
+    });
     let page_lang = |state: &minijinja::State| state.lookup("lang").and_then(|l| l.as_str().map(String::from)).unwrap_or_else(|| "zh".into());
     env.add_filter("date", move |state: &minijinja::State, value: String| crate::langs::format_date(&value, &page_lang(state)));
     env.add_filter("number", move |state: &minijinja::State, value: f64, decimals: Option<usize>| crate::langs::format_number(value, &page_lang(state), decimals.unwrap_or(0)));
@@ -701,7 +774,7 @@ fn render_thread(asker: Asker, mode: Mode, page: &str, ctx: Value) -> Result<Str
         }
         match a.ask(Ask::File(name.to_string()))? {
             Answer::File(f) => Ok(f),
-            Answer::Records(_) | Answer::Count(_) => Ok(None),
+            Answer::Records(_) | Answer::Count(_) | Answer::Size(_) => Ok(None),
         }
     });
     let (a, l) = (asker.clone(), last.clone());
@@ -781,9 +854,9 @@ pub struct Rendered {
 /// functions `collection(name, filter?, sort?, limit?, offset?)`, `record(collection, id)` and
 /// `search(q, collection?, limit?)` (published records this visitor may read, each with `_collection` and `_snippet`). Lookups run on
 /// `conn`, the caller's connection, so a render inside the publish transaction sees what is about to go live.
-pub fn render(conn: &Connection, mode: Mode, page: &str, ctx: Value) -> Result<Rendered, String> {
+pub fn render(conn: &Connection, uploads: &std::path::Path, mode: Mode, page: &str, ctx: Value) -> Result<Rendered, String> {
     let viewer = ctx["member"]["id"].as_i64().map_or(crate::access::Viewer::Anon, crate::access::Viewer::Member);
-    let mut server = Server { conn, mode, page: page.to_string(), order: None, files_changed: vec![], asks: 0, viewer, deps: Default::default(),
+    let mut server = Server { conn, uploads, mode, page: page.to_string(), order: None, files_changed: vec![], asks: 0, viewer, deps: Default::default(),
         lang: serde_json::from_value(ctx["_site_lang"].clone()).ok(), canvas: None };
     let (tx, rx) = mpsc::channel::<Line>();
     // minijinja functions must be 'static, so they cannot borrow the connection: the render runs on a scoped
@@ -974,7 +1047,8 @@ pub fn check_live(conn: &Connection, problems: &mut Vec<String>) -> Result<(), S
     for path in paths {
         let result = if ext(&path) == "html" {
             let ctx = json!({ "request": { "path": format!("/{path}"), "query": {} }, "member": null });
-            render(conn, Mode::Live, &path, ctx).map(|_| ())
+            // Whether it renders, not what it looks like: a picture's size is not looked up.
+            render(conn, std::path::Path::new(""), Mode::Live, &path, ctx).map(|_| ())
         } else if is_script(&path) {
             let source = file(conn, Mode::Live, &path)?.unwrap_or_default();
             transpile(&path, &source).map(|_| ())

@@ -107,6 +107,41 @@ struct Extra {
     /// The admin address as typed into a refused 网址 form.
     address: Option<String>,
     saved: String,
+    /// The row to show open (`s-model`, …): the one a refused form came from.
+    open: Option<&'static str>,
+}
+
+/// The row of the page a form belongs to, by where it posts.
+fn row_of(path: &str) -> Option<&'static str> {
+    let rest = path.strip_prefix("/admin/settings/")?;
+    Some(match rest.split('/').next()? {
+        "keys" => "s-access",
+        "notes" => "s-notes",
+        "name" => "s-name",
+        "password" => "s-account",
+        "admins" => "s-admins",
+        "appearance" => "s-look",
+        "model" => "s-model",
+        "backup" | "restore" => "s-backup",
+        "languages" => "s-langs",
+        "web-search" => "s-web",
+        "skills" => "s-skills",
+        "address" => "s-address",
+        "hooks" => "s-hooks",
+        _ => return None,
+    })
+}
+
+/// A page answer with its row open, when the answer does not already say which.
+fn at_row(out: Result<Out, Out>, row: Option<&'static str>) -> Result<Out, Out> {
+    let open = |o: Out| match o {
+        Out::Page(status, name, mut ctx) if ctx["open"].is_null() => {
+            ctx["open"] = json!(row);
+            Out::Page(status, name, ctx)
+        }
+        other => other,
+    };
+    out.map(open).map_err(open)
 }
 
 fn settings_page(app: &App, user: &AdminUser, extra: Extra) -> Result<Out, Out> {
@@ -172,6 +207,9 @@ fn settings_page(app: &App, user: &AdminUser, extra: Extra) -> Result<Out, Out> 
         "revealed": extra.revealed.map(|(email, password)| json!({ "email": email, "password": password })),
         "error": extra.error,
         "saved": extra.saved,
+        "open": extra.open,
+        // Where messages go is the builder's to see: an address is a way into someone's group.
+        "hooks": if builder { crate::hooks::section(app) } else { Value::Null },
     });
     Ok(Out::Page(status, "settings.html", content::shell(app, user, "settings", ctx)))
 }
@@ -182,7 +220,7 @@ fn refused(app: &App, user: &AdminUser, error: String) -> Result<Out, Out> {
 
 /// The 网址 form refused, with what was typed.
 pub(super) fn address_refused(app: &App, user: &AdminUser, error: String, typed: String) -> Result<Out, Out> {
-    settings_page(app, user, Extra { error: Some(error), address: Some(typed), ..Default::default() })
+    settings_page(app, user, Extra { error: Some(error), address: Some(typed), open: Some("s-address"), ..Default::default() })
 }
 
 /// The page after a switch, shown right here: the next request on this address may already be redirected.
@@ -197,6 +235,7 @@ pub async fn page(State(app): State<Shared>, Extension(user): Extension<AdminUse
 
 /// Reads and checks the form, then the role, then runs `f`. Every answer is `no-store`: some carry a secret.
 async fn handle(app: Shared, user: AdminUser, req: Request, builder_only: bool, f: impl FnOnce(&App, &AdminUser, Posted) -> Result<Out, Out> + Send + 'static) -> Response {
+    let row = row_of(req.uri().path());
     let posted = match content::checked(&user, req).await {
         Ok(p) => p,
         Err(o) => return o.into_response(),
@@ -204,7 +243,7 @@ async fn handle(app: Shared, user: AdminUser, req: Request, builder_only: bool, 
     if builder_only && user.role != "builder" {
         return (StatusCode::FORBIDDEN, format!("“{}”是编辑：只有搭建者（builder）可以改这项设置。", user.email)).into_response();
     }
-    let mut resp = content::blocking(move || f(&app, &user, posted)).await;
+    let mut resp = content::blocking(move || at_row(f(&app, &user, posted), row)).await;
     resp.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     resp
 }
@@ -469,7 +508,7 @@ pub async fn detect_models(State(app): State<Shared>, Extension(user): Extension
     };
     let mut resp = content::blocking(move || match found {
         Ok(models) => settings_page(&app, &user, Extra { model: ModelForm { models: Some(models), ..p }, saved: "detected".into(), ..Default::default() }),
-        Err(e) => settings_page(&app, &user, Extra { error: Some(e), model: p, ..Default::default() }),
+        Err(e) => settings_page(&app, &user, Extra { error: Some(e), model: p, open: Some("s-model"), ..Default::default() }),
     })
     .await;
     resp.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -587,6 +626,47 @@ pub async fn save_web_search(State(app): State<Shared>, Extension(user): Extensi
         }
     })
     .await
+}
+
+// ---- 通知 ----
+
+/// `POST /admin/settings/hooks`: adds a destination for messages (builders only).
+pub async fn add_hook(State(app): State<Shared>, Extension(user): Extension<AdminUser>, req: Request) -> Response {
+    handle(app, user, req, true, |app, user, posted| {
+        let events = posted.fields.get("event").cloned().unwrap_or_default();
+        let added = crate::hooks::add(&app.conn(), posted.one("url"), posted.one("secret"), &events);
+        match added {
+            Ok(_) => Ok(Out::Go("/admin/settings?saved=hook#s-hooks".into())),
+            Err(e) => refused(app, user, e),
+        }
+    })
+    .await
+}
+
+/// `POST /admin/settings/hooks/<id>/delete` (builders only).
+pub async fn remove_hook(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Path(id): Path<i64>, req: Request) -> Response {
+    handle(app, user, req, true, move |app, user, _| {
+        let removed = crate::hooks::remove(&app.conn(), id);
+        match removed {
+            Ok(()) => Ok(Out::Go("/admin/settings#s-hooks".into())),
+            Err(e) => refused(app, user, e),
+        }
+    })
+    .await
+}
+
+/// `POST /admin/settings/hooks/<id>/test`: sends one message now and says how it went (builders only).
+pub async fn test_hook(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Path(id): Path<i64>, req: Request) -> Response {
+    if let Err(o) = content::checked(&user, req).await {
+        return o.into_response();
+    }
+    if user.role != "builder" {
+        return (StatusCode::FORBIDDEN, format!("“{}”是编辑：只有搭建者（builder）可以改这项设置。", user.email)).into_response();
+    }
+    match crate::hooks::test(&app, id).await {
+        Ok(()) => Out::Go("/admin/settings?saved=hooksent#s-hooks".into()).into_response(),
+        Err(e) => content::blocking(move || settings_page(&app, &user, Extra { error: Some(format!("测试消息没发出去：{e}")), open: Some("s-hooks"), ..Default::default() })).await,
+    }
 }
 
 pub async fn install_skill(State(app): State<Shared>, Extension(user): Extension<AdminUser>, req: Request) -> Response {

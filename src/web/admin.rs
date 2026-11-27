@@ -393,7 +393,7 @@ const VERSIONS_SHOWN: i64 = 20;
 fn releases(conn: &Connection, actor: &crate::auth::Actor, only: Option<i64>) -> rusqlite::Result<Vec<Value>> {
     // Visitor and member submissions are history too (versions keep them) but not releases a person made.
     let mut stmt = conn.prepare(
-        "SELECT id, actor, note, created_at FROM releases WHERE (?1 IS NULL OR id = ?1) AND actor != '访客' AND actor NOT LIKE 'member:%' AND actor NOT LIKE 'public:%' ORDER BY id DESC LIMIT 50",
+        "SELECT id, actor, note, created_at FROM releases WHERE (?1 IS NULL OR id = ?1) AND actor != '访客' AND actor NOT LIKE 'member:%' AND actor NOT LIKE 'public:%' AND actor NOT LIKE 'fn:%' ORDER BY id DESC LIMIT 50",
     )?;
     let heads: Vec<(i64, String, String, String)> = stmt.query_map([only], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
     let mut versions = conn.prepare("SELECT id, target, doc, prev, actor, note FROM versions WHERE release_id = ?1 ORDER BY id LIMIT ?2")?;

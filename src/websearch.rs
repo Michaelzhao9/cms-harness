@@ -192,9 +192,14 @@ async fn checked(r: reqwest::Response) -> Result<Value, String> {
     serde_json::from_str(&text).map_err(|_| "搜索服务的回复不是 JSON：SearXNG 要在设置里打开 json 格式。".into())
 }
 
+/// `HC_FETCH_ALLOW_PRIVATE=1`: this deployment may reach addresses inside its own network (tests, an intranet).
+pub(crate) fn private_allowed() -> bool {
+    std::env::var("HC_FETCH_ALLOW_PRIVATE").as_deref() == Ok("1")
+}
+
 /// Public addresses only: the same rule as skill downloads.
-fn public(ip: IpAddr) -> bool {
-    crate::skills::public_ip(ip) || std::env::var("HC_FETCH_ALLOW_PRIVATE").as_deref() == Ok("1")
+pub(crate) fn public(ip: IpAddr) -> bool {
+    crate::skills::public_ip(ip) || private_allowed()
 }
 
 /// One public web page as text: `{url, title, text}`. Each hop of a redirect is resolved, checked and connected to

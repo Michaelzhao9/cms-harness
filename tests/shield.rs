@@ -144,34 +144,33 @@ async fn the_site_refuses_ai_crawlers_and_says_so_in_robots_txt() {
 }
 
 #[tokio::test]
-async fn a_probe_is_refused_recorded_and_shown_to_the_admin() {
+async fn a_probe_is_refused_and_recorded_and_the_admin_shows_nothing_of_it() {
     let app = app();
     assert_eq!(fetch(&app, "/wp-login.php", CHROME).await.0, StatusCode::FORBIDDEN);
     assert_eq!(fetch(&app, "/", CHROME).await.0, StatusCode::FORBIDDEN, "the same client's next request");
     let events = shield::events(&app.conn(), 10).unwrap();
     assert_eq!((events[0]["kind"].as_str(), events[0]["path"].as_str()), (Some("probe"), Some("/wp-login.php")), "{events:?}");
 
-    let (cookie, _) = admin_session(&app, "builder").await;
-    let (s, _, page) = get_with(&app, "/admin/shield", Some(&cookie)).await;
-    assert_eq!(s, StatusCode::OK, "the admin is not shut out with the visitor");
-    // The template escapes the slash.
-    assert!(page.contains("wp-login.php") && page.contains("探测漏洞的路径"), "{page}");
+    // Protection is not something the admin shows or sets: it is on, as the code says.
+    let session = admin_session(&app, "builder").await;
+    let cookie = session.0.clone();
+    assert_eq!(get_with(&app, "/admin/shield", Some(&cookie)).await.0, StatusCode::NOT_FOUND);
+    assert!(post_form(&app, "/admin/shield", Some(&session), &[("mode", "off")]).await.0.is_client_error());
+    for path in ["/admin", "/admin/settings"] {
+        let (s, _, page) = get_with(&app, path, Some(&cookie)).await;
+        assert_eq!(s, StatusCode::OK, "the admin is not shut out with the visitor");
+        for word in ["防护", "反爬", "爬虫", "封禁", "/admin/shield"] {
+            assert!(!page.contains(word), "{path} mentions {word}");
+        }
+    }
 }
 
 #[tokio::test]
-async fn strict_mode_serves_the_challenge_and_only_a_builder_changes_the_mode() {
+async fn strict_mode_serves_the_challenge_and_a_solved_one_lets_the_visitor_in() {
     let app = app();
-    let editor = admin_session(&app, "editor").await;
-    let (s, _, _) = post_form(&app, "/admin/shield", Some(&editor), &[("mode", "strict")]).await;
-    assert_eq!(s, StatusCode::FORBIDDEN, "editors do not change the protection");
     assert_eq!(fetch(&app, "/", CHROME).await.0, StatusCode::OK);
-
-    let builder = admin_session(&app, "builder").await;
-    let (s, _, body) = post_form(&app, "/admin/shield", Some(&builder), &[("mode", "strict"), ("per_minute", "100"), ("pages_per_minute", "20"), ("block_ai", "on"), ("blocked", "9.9.9.9\n8.8.8.8")]).await;
-    assert_eq!(s, StatusCode::SEE_OTHER, "{body}");
-    let saved = shield::load(&app.conn());
-    assert_eq!((saved.mode, saved.per_minute, saved.pages_per_minute, saved.block_ai, saved.block_tools), (Mode::Strict, 100, 20, true, false));
-    assert_eq!(saved.blocked, vec!["9.9.9.9".to_string(), "8.8.8.8".to_string()]);
+    // Only code changes the level.
+    app.shield.set_config(Config { mode: Mode::Strict, ..Config::default() });
 
     let (s, page) = fetch(&app, "/", CHROME).await;
     assert_eq!(s, StatusCode::FORBIDDEN);
@@ -184,5 +183,16 @@ async fn strict_mode_serves_the_challenge_and_only_a_builder_changes_the_mode() 
     let seed = page.split("data-seed=\"").nth(1).unwrap().split('"').next().unwrap().to_string();
     let req = Request::get("/").header(header::USER_AGENT, CHROME).header(header::COOKIE, format!("hc_pass={seed}.{}", solve(&seed))).body(axum::body::Body::empty()).unwrap();
     assert_eq!(cms_harness::api::router(app.clone()).oneshot(req).await.unwrap().status(), StatusCode::OK);
-    assert!(post_form(&app, "/admin/shield", Some(&builder), &[("mode", "nonsense")]).await.0.is_client_error());
+}
+
+#[test]
+fn the_level_out_of_the_box_is_the_full_one() {
+    let c = Config::default();
+    assert_eq!(c.mode, Mode::Standard);
+    assert!(c.block_ai && c.block_tools && c.per_minute <= 240 && c.pages_per_minute <= 40);
+    // Nothing saved in the database turns it down.
+    let app = app();
+    app.conn().execute("INSERT INTO site_settings(key, value) VALUES ('shield', '{\"mode\":\"off\"}')", []).unwrap();
+    let again = cms_harness::App::new(cms_harness::store::open(":memory:").unwrap(), std::env::temp_dir(), "http://127.0.0.1:4200".into(), "x".into());
+    assert_eq!(again.shield.config().mode, Mode::Standard);
 }

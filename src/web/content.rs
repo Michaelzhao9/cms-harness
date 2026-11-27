@@ -958,7 +958,11 @@ pub(super) fn members_page(app: &App, user: &AdminUser, params: &Params, error: 
         .as_array()
         .into_iter()
         .flatten()
-        .map(|m| json!({ "id": m["id"], "disabled": m["status"] == "disabled", "cells": columns.iter().map(|f| shown(&f.name, &m[&f.name])).collect::<Vec<_>>() }))
+        .map(|m| {
+            // Attributes as they are typed back in: `kind=teacher, class=3`.
+            let data = m["data"].as_object().map(|o| o.iter().map(|(k, v)| format!("{k}={}", v.as_str().map_or_else(|| v.to_string(), String::from))).collect::<Vec<_>>().join(", ")).unwrap_or_default();
+            json!({ "id": m["id"], "disabled": m["status"] == "disabled", "data": data, "cells": columns.iter().map(|f| shown(&f.name, &m[&f.name])).collect::<Vec<_>>() })
+        })
         .collect();
     let href = |status: &str, page: i64| {
         let mut parts = vec![];
@@ -993,6 +997,51 @@ pub(super) fn members_page(app: &App, user: &AdminUser, params: &Params, error: 
 
 fn url_escape(s: &str) -> String {
     s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+#[derive(serde::Deserialize)]
+pub struct MemberDataForm {
+    #[serde(default)]
+    csrf: String,
+    #[serde(default)]
+    data: String,
+}
+
+/// `POST /admin/members/<id>/data`: the member's attributes, typed as `kind=teacher, class=3`. What is typed is
+/// the whole set: an attribute left out is removed.
+pub async fn member_data(State(app): State<Shared>, Extension(user): Extension<AdminUser>, Path(id): Path<i64>, axum::Form(f): axum::Form<MemberDataForm>) -> Response {
+    if let Err(s) = super::session::check_csrf(&user, &f.csrf) {
+        return s.into_response();
+    }
+    blocking(move || {
+        let refuse = |e: String| members_page(&app, &user, &vec![], Some(e)).map(|out| match out {
+            Out::Page(_, name, ctx) => Out::Page(StatusCode::BAD_REQUEST, name, ctx),
+            other => other,
+        });
+        let mut patch = Map::new();
+        for pair in f.data.split([',', '，', '\n']).map(str::trim).filter(|p| !p.is_empty()) {
+            let Some((key, value)) = pair.split_once('=').map(|(k, v)| (k.trim(), v.trim())) else {
+                return refuse(format!("“{pair}”看不懂：属性写成 名字=值，多个用逗号隔开，比如 kind=teacher, class=3。"));
+            };
+            let typed = match value {
+                "true" => json!(true),
+                "false" => json!(false),
+                v => v.parse::<i64>().map(Value::from).or_else(|_| v.parse::<f64>().map(Value::from)).unwrap_or_else(|_| json!(v)),
+            };
+            patch.insert(key.to_string(), typed);
+        }
+        // An attribute the member has that was not typed again goes.
+        let listed = tool(&app, &user, "list_members", json!({ "limit": 200 })).map_err(internal)?;
+        let had = listed["items"].as_array().into_iter().flatten().find(|m| m["id"] == id).and_then(|m| m["data"].as_object().cloned()).unwrap_or_default();
+        for key in had.keys().filter(|k| !patch.contains_key(*k)).cloned().collect::<Vec<_>>() {
+            patch.insert(key, Value::Null);
+        }
+        match tool(&app, &user, "set_member_data", json!({ "id": id, "data": patch, "note": "后台修改会员属性" })) {
+            Ok(_) => Ok(Out::Go("/admin/members".into())),
+            Err(e) => refuse(e),
+        }
+    })
+    .await
 }
 
 #[derive(serde::Deserialize)]

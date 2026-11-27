@@ -211,7 +211,10 @@ async fn editors_cannot_manage_keys_or_admins() {
     let (status, _, page) = get_with(&app, "/admin/settings", Some(&e.0)).await;
     assert_eq!(status, StatusCode::OK);
     assert_clean(&page);
-    assert!(page.contains("已有") && page.contains("只有搭建者"), "{page}");
+    // What an editor cannot use is not on their page at all: no rows for keys, the model, backups or admins.
+    for row in ["s-access", "s-model", "s-backup", "s-admins", "s-address"] {
+        assert!(!page.contains(&format!("id=\"{row}\"")), "{row} shown to an editor: {page}");
+    }
     for action in ["/admin/settings/keys", "/admin/settings/admins", "/admin/settings/notes"] {
         assert!(!page.contains(&format!("action=\"{action}")), "{action} offered to an editor: {page}");
     }
@@ -451,9 +454,9 @@ async fn site_notes_and_password_are_changed_in_settings() {
     let (_, _, page) = get_with(&app, "/admin/settings?saved=notes", Some(&b.0)).await;
     assert_clean(&page);
     assert!(page.contains("周一休息") && page.contains("发布后"), "{page}");
-    // Editors read the notes but the tool refuses them a change.
+    // The notes are the builder's to write: an editor's page has no row for them, and the tool refuses a change.
     let (_, _, page) = get_with(&app, "/admin/settings", Some(&e.0)).await;
-    assert!(page.contains("周一休息"), "{page}");
+    assert!(!page.contains("id=\"s-notes\"") && !page.contains("action=\"/admin/settings/notes\""), "{page}");
     let (status, _, page) = post_form(&app, "/admin/settings/notes", Some(&e), &[("text", "改掉"), ("note", "n")]).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(page.contains("structure"), "{page}");

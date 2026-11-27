@@ -187,17 +187,6 @@ pub struct Attachment {
     pub bytes: Vec<u8>,
 }
 
-fn image_type(filename: &str) -> Option<&'static str> {
-    let ext = filename.rsplit('.').next()?.to_ascii_lowercase();
-    Some(match ext.as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        _ => return None,
-    })
-}
-
 pub fn reset(app: &Shared, token_hash: &str) {
     app.chat.reset(token_hash);
 }
@@ -220,10 +209,12 @@ pub fn start(app: Shared, user: &AdminUser, text: String, attachments: Vec<Attac
     let mark = TurnMark { text: text.clone(), images: attachments.len(), ..Default::default() };
     let mut blocks = vec![];
     for a in &attachments {
-        let media_type = image_type(&a.filename).ok_or_else(|| format!("“{}”不是图片：对话里只能附 PNG、JPG、GIF 或 WebP 图片。", a.filename))?;
+        // The model gets a small upright copy; the site keeps the picture itself.
+        let (media_type, seen) = crate::media::for_model(&a.bytes).ok_or_else(|| format!("“{}”不是图片：对话里只能附 PNG、JPG、GIF 或 WebP 图片。", a.filename))?;
         let path = crate::media::store_upload(&app, &a.filename, &a.bytes)?;
-        blocks.push(Block::Image { media_type: media_type.into(), data_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &a.bytes) });
-        blocks.push(Block::Text(format!("（附件图片已上传到 {path}，可以把这个路径填进图片字段。）")));
+        let size = crate::media::info(&app, path.trim_start_matches("/uploads/")).map(|(w, h, bytes)| format!("{w}×{h}，{} KB，", bytes.div_ceil(1024))).unwrap_or_default();
+        blocks.push(Block::Image { media_type: media_type.into(), data_base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &seen) });
+        blocks.push(Block::Text(format!("（附件图片已上传到 {path}，{size}可以把这个路径填进图片字段。）")));
     }
     // What the admin is looking at (a page, picked elements) can carry text from the site itself: it goes into the
     // user turn as quoted data, capped, never into the system prompt.
@@ -339,9 +330,10 @@ const RULES: &str = "你是这个网站后台里的助手，替管理员修改�
   · 网站上删掉某个功能时，同一轮里用 delete_view 删掉它的管理界面。\n\
 - 要做的事有三步以上时（建一个网站、一套系统），开始动手前先用 set_tasks 把任务清单列给管理员看，每做完一项就再调用一次把它标成完成。小改动不用列。\n\
 - 写完或改完一个页面，用 check_page 看一眼它的草稿：ok 不是 true（渲染报错、链接或文件指向不存在的地方）就先修好，再告诉管理员做完了。warnings 里的问题顺手补上。\n\
-- 这个环境可以有多个端：网站本身是第一个。不同的人要用不同的界面时（学生和老师、顾客和店员），用 set_end 给每一种人建一个端，页面写在它的文件夹下（teacher/index.html 的网址是 /teacher/）。只给登录会员用的端设 enter: members：没登录的访客会被带去登录，页面里不用自己检查。数据是所有端共用的：会员能改、能删哪些记录，用集合的 update、delete 规则定（owner，或一句条件，比如 record.owner == member.id），会员在页面里用 PATCH、DELETE /api/v1/content/<集合>/<编号> 来改和删。只有一种使用者时不要建端。\n\
+- 页面里的脚本做不了、规则也表达不了的事（下单同时扣库存、算总分、要查几张表才能决定的权限），写成服务器端的函数：站点文件放在 _fn 文件夹下，_fn/order.js 的网址是 /_fn/order，teacher/_fn/grade.js 的网址是 /teacher/_fn/grade（在端的文件夹里就归那个端，只让会员进的端它的函数也只让会员调）。文件写成 export default function (req) { … return 结果 }：req 有 method、path、query、body、member（登录的会员，没登录是 null）；用 db.query(集合, {filter, sort, limit, offset, search})、db.get(集合, 编号)、db.create(集合, 数据)、db.update(集合, 编号, 数据)、db.delete(集合, 编号) 读写数据，用 db.aggregate(集合, {filter, group_by, sum, avg, min, max}) 汇总，它不受集合访问规则的限制，所以该谁能做什么要在函数里自己判断；返回值就是给页面的 JSON，要别的状态码用 return reply(403, {error: \"…\"})。要让人马上知道的事（库存不足、有人下了单）用 notify(\"一句话\")，它会发到搭建者在设置里接好的群（飞书、企业微信或自己的地址）；发到哪里只有搭建者能定，没接的时候它什么也不做。一次运行是一个整体：抛出异常，或者回答 400 及以上，它写的都不算数。函数里没有网络、文件和定时器，最多运行半秒。页面用 fetch(\"/_fn/order\", {method: \"POST\", headers: {\"content-type\": \"application/json\"}, body: JSON.stringify(…)}) 调它。写完用 run_function 试运行（不会真的写入），线上出了错用 function_log 看原因。\n\
+- 这个环境可以有多个端：网站本身是第一个。不同的人要用不同的界面时（学生和老师、顾客和店员），用 set_end 给每一种人建一个端，页面写在它的文件夹下（teacher/index.html 的网址是 /teacher/）。只给登录会员用的端设 enter: members；只给某一类人用的，先用 set_member_data 给会员设属性（比如 kind: teacher），再把 enter 写成条件 member.kind == 'teacher'。没登录的访客会被带去登录，不符合的会员会被拒绝，页面里不用自己检查。数据是所有端共用的：会员能改、能删哪些记录，用集合的 update、delete 规则定（owner，或一句条件，比如 record.owner == member.id），会员在页面里用 PATCH、DELETE /api/v1/content/<集合>/<编号> 来改和删。只有一种使用者时不要建端。\n\
 - 这个系统完全独立运行：不要把数据推送或同步到任何外部平台，也不要接入外部服务。需要保存的数据，都建成这里的集合。\n\
-- 网站一开始只有一个内置的欢迎页；网站的页面都由你写网站文件来做（写了 index.html 就替换欢迎页），内容通过 collection()、record()、search() 取，分页的总数用 count(\"集合名\", filter={...})（collection() 一次最多 100 条）。上传的图片按显示的宽度用缩小版：{{ p.image|thumb(640) }}（列表、卡片用 384 到 828，大图横幅用 1920），不要直接放原图。\n\
+- 网站一开始只有一个内置的欢迎页；网站的页面都由你写网站文件来做（写了 index.html 就替换欢迎页），内容通过 collection()、record()、search() 取，分页的总数用 count(\"集合名\", filter={...})（collection() 一次最多 100 条）。上传的图片用 {{ img(p.image, alt=p.title, sizes=\"(min-width: 800px) 33vw, 100vw\", class=\"cover\") }} 放进页面：它写出整个 <img>，带各种宽度的缩小版、图片的宽高和延迟加载；sizes 写这张图在页面上占多宽，一屏里最先看到的那张大图加 eager=true。只要网址的地方（比如 CSS 背景）用 {{ p.image|thumb(640) }}（列表、卡片用 384 到 828，大图横幅用 1920）。不要直接放原图。照片上传时已经自动扶正、去掉拍摄信息并压缩，不用再处理。\n\
 - 每条记录自动有自己的页面：给集合写一个详情模板「集合名/_item.html」（全站通用的叫 _item.html），模板里用 item 取这条记录；网址默认是 /集合名/网址名，网址名从标题自动生成。要别的网址就在集合上设 url，比如 /products/{category.slug}/{slug} 或 /{slug}。列表页写成「集合名/index.html」。\n\
 - 链接到记录一律用 item.url（或 /_r/编号），不要手写网址：网址改了链接会自动跟着变，旧网址会自动跳转。建了要在网站上展示的集合（资讯、产品、作品等），同一轮里就把列表页和详情模板做好；集合不再展示时一起删掉。\n\
 - 写网站代码时没有打包工具：用浏览器能直接运行的写法（HTML、CSS、JavaScript；JSX 和 TypeScript 会自动转换）。第三方库（React、Vue、Three.js 等）通过 import map 从 https://esm.sh 加载，用 set_site_settings 设置；Vue 用浏览器版写法，不写 .vue 文件。\n\
@@ -406,7 +398,7 @@ fn step_kind(name: &str) -> StepKind {
     }
     match tools::specs().iter().find(|s| s.name == name).map(|s| s.scope) {
         Some(Scope::Write | Scope::Structure | Scope::Publish) => StepKind::Write,
-        _ if name == "list_pending" || name == "check_page" => StepKind::Check,
+        _ if name == "list_pending" || name == "check_page" || name == "run_function" => StepKind::Check,
         _ => StepKind::Read,
     }
 }
@@ -421,12 +413,16 @@ fn step_label(name: &str, input: &Value) -> String {
         "delete_collection" => format!("删除集合 {}", s("name")),
         "get_record" => format!("读取记录 #{}", s("id")),
         "query_records" => format!("查询 {} 的记录", s("collection")),
+        "aggregate_records" => format!("汇总 {} 的记录", s("collection")),
         "create_record" => format!("在 {} 里新建记录", s("collection")),
         "update_record" => format!("修改记录 #{}", s("id")),
         "delete_record" => format!("删除记录 #{}", s("id")),
         "list_pending" => "检查待发布的改动".into(),
         "check_page" => format!("检查页面 {}", s("path")),
+        "run_function" => format!("试运行函数 {}", s("path")),
+        "function_log" => "查看函数的运行记录".into(),
         "list_ends" => "查看所有端".into(),
+        "set_member_data" => format!("给会员 #{} 设属性", s("id")),
         "set_end" => format!("建立端 {}", s("name")),
         "delete_end" => format!("删除端 {}", s("name")),
         crate::websearch::WEB_SEARCH => format!("搜索网页 {}", s("query")),

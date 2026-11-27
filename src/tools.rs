@@ -40,6 +40,7 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<DeleteRecord>("delete_record", Scope::Write, "删除记录；从未发布的记录直接消失，已发布的待发布时才真正删除。"),
             spec::<GetRecord>("get_record", Scope::Read, "按编号读取一条记录（有草稿时返回草稿）和状态。"),
             spec::<QueryRecords>("query_records", Scope::Read, "查询集合的记录（草稿视图）。filter 与 sort 只能用 id 或设置了 index/unique 的字段；status 可只看某几种状态的记录。"),
+            spec::<AggregateRecords>("aggregate_records", Scope::Read, "汇总一个集合：符合条件的有多少条（count），数字字段的总和（sum）、平均（avg）、最小（min）、最大（max），可以按某个字段分组（group_by）。筛选条件和 query_records 一样（filter、status、search）。回答“这个月卖了多少”“每种状态各有几单”这类问题时用它，不要把记录全读出来自己数。"),
             spec::<Search>("search", Scope::Read, "全文搜索已发布的记录（中文、英文都行），按相关度排序，返回集合、编号和命中的一小段文字。网站页面里用模板函数 search(q, collection=..., limit=...) 做站内搜索，访客只会搜到自己能看的内容。"),
             spec::<SchedulePublish>("schedule_publish", Scope::Publish, "定时发布：到了时间按普通发布的流程和检查上线，记在发布记录里，发布人是你。at 是时间，tz_offset_minutes 是这个时间所在时区比 UTC 快多少分钟（北京时间 480，默认 0 即 UTC）。不传 targets 就发布到时所有待发布的改动。"),
             spec::<NoArgs>("list_schedules", Scope::Read, "列出等待中的定时发布和最近执行过的定时发布（时间是 UTC）。"),
@@ -60,12 +61,15 @@ pub fn specs() -> &'static [ToolSpec] {
             spec::<SetSiteSettings>("set_site_settings", Scope::Structure, "修改网站的设置（草稿，发布后生效）：name 是站点名称（网页标题、内置页面和后台都用它），import_map、script_origins 管前端脚本。只传要改的项，传 null 恢复默认。例：用 React 时 import_map 设为 {\"imports\": {\"react\": \"https://esm.sh/react@19\", \"react/jsx-runtime\": \"https://esm.sh/react@19/jsx-runtime\", \"react-dom/client\": \"https://esm.sh/react-dom@19/client\"}}。"),
             spec::<SetMemberLogin>("set_member_login", Scope::Structure, "打开或关闭网站的会员注册和登录（草稿，发布后生效）。打开后网站有 /account/signup、/account/login、/account/logout 页面和 /api/v1/members/* 接口，模板里 member 是当前登录的会员；后台左边会自动出现「用户管理」，关闭后它自动消失；要改它的样子，用 set_view 并写 collection: \"_members\"（字段 email、name、status、created_at、last_login）。网站要做登录功能时用它，不要自己建会员集合。"),
             spec::<CheckPage>("check_page", Scope::Read, "检查草稿里的一个页面，就像预览会显示的那样：渲染有没有报错（带原因）、站内链接和引用的文件有没有指向不存在的地方、标题和各级小标题，以及该补的东西（没有 title、没有 viewport、图片没有 alt 等）。写完或改完页面后调用它，ok 不是 true 就先修好。path 是页面的网址，比如 / 或 /about。"),
+            spec::<RunFunction>("run_function", Scope::Read, "试运行草稿里的一个服务器端函数，什么都不会真的写入：返回它的回答（status、body）、console.log 的内容和出错原因。函数是 _fn 文件夹下的站点文件，网址去掉扩展名：_fn/add.js 是 /_fn/add，teacher/_fn/grade.js 是 /teacher/_fn/grade。写完函数先用它试一遍。method 默认 GET；body 是请求内容；member_id 让它以某个会员的身份运行。"),
+            spec::<FunctionLog>("function_log", Scope::Read, "线上的函数最近出错或写了日志的运行：时间、网址、状态、用时、出错原因、console.log 的内容。path 只看某一个函数。"),
             spec::<NoArgs>("list_ends", Scope::Read, "列出这个环境里的端：第一个是网站本身（name 为空，网址 /），其余每个端是一个有名字的文件夹（文件写在 <name>/ 下，网址 /<name>/），带标题、谁能进（enter）、状态和文件数。"),
-            spec::<SetEnd>("set_end", Scope::Structure, "新建或修改一个端（草稿，发布后生效）。不同的人要用不同的界面时（学生端、老师端、门店端），给每一种人建一个端：name 是它的文件夹名和网址（/<name>/），title 是给人看的名字，enter 是谁能进：public（默认）或 members（只有登录的会员，没登录的访客会被带去登录，端里的页面不用自己检查）。端的页面用 write_site_file 写在 <name>/ 下，比如 teacher/index.html。数据是整个环境共用的，各个端读写同一批集合。"),
+            spec::<SetEnd>("set_end", Scope::Structure, "新建或修改一个端（草稿，发布后生效）。不同的人要用不同的界面时（学生端、老师端、门店端），给每一种人建一个端：name 是它的文件夹名和网址（/<name>/），title 是给人看的名字，enter 是谁能进：public（默认）、members（登录的会员都能进）或一句只看会员的条件，比如 member.kind == 'teacher'（属性用 set_member_data 设）；没登录的访客会被带去登录，不符合条件的会员会被拒绝，端里的页面和函数不用自己检查。端的页面用 write_site_file 写在 <name>/ 下，比如 teacher/index.html。数据是整个环境共用的，各个端读写同一批集合。"),
             spec::<DeleteEnd>("delete_end", Scope::Structure, "删除一个端，连同它文件夹里的所有文件（草稿，发布后才真正删除）。"),
             spec::<ListMembers>("list_members", Scope::Read, "列出网站的注册会员（不含密码）：可按状态 active/disabled 和关键词筛选。"),
+            spec::<SetMemberData>("set_member_data", Scope::Write, "给一个会员设属性（立即生效）：属性是你自己定的键值，比如 {\"kind\": \"teacher\", \"class\": 3}，系统不管它的含义。规则里用 member.kind 读它（集合的 update、delete 规则，端的进门条件），页面模板里是 {{ member.kind }}，函数里是 req.member.kind。给出的键被修改，值写 null 是去掉，其余不动。会员自己改不了属性。"),
             spec::<SetMemberStatus>("set_member_status", Scope::Write, "停用或恢复一个会员（立即生效）：停用后他不能登录，已登录的会话也会失效。"),
-            spec::<UploadMedia>("upload_media", Scope::Write, "上传图片或 PDF（base64，最大 5 MB）：返回 /uploads/ 路径，可填进 media 字段。"),
+            spec::<UploadMedia>("upload_media", Scope::Write, "上传图片或 PDF（base64，最大 5 MB）：返回 /uploads/ 路径，可填进 media 字段；图片还返回存下来的宽、高和字节数。照片不用先处理：存的时候会自动扶正、去掉拍摄地点等信息、把最长边缩到 2560 以内并压缩。"),
             spec::<NoArgs>("list_site_files", Scope::Read, "列出网站的源文件：状态、字节数和行数（有草稿时按草稿）。不含内容，读内容用 get_site_file。"),
             spec::<PathArgs>("get_site_file", Scope::Read, "按路径读一个网站文件：内容（有草稿时返回草稿）和状态。"),
             spec::<WriteSiteFile>("write_site_file", Scope::Structure, "新建或替换一个网站文件的草稿，发布后上线。最多 2000 个文件。路径：相对路径，字母（区分大小写）、数字和 . _ / -，不能有 ..，最长 200 个字符，不能在 admin/ api/ uploads/ _hc/ 下，也不能叫 mcp。文本文件（html css js mjs jsx ts tsx json svg txt md xml webmanifest map）：content 是文字，最大 1 MB。二进制文件（png jpg jpeg gif webp avif ico woff woff2 ttf otf mp4 webm）：content 是标准 base64，解码后最大 5 MB。`.html` 是 minijinja 模板，按路径访问（/about 对应 about.html 或 about/index.html），可以 extends 或 include 其他文件，用 collection(名字, filter?, sort?, limit?, offset?) 和 record(集合, 编号) 读线上内容，还有 site、request、member。`.jsx/.ts/.tsx` 会转换后提供（去掉 TypeScript，JSX 走 react/jsx-runtime）。写入时检查语法。用户在画板上手动调整过的元素（get_site_file 返回的 hand_edits）要保留：改写会让它们对不上时，工具不写入，先问用户。"),
@@ -150,6 +154,7 @@ fn dispatch(app: &App, conn: &Connection, actor: &Actor, name: &str, args: Value
         "delete_record" => delete_record(conn, actor, parse(name, args)?),
         "get_record" => get_record(conn, parse(name, args)?),
         "query_records" => query_records(conn, parse(name, args)?),
+        "aggregate_records" => aggregate_records(conn, parse(name, args)?),
         "search" => {
             let a: Search = parse(name, args)?;
             let hits = crate::search::search(conn, &a.q, a.collection.as_deref(), crate::access::Viewer::Key, a.limit.unwrap_or(20).clamp(1, 50))?;
@@ -187,6 +192,14 @@ fn dispatch(app: &App, conn: &Connection, actor: &Actor, name: &str, args: Value
             let a: CheckPage = parse(name, args)?;
             crate::check::page(app, conn, &a.path)
         }
+        "run_function" => {
+            let a: RunFunction = parse(name, args)?;
+            crate::func::trial(app, conn, &a.path, a.method.as_deref(), a.query.as_ref(), a.body, a.member_id)
+        }
+        "function_log" => {
+            let a: FunctionLog = parse(name, args)?;
+            crate::func::log(conn, a.path.as_deref(), a.limit.unwrap_or(20))
+        }
         "list_ends" => parse::<NoArgs>(name, args).and_then(|_| crate::ends::list(conn, &app.name(conn, true))),
         "set_end" => {
             let a: SetEnd = parse(name, args)?;
@@ -199,6 +212,11 @@ fn dispatch(app: &App, conn: &Connection, actor: &Actor, name: &str, args: Value
         "list_members" => {
             let a: ListMembers = parse(name, args)?;
             crate::members::list(conn, a.status.as_deref(), a.query.as_deref(), a.limit.unwrap_or(50), a.offset.unwrap_or(0))
+        }
+        "set_member_data" => {
+            let a: SetMemberData = parse(name, args)?;
+            check_note(&a.note)?;
+            crate::members::set_data(conn, a.id, &a.data)
         }
         "set_member_status" => {
             let a: SetMemberStatus = parse(name, args)?;
@@ -255,10 +273,15 @@ struct CreateCollection {
     /// Old form of `read: public`.
     #[serde(default)]
     public_read: bool,
-    /// Who may read live records: public, members (logged-in members), owner (each member their own), private (default).
-    read: Option<crate::schema::Read>,
-    /// Who may add records from the site, live at once: none (default), members, public.
-    create: Option<crate::schema::Create>,
+    /// Who may read live records: public, members (logged-in members), owner (each member their own), private
+    /// (default), or a condition that is asked of every record and filters every list, such as
+    /// "record.open == true or record.owner == member.id or member.kind == 'teacher'". A collection read by a
+    /// condition has no record pages and is not searched for visitors.
+    read: Option<String>,
+    /// Who may add records from the site, live at once: none (default), members, public, or a condition on the
+    /// member and what is sent, such as "member.kind == 'student' and data.class == member.class" (data.<field>;
+    /// there is no record yet).
+    create: Option<String>,
     /// Who may change a live record from the site (PATCH /api/v1/content/<name>/<id>), live at once: none (default),
     /// owner (the member who added it), members, or a condition such as
     /// "record.owner == member.id and data.status == record.status". In a condition: record.<field>, record.id,
@@ -309,10 +332,10 @@ struct UpdateCollection {
     title: Option<String>,
     /// Old form of `read`: true means public, false private.
     public_read: Option<bool>,
-    /// public, members, owner or private.
-    read: Option<crate::schema::Read>,
-    /// none, members or public.
-    create: Option<crate::schema::Create>,
+    /// public, members, owner, private, or a condition (see create_collection).
+    read: Option<String>,
+    /// none, members, public, or a condition (see create_collection).
+    create: Option<String>,
     /// Who may change a live record from the site: none, owner, members, or a condition (see create_collection).
     update: Option<String>,
     /// Who may remove a live record from the site: none, owner, members, or a condition.
@@ -409,11 +432,11 @@ fn create_collection(conn: &Connection, actor: &Actor, a: CreateCollection) -> R
         name: a.name,
         title: a.title,
         single: a.single,
-        access: crate::schema::Access {
-            read: a.read.unwrap_or(if a.public_read { crate::schema::Read::Public } else { crate::schema::Read::Private }),
-            create: a.create.unwrap_or_default(),
-            update: crate::schema::kept_rule(a.update),
-            delete: crate::schema::kept_rule(a.delete),
+        access: {
+            let mut access = crate::schema::Access { update: crate::schema::kept_rule(a.update), delete: crate::schema::kept_rule(a.delete), ..Default::default() };
+            access.set_read(a.read.as_deref().unwrap_or(if a.public_read { "public" } else { "private" }));
+            access.set_create(a.create.as_deref().unwrap_or("none"));
+            access
         },
         fields: a.fields,
         url: a.url.filter(|u| !u.trim().is_empty()),
@@ -449,13 +472,13 @@ fn update_collection(conn: &Connection, actor: &Actor, a: UpdateCollection) -> R
         def.title = t;
     }
     if let Some(p) = a.public_read {
-        def.access.read = if p { crate::schema::Read::Public } else { crate::schema::Read::Private };
+        def.access.set_read(if p { "public" } else { "private" });
     }
-    if let Some(r) = a.read {
-        def.access.read = r;
+    if let Some(r) = &a.read {
+        def.access.set_read(r);
     }
-    if let Some(c) = a.create {
-        def.access.create = c;
+    if let Some(c) = &a.create {
+        def.access.set_create(c);
     }
     if a.update.is_some() {
         def.access.update = crate::schema::kept_rule(a.update);
@@ -850,6 +873,44 @@ fn get_record(conn: &Connection, a: GetRecord) -> Result<Value, String> {
     Ok(json!({ "id": a.id, "collection": row.collection, "status": row.status(), "slug": slug, "url": url, "data": project(&def, &doc) }))
 }
 
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct AggregateRecords {
+    collection: String,
+    /// As in query_records.
+    filter: Option<Value>,
+    /// Keep only records in these states (draft, changed, deleting, published); leave out for all.
+    status: Option<Vec<query::Status>>,
+    /// Text to look for anywhere in a record.
+    search: Option<String>,
+    /// One line per value of this field instead of one line in all.
+    group_by: Option<String>,
+    /// Number fields to add up.
+    #[serde(default)]
+    sum: Vec<String>,
+    #[serde(default)]
+    avg: Vec<String>,
+    #[serde(default)]
+    min: Vec<String>,
+    #[serde(default)]
+    max: Vec<String>,
+}
+
+fn aggregate_records(conn: &Connection, a: AggregateRecords) -> Result<Value, String> {
+    let def = collection_def_for_read(conn, &a.collection)?;
+    let q = Query {
+        filters: a.filter.as_ref().map(|f| query::parse_filter(&def, f)).transpose()?.unwrap_or_default(),
+        status: a.status.unwrap_or_default(),
+        sort: None,
+        limit: 1,
+        offset: 0,
+        owner: None,
+        search: a.search,
+        rule: None,
+    };
+    query::totals(conn, &def, &q, false, &query::Totals { group_by: a.group_by, sum: a.sum, avg: a.avg, min: a.min, max: a.max })
+}
+
 fn query_records(conn: &Connection, a: QueryRecords) -> Result<Value, String> {
     let def = collection_def_for_read(conn, &a.collection)?;
     let q = Query {
@@ -863,6 +924,7 @@ fn query_records(conn: &Connection, a: QueryRecords) -> Result<Value, String> {
         offset: a.offset.unwrap_or(0),
         owner: None,
         search: a.search,
+        rule: None,
     };
     let (rows, total) = query::run(conn, &def, &q, false)?;
     let items: Vec<Value> = rows.into_iter().map(|r| json!({ "id": r.id, "status": r.status, "data": r.doc })).collect();
@@ -982,13 +1044,39 @@ struct CheckPage {
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct RunFunction {
+    /// The function's address: "/_fn/add" for the file _fn/add.js.
+    path: String,
+    /// GET (default), POST, …
+    method: Option<String>,
+    /// The query string as an object: {"page": "2"}.
+    query: Option<Value>,
+    /// The request body, as the function gets it in req.body.
+    body: Option<Value>,
+    /// Run as this member (req.member); leave out for a visitor.
+    member_id: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct FunctionLog {
+    /// Only this function's runs, by its address ("/_fn/add").
+    path: Option<String>,
+    /// 1 to 100, default 20.
+    limit: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct SetEnd {
     /// The folder its files live in and its address: "teacher" holds teacher/… and answers at /teacher/.
     name: String,
     /// What people call it, like 老师端. Required for a new one.
     title: Option<String>,
-    /// Who may open its pages: public (default) or members.
-    enter: Option<crate::ends::Enter>,
+    /// Who may open its pages and call its functions: "public" (default), "members" (anyone logged in), or a
+    /// condition on the member such as "member.kind == 'teacher'" (member.id, member.email, member.name and the
+    /// attributes set with set_member_data; == != < <= > >=, and, or, not).
+    enter: Option<String>,
     note: String,
 }
 
@@ -996,6 +1084,15 @@ struct SetEnd {
 #[serde(deny_unknown_fields)]
 struct DeleteEnd {
     name: String,
+    note: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SetMemberData {
+    id: i64,
+    /// The attributes to change: text, numbers or booleans by name; null removes one.
+    data: Value,
     note: String,
 }
 
@@ -1233,7 +1330,7 @@ fn upload_media(app: &App, a: UploadMedia) -> Result<Value, String> {
     if bytes.len() > crate::media::MAX_BYTES_INLINE {
         return Err(format!("“{}”太大：通过工具上传最大 {} MB，更大的文件请用 POST /api/v1/media。", a.filename, crate::media::MAX_BYTES_INLINE >> 20));
     }
-    Ok(json!({ "path": crate::media::store_upload(app, &a.filename, &bytes)? }))
+    Ok(crate::media::stored(app, crate::media::store_upload(app, &a.filename, &bytes)?))
 }
 
 // ---- site files ----

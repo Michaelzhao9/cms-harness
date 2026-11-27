@@ -97,6 +97,7 @@ async fn multipart_route() {
     let (s, v) = upload(&app, Some(&w), &[("file", &bytes)]).await;
     assert_eq!((s, v["ok"].clone()), (StatusCode::OK, json!(true)), "{v}");
     let path = v["result"]["path"].as_str().unwrap().to_string();
+    assert_eq!((v["result"]["width"].as_u64(), v["result"]["height"].as_u64(), v["result"]["bytes"].as_u64()), (Some(3), Some(3), Some(bytes.len() as u64)), "what was kept: {v}");
     assert_eq!(get(&app, &path, None).await.0, StatusCode::OK);
     assert_eq!(upload(&app, None, &[("file", &bytes)]).await.0, StatusCode::UNAUTHORIZED);
     assert_eq!(upload(&app, Some(&key(&app, &[Scope::Read])), &[("file", &bytes)]).await.0, StatusCode::FORBIDDEN);

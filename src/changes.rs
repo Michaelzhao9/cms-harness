@@ -1084,6 +1084,8 @@ fn run_publish(conn: &Connection, actor: &Actor, only: Option<&[Target]>, note: 
         tx.execute(version, params![release, target.to_string(), live_copy(&target)?, before, actor.name, why]).map_err(fail)?;
     }
     if commit {
+        let text = format!("{} 发布了 {} 处修改：{note}", actor.name, published.len());
+        crate::hooks::fire(&tx, "publish", &text, serde_json::json!({ "release_id": release, "published": published, "note": note, "by": actor.name }));
         tx.commit().map_err(fail)?;
     }
     // Without a commit, dropping the transaction rolls everything back.

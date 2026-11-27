@@ -69,12 +69,20 @@ pub enum Create {
     Public,
 }
 
-#[derive(Serialize, JsonSchema, Clone, Default, PartialEq, Eq, Debug)]
+#[derive(JsonSchema, Clone, Default, PartialEq, Eq, Debug)]
 pub struct Access {
     #[serde(default)]
     pub read: Read,
     #[serde(default)]
     pub create: Create,
+    /// A condition in place of `read`'s keyword (see `rules`): which live records a visitor or member may see.
+    /// It filters every list. `read` is then `private`, so everything that asks only the keyword (record pages,
+    /// search, relations) treats the collection as closed.
+    #[schemars(skip)]
+    pub read_rule: Option<String>,
+    /// A condition in place of `create`'s keyword: who may add a record, and holding what (`data`).
+    #[schemars(skip)]
+    pub create_rule: Option<String>,
     /// Who may change a live record from the site: a rule (see `rules`); nobody when left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update: Option<String>,
@@ -88,23 +96,71 @@ pub fn kept_rule(rule: Option<String>) -> Option<String> {
     rule.map(|r| r.trim().to_string()).filter(|r| !r.is_empty() && r != "none")
 }
 
+impl Serialize for Access {
+    /// `read` and `create` as they were written: the keyword, or the condition.
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut m = s.serialize_map(None)?;
+        match &self.read_rule {
+            Some(rule) => m.serialize_entry("read", rule)?,
+            None => m.serialize_entry("read", &self.read)?,
+        }
+        match &self.create_rule {
+            Some(rule) => m.serialize_entry("create", rule)?,
+            None => m.serialize_entry("create", &self.create)?,
+        }
+        if let Some(u) = &self.update {
+            m.serialize_entry("update", u)?;
+        }
+        if let Some(d) = &self.delete {
+            m.serialize_entry("delete", d)?;
+        }
+        m.end()
+    }
+}
+
+impl Access {
+    /// Sets who may read: `public`, `members`, `owner`, `private`, or a condition.
+    pub fn set_read(&mut self, written: &str) {
+        let written = written.trim();
+        match serde_json::from_value::<Read>(Value::String(written.to_string())) {
+            Ok(keyword) => (self.read, self.read_rule) = (keyword, None),
+            Err(_) => (self.read, self.read_rule) = (Read::Private, Some(written.to_string())),
+        }
+    }
+
+    /// Sets who may add records from the site: `none`, `members`, `public`, or a condition.
+    pub fn set_create(&mut self, written: &str) {
+        let written = written.trim();
+        match serde_json::from_value::<Create>(Value::String(written.to_string())) {
+            Ok(keyword) => (self.create, self.create_rule) = (keyword, None),
+            Err(_) => (self.create, self.create_rule) = (Create::None, Some(written.to_string())),
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for Access {
     /// Also reads the old `{ "public_read": true }` form as `read: public`.
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Raw {
-            read: Option<Read>,
-            #[serde(default)]
-            create: Create,
+            read: Option<String>,
+            create: Option<String>,
             #[serde(default)]
             public_read: bool,
             update: Option<String>,
             delete: Option<String>,
         }
         let r = Raw::deserialize(d)?;
-        let read = r.read.unwrap_or(if r.public_read { Read::Public } else { Read::Private });
-        Ok(Access { read, create: r.create, update: kept_rule(r.update), delete: kept_rule(r.delete) })
+        let mut access = Access { read: if r.public_read { Read::Public } else { Read::Private }, update: kept_rule(r.update), delete: kept_rule(r.delete), ..Access::default() };
+        if let Some(read) = r.read {
+            access.set_read(&read);
+        }
+        if let Some(create) = r.create {
+            access.set_create(&create);
+        }
+        Ok(access)
     }
 }
 
@@ -210,10 +266,13 @@ pub fn check_def(def: &CollectionDef) -> Result<(), String> {
     if let Some(p) = &def.url {
         crate::routes::check_pattern(def, p)?;
     }
-    for (name, rule) in [("update", &def.access.update), ("delete", &def.access.delete)] {
+    for (name, rule) in [("read", &def.access.read_rule), ("update", &def.access.update), ("delete", &def.access.delete)] {
         if let Some(rule) = rule {
             crate::rules::check(def, rule).map_err(|e| format!("集合的 {name} 规则“{rule}”写得不对：{e}"))?;
         }
+    }
+    if let Some(rule) = &def.access.create_rule {
+        crate::rules::check_create(def, rule).map_err(|e| format!("集合的 create 规则“{rule}”写得不对：{e}"))?;
     }
     Ok(())
 }

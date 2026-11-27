@@ -115,5 +115,5 @@ async fn only_builders_download_and_restore_from_settings() {
     assert_eq!(post_form(&app, "/admin/settings/backup", Some(&e), &[]).await.0, StatusCode::FORBIDDEN);
     assert_eq!(post_form(&app, "/admin/settings/restore", Some(&e), &[]).await.0, StatusCode::FORBIDDEN);
     let (_, _, settings) = get_with(&app, "/admin/settings", Some(&e.0)).await;
-    assert!(settings.contains("只有搭建者可以备份和恢复") && !settings.contains("/admin/settings/restore"));
+    assert!(!settings.contains("id=\"s-backup\"") && !settings.contains("/admin/settings/restore"), "an editor's page has no backup row");
 }

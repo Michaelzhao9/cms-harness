@@ -49,14 +49,15 @@
 {% else %}{{ coll(e) }}{% endif -%}
 {% endfor -%}
 {% endif -%}
+{% if nav.members or nav.media or nav.releases -%}
 <span class="rule" aria-hidden="true"></span>
 <span class="cap">{{ "后台"|t }}</span>
+{% endif -%}
 {% if nav.members %}{{ item("/admin/members", "members", ("用户管理"|t), "users") }}
 {% endif -%}
 {% if nav.media %}{{ item("/admin/media", "media", ("素材库"|t), "images") }}
 {% endif -%}
 {% if nav.releases %}{{ item("/admin/releases", "releases", ("发布记录"|t), "clock-counter-clockwise") }}
 {% endif -%}
-{{ item("/admin/shield", "shield", ("防护"|t), "shield") }}
 {{ item("/admin/settings", "settings", ("设置"|t), "sliders-horizontal", "item end") }}
 </nav>
