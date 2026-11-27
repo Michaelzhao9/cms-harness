@@ -1130,3 +1130,4 @@ Webhook 地址要以 https:// 开头。	A webhook address starts with https://.
 连不上“{}”：{}	Could not connect to “{}”: {}
 对方返回 {}：{}	The other side answered {}: {}
 {}没有收下：{}	{} did not accept it: {}
+符合条件的会员才能进：	Only members who fit: 

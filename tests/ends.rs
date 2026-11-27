@@ -152,6 +152,14 @@ async fn the_admin_lists_every_end_and_opens_each_in_the_workbench() {
         assert!(env.contains(text), "{text} missing from the overview: {env}");
     }
     assert!(get_with(&app, "/admin/env", None).await.0 != StatusCode::OK, "the overview needs a session");
+
+    // Who may enter is said as it is: a door with a condition is not "open to everyone".
+    ok(&app, &builder(), "set_end", json!({"name": "staff", "title": "教务端", "enter": "member.kind == 'staff'", "note": "x"}));
+    let (_, _, env) = get_with(&app, "/admin/env", Some(&cookie)).await;
+    let list = &env[env.find("class=\"went\"").expect("the list of ends")..];
+    let row = &list[list.find("教务端").expect("the new end is listed")..];
+    let row = &row[..row.find("</li>").unwrap()];
+    assert!(row.contains("member.kind == &#x27;staff&#x27;") && !row.contains("所有人都能进"), "{row}");
 }
 
 #[tokio::test]
