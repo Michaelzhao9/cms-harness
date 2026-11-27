@@ -27,8 +27,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/demo.gif" alt="演示：在后台对话里说要求，AI 做出草稿、预览标出改动，然后发布并查看线上网站。" width="100%"><br>
-  <sub>演示（英文界面，后台可以切换成中文）</sub>
+  <img src="docs/images/demo-zh.webp" alt="演示：在后台的对话里说要一个作业系统，助手建好数据、学生端、老师端和打分的函数，全是草稿；在预览里看过两个端，点发布，最后在环境页看到三个端和它们共用的数据。" width="100%"><br>
+  <sub>一句话，从空环境到带两个端的应用。界面和每一步都是真实的程序在跑；为了能重复录制，这段里模型的回复是按脚本回放的。</sub>
 </p>
 
 部署这一个程序，它就是整个环境，也是管理它的后台。打开后台直接说“首页做成工作室的主页”“加一个预约表单”，或者“给老师和学生各做一个界面，学生交作业，老师打分”，内置的对话助手就去建数据、写页面、写后端的函数，再建好管理它们的界面。它做的一切都是**草稿**：人看过改动、点了**发布**，线上才会变。
@@ -135,20 +135,20 @@ cargo build --release
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/workbench-zh.webp" alt="后台：左边的对话把首页做成了工作室主页，右边预览标出改了哪里，发布按钮上显示 2 处待发布。"></td>
-    <td width="50%"><img src="docs/images/publish-zh.webp" alt="发布前看一遍：每一处待发布的改动，新旧对照。"></td>
+    <td width="50%"><img src="docs/images/workbench-zh.webp" alt="后台：左边的对话建好了作业系统并列出每一处改动，右边的预览是带两扇门的首页，发布按钮上显示 13 处待发布。"></td>
+    <td width="50%"><img src="docs/images/publish-zh.webp" alt="发布前看一遍：每一处待发布的改动，各有一个勾选框。"></td>
   </tr>
   <tr>
     <td align="center"><sub>左边对话，右边草稿，改动都标出来。</sub></td>
-    <td align="center"><sub>发布前看一遍：每一处改动，新旧对照。</sub></td>
+    <td align="center"><sub>发布前看一遍：每一处改动，不要的取消勾选。</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/table-zh.webp" alt="集合的表格视图，可以筛出有改动和草稿的记录。"></td>
-    <td width="50%"><img src="docs/images/welcome.webp" alt="刚部署好的网站：只有一个欢迎页，有站点名和进后台的链接。"></td>
+    <td width="50%"><img src="docs/images/environment-zh.webp" alt="环境页：网站、学生端、老师端，各自谁能进，还有它们共用的数据。"></td>
+    <td width="50%"><img src="docs/images/built-zh.webp" alt="建出来的线上首页：学生端和老师端两扇门。"></td>
   </tr>
   <tr>
-    <td align="center"><sub>助手建好的内容表格，跟着网站一起变。</sub></td>
-    <td align="center"><sub>刚部署好：只有一个页面，等你开口。</sub></td>
+    <td align="center"><sub>一个环境里的每个端，和它们共用的数据。</sub></td>
+    <td align="center"><sub>一句话之后的线上首页：各走各的门。</sub></td>
   </tr>
 </table>
 

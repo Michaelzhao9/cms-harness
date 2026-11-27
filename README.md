@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/banner.svg" alt="CMS Harness: say what you want, the AI builds it as a draft, you publish." width="100%">
+  <img src="docs/images/banner.svg" alt="CMS Harness: say what you need, the AI builds it as drafts, you publish." width="100%">
 </p>
 
 <h3 align="center">An AI builds your whole app. It can't publish a thing.</h3>
@@ -27,7 +27,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/demo.gif" alt="Typing a request in the admin chat, the AI building a studio home page as a draft with the changes marked in the preview, then publishing it and viewing the live site." width="100%">
+  <img src="docs/images/demo-en.webp" alt="Demo: asking the admin chat for a homework system; the assistant sets up the data, a student surface, a teacher surface and the grading function, all as drafts; both surfaces in the preview; publishing; and the environment page listing three surfaces and the data they share." width="100%"><br>
+  <sub>One request, from an empty environment to an app with two surfaces. The screen and every step are the real program running; so that it can be recorded again, the model's replies here are played back from a script.</sub>
 </p>
 
 Deploy this one program and it is the whole environment, and the admin that manages it. Open the admin and say *"turn the home page into a studio page"*, *"add a booking form"* or *"give teachers and students a screen each: students hand in homework, teachers grade it"*. The built-in assistant sets up the data, writes the pages and the server functions, and builds the admin screens to manage them. Everything it does is a **draft**: nothing live moves until a person reviews the changes and presses **Publish**.
@@ -134,20 +135,20 @@ Hand edits are drafts too, like everything else.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/workbench-en.webp" alt="The admin: the chat on the left has turned the home page into a studio page, the preview on the right marks what changed, and the Publish button shows 2 pending changes."></td>
-    <td width="50%"><img src="docs/images/publish-en.webp" alt="Publish review: each pending change with its old and new value."></td>
+    <td width="50%"><img src="docs/images/workbench-en.webp" alt="The admin: the chat on the left has built a homework system and lists every change, the preview on the right shows a home page with two doors, and the Publish button shows 13 pending changes."></td>
+    <td width="50%"><img src="docs/images/publish-en.webp" alt="Publish review: every pending change, each with its own checkbox."></td>
   </tr>
   <tr>
     <td align="center"><sub>Chat on the left, the draft on the right, changes marked.</sub></td>
-    <td align="center"><sub>Review before publishing: every change, old against new.</sub></td>
+    <td align="center"><sub>Review before publishing: every change, and you uncheck what you don't want.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/table-en.webp" alt="A collection as a table, with filters for changed and draft records."></td>
-    <td width="50%"><img src="docs/images/welcome.webp" alt="A fresh site: one welcome page with its name and a link to the admin."></td>
+    <td width="50%"><img src="docs/images/environment-en.webp" alt="The environment page: the site, the student surface and the teacher surface, who may enter each, and the data they share."></td>
+    <td width="50%"><img src="docs/images/built-en.webp" alt="The live home page that was built: a door for students and a door for teachers."></td>
   </tr>
   <tr>
-    <td align="center"><sub>Content tables the assistant builds and keeps in step with the site.</sub></td>
-    <td align="center"><sub>A fresh deploy: one page, until you ask for more.</sub></td>
+    <td align="center"><sub>Every surface in one environment, and the data they share.</sub></td>
+    <td align="center"><sub>The live home page after one request: a door for each.</sub></td>
   </tr>
 </table>
 

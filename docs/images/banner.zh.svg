@@ -1,27 +1,65 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-label="CMS Harness">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-label="CMS Harness：说出想要的应用，AI 把它建成草稿，你看一遍再点发布。">
 <defs>
-<linearGradient id="pic" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fbe7a6"/><stop offset="1" stop-color="#fdf6de"/></linearGradient>
-<filter id="lift" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#10101a" flood-opacity=".22"/></filter>
-<filter id="soft" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#10101a" flood-opacity=".10"/></filter>
+<radialGradient id="glow" cx="78%" cy="8%" r="62%"><stop offset="0" stop-color="#f5b700" stop-opacity=".20"/><stop offset=".55" stop-color="#f5b700" stop-opacity=".04"/><stop offset="1" stop-color="#f5b700" stop-opacity="0"/></radialGradient>
+<radialGradient id="cool" cx="96%" cy="100%" r="55%"><stop offset="0" stop-color="#3558f6" stop-opacity=".22"/><stop offset="1" stop-color="#3558f6" stop-opacity="0"/></radialGradient>
+<linearGradient id="site" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#55555f"/><stop offset="1" stop-color="#3c3c45"/></linearGradient>
+<linearGradient id="student" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3558f6"/><stop offset="1" stop-color="#6f8bff"/></linearGradient>
+<linearGradient id="teacher" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0c9a72"/><stop offset="1" stop-color="#3fc79d"/></linearGradient>
+<clipPath id="typed"><rect x="724" y="60" width="342" height="40"><animate attributeName="width" dur="10s" repeatCount="indefinite" keyTimes="0;0.03;0.25;0.94;0.97;1" values="0;0;342;342;0;0"/></rect></clipPath>
+<clipPath id="frame"><rect width="1280" height="420" rx="24"/></clipPath>
 </defs>
-<rect width="1280" height="420" rx="24" fill="#efeff1"/>
-<g transform="translate(84 118)">
-<rect width="64" height="64" rx="18" fill="#1d1d1f"/><rect x="12" y="12" width="40" height="40" rx="9" fill="#fff"/><circle cx="12" cy="12" r="9" fill="#f5b700" stroke="#1d1d1f" stroke-width="4"/>
-</g>
-<text x="84" y="252" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', Helvetica, Arial, sans-serif" font-size="64" font-weight="700" letter-spacing="-2" fill="#1d1d1f">CMS Harness</text>
-<text x="86" y="300" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', Helvetica, Arial, sans-serif" font-size="24" fill="#55555b">说出想要的应用，AI 把它建成草稿。</text>
-<text x="86" y="334" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', Helvetica, Arial, sans-serif" font-size="24" fill="#55555b">你看一遍再点发布。一个可执行文件，一个 SQLite。</text>
-<g transform="translate(860 52) rotate(-5)" opacity=".75" filter="url(#soft)">
-<rect width="250" height="300" rx="16" fill="#fff"/><rect x="26" y="34" width="130" height="14" rx="5" fill="#cfcfd5"/>
-<rect x="26" y="66" width="198" height="9" rx="4" fill="#e7e7eb"/><rect x="26" y="86" width="160" height="9" rx="4" fill="#e7e7eb"/>
-</g>
-<g transform="translate(930 86)" filter="url(#lift)">
-<rect width="250" height="300" rx="16" fill="#fff"/>
-<rect x="26" y="34" width="140" height="16" rx="5" fill="#1d1d1f"/>
-<rect x="20" y="28" width="152" height="28" rx="8" fill="none" stroke="#f5b700" stroke-opacity=".45" stroke-width="5"/>
-<rect x="26" y="70" width="198" height="9" rx="4" fill="#e7e7eb"/><rect x="26" y="90" width="150" height="9" rx="4" fill="#e7e7eb"/>
-<rect x="26" y="114" width="198" height="104" rx="12" fill="url(#pic)"/>
-<rect x="26" y="234" width="198" height="9" rx="4" fill="#e7e7eb"/><rect x="26" y="254" width="110" height="9" rx="4" fill="#e7e7eb"/>
-<circle cx="0" cy="0" r="20" fill="#f5b700" stroke="#fff" stroke-width="6"/>
+<g clip-path="url(#frame)">
+<rect width="1280" height="420" fill="#101013"/><rect width="1280" height="420" fill="url(#glow)"/><rect width="1280" height="420" fill="url(#cool)"/>
+
+<g transform="translate(84 92)"><rect width="60" height="60" rx="17" fill="#f4f4f6"/><rect x="11" y="11" width="38" height="38" rx="9" fill="#101013"/><circle cx="11" cy="11" r="9" fill="#f5b700" stroke="#f4f4f6" stroke-width="4"/></g>
+<text x="84" y="232" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="64" font-weight="700" letter-spacing="-2" fill="#f4f4f6">CMS Harness</text>
+<text x="86" y="280" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="22.5"><tspan fill="#b9b9c4">说出想要的应用，AI 把它建成</tspan><tspan fill="#f5b700">草稿</tspan><tspan fill="#b9b9c4">。</tspan></text>
+<text x="86" y="314" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="22.5"><tspan fill="#b9b9c4">你看一遍再点</tspan><tspan fill="#f5b700">发布</tspan><tspan fill="#b9b9c4">。一个可执行文件，一个 SQLite。</tspan></text>
+
+<rect x="700" y="52" width="510" height="56" rx="18" fill="#18181d" stroke="#2b2b33"/>
+<text x="726" y="87" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="18" fill="#eeeef2" textLength="336" lengthAdjust="spacingAndGlyphs" clip-path="url(#typed)">做一个作业系统：学生交作业，老师打分</text>
+<rect x="1066" y="69" width="2" height="22" rx="1" fill="#f5b700"><animate attributeName="x" dur="10s" repeatCount="indefinite" keyTimes="0;0.03;0.25;0.94;0.97;1" values="726;726;1066;1066;726;726"/><animate attributeName="opacity" dur="1s" repeatCount="indefinite" keyTimes="0;0.5;1" values="1;0;1" calcMode="discrete"/></rect>
+<circle cx="1182" cy="80" r="15" fill="#f4f4f6"/><path d="M1182 87v-14m-6 6 6-6 6 6" fill="none" stroke="#101013" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+
+<g><g><animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.27;0.315;0.94;1" values="0;0;1;1;0"/><animateTransform attributeName="transform" type="translate" dur="10s" repeatCount="indefinite" keyTimes="0;0.27;0.315;1" values="0 16;0 16;0 0;0 0"/><text x="702" y="138" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="13.5" fill="#8f8f9b">AI 在建：数据 · 页面 · 后端函数 · 进门规则</text></g></g>
+<g transform="translate(700 156)"><g><animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.3;0.345;0.94;1" values="0;0;1;1;0"/><animateTransform attributeName="transform" type="translate" dur="10s" repeatCount="indefinite" keyTimes="0;0.3;0.345;1" values="0 16;0 16;0 0;0 0"/>
+<rect width="158" height="168" rx="16" fill="#18181d" stroke="#2b2b33"/>
+<path d="M0 16a16 16 0 0 1 16-16h126a16 16 0 0 1 16 16v30H0z" fill="url(#site)"/>
+<text x="16" y="29" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#fff">网站</text>
+<rect x="16" y="62" width="104" height="8" rx="4" fill="#33333c"/><rect x="16" y="80" width="126" height="8" rx="4" fill="#292930"/><rect x="16" y="98" width="82" height="8" rx="4" fill="#292930"/>
+<g><rect x="16" y="126" width="64" height="26" rx="13" fill="none" stroke="#f5b700" stroke-width="1.5" opacity="0"><animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.62;0.64;1" values="1;1;0;0"/></rect>
+<text x="48" y="144" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#f5b700" opacity="0">草稿<animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.62;0.64;1" values="1;1;0;0"/></text>
+<rect x="16" y="126" width="64" height="26" rx="13" fill="#12a77c"><animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.62;0.65;1" values="0;0;1;1"/></rect>
+<text x="48" y="144" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#fff">已发布<animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.62;0.65;1" values="0;0;1;1"/></text></g>
+</g></g>
+<g transform="translate(876 156)"><g><animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.35;0.395;0.94;1" values="0;0;1;1;0"/><animateTransform attributeName="transform" type="translate" dur="10s" repeatCount="indefinite" keyTimes="0;0.35;0.395;1" values="0 16;0 16;0 0;0 0"/>
+<rect width="158" height="168" rx="16" fill="#18181d" stroke="#2b2b33"/>
+<path d="M0 16a16 16 0 0 1 16-16h126a16 16 0 0 1 16 16v30H0z" fill="url(#student)"/>
+<text x="16" y="29" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#fff">学生端</text>
+<rect x="16" y="62" width="104" height="8" rx="4" fill="#33333c"/><rect x="16" y="80" width="126" height="8" rx="4" fill="#292930"/><rect x="16" y="98" width="82" height="8" rx="4" fill="#292930"/>
+<g><rect x="16" y="126" width="64" height="26" rx="13" fill="none" stroke="#f5b700" stroke-width="1.5" opacity="0"><animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.62;0.64;1" values="1;1;0;0"/></rect>
+<text x="48" y="144" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#f5b700" opacity="0">草稿<animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.62;0.64;1" values="1;1;0;0"/></text>
+<rect x="16" y="126" width="64" height="26" rx="13" fill="#12a77c"><animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.62;0.65;1" values="0;0;1;1"/></rect>
+<text x="48" y="144" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#fff">已发布<animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.62;0.65;1" values="0;0;1;1"/></text></g>
+</g></g>
+<g transform="translate(1052 156)"><g><animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.4;0.445;0.94;1" values="0;0;1;1;0"/><animateTransform attributeName="transform" type="translate" dur="10s" repeatCount="indefinite" keyTimes="0;0.4;0.445;1" values="0 16;0 16;0 0;0 0"/>
+<rect width="158" height="168" rx="16" fill="#18181d" stroke="#2b2b33"/>
+<path d="M0 16a16 16 0 0 1 16-16h126a16 16 0 0 1 16 16v30H0z" fill="url(#teacher)"/>
+<text x="16" y="29" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#fff">老师端</text>
+<rect x="16" y="62" width="104" height="8" rx="4" fill="#33333c"/><rect x="16" y="80" width="126" height="8" rx="4" fill="#292930"/><rect x="16" y="98" width="82" height="8" rx="4" fill="#292930"/>
+<g><rect x="16" y="126" width="64" height="26" rx="13" fill="none" stroke="#f5b700" stroke-width="1.5" opacity="0"><animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.62;0.64;1" values="1;1;0;0"/></rect>
+<text x="48" y="144" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#f5b700" opacity="0">草稿<animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.62;0.64;1" values="1;1;0;0"/></text>
+<rect x="16" y="126" width="64" height="26" rx="13" fill="#12a77c"><animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.62;0.65;1" values="0;0;1;1"/></rect>
+<text x="48" y="144" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="700" fill="#fff">已发布<animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.62;0.65;1" values="0;0;1;1"/></text></g>
+</g></g>
+
+<g transform="translate(1094 344)"><g><animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.46;0.505;0.94;1" values="0;0;1;1;0"/><animateTransform attributeName="transform" type="translate" dur="10s" repeatCount="indefinite" keyTimes="0;0.46;0.505;1" values="0 16;0 16;0 0;0 0"/>
+<rect width="116" height="40" rx="20" fill="#f5b700"><animate attributeName="fill" dur="10s" repeatCount="indefinite" keyTimes="0;0.60;0.615;0.66;1" values="#f5b700;#f5b700;#ffd95a;#f5b700;#f5b700"/></rect>
+<text x="58" y="26" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Helvetica, Arial, sans-serif" font-size="15.5" font-weight="700" fill="#1d1d1f">发布</text>
+</g></g>
+<circle cx="1172" cy="370" r="8" fill="none" stroke="#f5b700" stroke-width="2" opacity="0"><animate attributeName="r" dur="10s" repeatCount="indefinite" keyTimes="0;0.6;0.67;1" values="8;8;40;40"/><animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.6;0.605;0.67;1" values="0;0;0.8;0;0"/></circle>
+<g opacity="0"><animate attributeName="opacity" dur="10s" repeatCount="indefinite" keyTimes="0;0.49;0.51;0.7;0.74;1" values="0;0;1;1;0;0"/>
+<g><animateTransform attributeName="transform" type="translate" dur="10s" repeatCount="indefinite" keyTimes="0;0.49;0.59;1" values="1010 300;1010 300;1172 370;1172 370" calcMode="spline" keySplines="0 0 1 1;0.3 0 0.2 1;0 0 1 1"/>
+<path d="M0 0v20.5l5-4.5 3.6 7.6 3.2-1.4-3.5-7.4h6.5z" fill="#101013" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></g></g>
 </g>
 </svg>
